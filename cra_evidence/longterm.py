@@ -4,7 +4,7 @@
 
 Each record signs the evidence digest + the WHOLE previous chain (+ an optional stronger re-hash), so a renewal
 cannot be grafted, reordered or applied to a different digest without breaking every later signature. The
-algorithm registry starts with Ed25519 (stdlib `cryptography`); a hybrid ML-DSA-65 + Ed25519 signer can be
+algorithm registry starts with Ed25519 (the optional `cryptography` dependency); a hybrid ML-DSA-65 + Ed25519 signer can be
 registered by the caller (see `register_algorithm`) — NIST IR 8547 deprecates the pre-quantum algorithms by 2030
 and disallows them by 2035, inside the retention window that starts today, so the seal MUST be renewable.
 
@@ -45,6 +45,12 @@ def _ed_gen():
     return sk, sk.public_key().public_bytes_raw().hex()
 
 
+# NIST IR 8547 (initial public draft, Nov 2024): quantum-vulnerable digital signatures (Ed25519 included) deprecated
+# after 2030 and disallowed after 2035. Used as the DEFAULT policy so that "always valid" is never the silent default.
+NIST_IR_8547_DISALLOWED_AFTER = 2051222400.0   # 2035-01-01T00:00:00Z
+NIST_IR_8547_DEPRECATED_AFTER = 1893456000.0   # 2030-01-01T00:00:00Z
+
+
 def _ed_sign(sk, msg: bytes) -> str:
     return sk.sign(msg).hex()
 
@@ -67,11 +73,14 @@ def register_algorithm(name: str, gen: Callable, sign: Callable, verify: Callabl
 
 
 class Signer:
-    def __init__(self, alg: str):
+    def __init__(self, alg: str, key: Optional[tuple] = None):
+        """key = (private, public_hex) of an EXISTING identity (pinned by the verifier); None = ephemeral key, which
+        proves integrity of the chain but NOT who sealed it (declared by `ephemeral`)."""
         if alg not in REGISTRY:
             raise ValueError(f"unknown algorithm: {alg}")
         self.alg = alg
-        self._sk, self.pub = REGISTRY[alg]["gen"]()
+        self.ephemeral = key is None
+        self._sk, self.pub = key if key is not None else REGISTRY[alg]["gen"]()
 
     def sign(self, msg: bytes) -> str:
         return REGISTRY[self.alg]["sign"](self._sk, msg)
@@ -86,6 +95,10 @@ class AlgorithmPolicy:
         b = self.broken_after.get(alg)
         return b is None or t < b
 
+    @classmethod
+    def nist_ir_8547(cls) -> "AlgorithmPolicy":
+        return cls({"ed25519": NIST_IR_8547_DISALLOWED_AFTER})
+
 
 @dataclass
 class LongTermEvidence:
@@ -97,18 +110,35 @@ class LongTermEvidence:
         return bytes.fromhex(_digest(hash_alg, _canon([self.evidence_digest, self.records[:prefix_len], rehash]).encode()))
 
     def seal(self, signer: Signer, t: float, ts_source: str = "asserted", stronger_digest: Optional[str] = None,
-             hash_alg: str = DEFAULT_HASH) -> Dict:
+             hash_alg: str = DEFAULT_HASH, token_b64: Optional[str] = None) -> Dict:
+        """ts_source != "asserted" REQUIRES the third-party token (RFC 3161 / OTS) so that the label can never be a
+        bare claim; the token is stored (and digested) with the record and verified by `timestamp_trust_fn`."""
+        if ts_source != "asserted" and not token_b64:
+            raise ValueError(f"ts_source={ts_source!r} needs the timestamp token (token_b64); without it the time is 'asserted'")
         rehash = stronger_digest or ""
         # t is stored as repr(float): Python's repr is the shortest round-trip string, float(repr(x)) == x exactly
         rec = {"alg": signer.alg, "hash": hash_alg, "t": repr(float(t)), "pub": signer.pub,
-               "sig": signer.sign(self._msg(len(self.records), rehash, hash_alg)), "ts_source": ts_source, "rehash": rehash}
+               "sig": signer.sign(self._msg(len(self.records), rehash, hash_alg)), "ts_source": ts_source, "rehash": rehash,
+               "ephemeral_key": signer.ephemeral}
+        if token_b64:
+            rec["token_b64"] = token_b64
+            rec["token_sha3"] = hashlib.sha3_256(token_b64.encode()).hexdigest()
         self.records.append(rec)
         return rec
 
-    def verify(self, now: float, policy: AlgorithmPolicy, timestamp_trust_fn: Optional[Callable[[Dict], bool]] = None) -> Dict:
+    def verify(self, now: float, policy: Optional[AlgorithmPolicy] = None, timestamp_trust_fn: Optional[Callable[[Dict], bool]] = None,
+               trusted_pubs: Optional[set] = None) -> Dict:
+        """policy None → NIST IR 8547 dates; trusted_pubs pins the FIRST signer (identity is external to the chain:
+        a chain over a known digest can be re-created by anyone with a fresh key — the pin is what says who sealed)."""
         reasons: List[str] = []
+        policy = policy or AlgorithmPolicy.nist_ir_8547()
         if not self.records:
             return {"ok": False, "reasons": ["empty chain (no archive timestamp)"], "temporal_trust": "n/a"}
+        if trusted_pubs is not None and self.records[0].get("pub") not in trusted_pubs:
+            reasons.append("record 0: sealing key not in trusted_pubs (identity NOT established)")
+        if any(r.get("ephemeral_key") for r in self.records):
+            if trusted_pubs is not None:
+                reasons.append("a seal used an EPHEMERAL key: integrity only, identity not provable")
         for i, rec in enumerate(self.records):
             if rec["alg"] not in REGISTRY:
                 reasons.append(f"record {i}: unknown algorithm {rec['alg']}")
@@ -127,6 +157,8 @@ class LongTermEvidence:
             temporal = "verified" if attested else "NOT verified — the temporal oracle refused one or more timestamps"
         else:
             temporal = "ASSUMED — timestamps not verified: inject timestamp_trust_fn (RFC 3161 / OTS) in production"
+            if len(self.records) > 1:
+                reasons.append("renewal chain: 'renewed before the algorithm broke' rests on UNVERIFIED timestamps (inject timestamp_trust_fn)")
         times = [float(r["t"]) for r in self.records]
         for i in range(1, len(times)):
             if times[i] < times[i - 1]:
@@ -139,10 +171,14 @@ class LongTermEvidence:
         for i in range(last):
             if not policy.trusted_at(self.records[i]["alg"], times[i + 1]):
                 reasons.append(f"record {i} ({self.records[i]['alg']}) renewed too late (algorithm already broken)")
+        unpoliced = sorted({r["alg"] for r in self.records if r["alg"] not in policy.broken_after})
         return {"ok": not reasons, "reasons": reasons, "chain_len": len(self.records),
-                "algorithms": [r["alg"] for r in self.records], "temporal_trust": temporal}
+                "algorithms": [r["alg"] for r in self.records], "temporal_trust": temporal,
+                "policy_note": ("every algorithm has an expiry in the policy" if not unpoliced else
+                                f"no expiry in the policy for {unpoliced}: their trust is NOT bounded in time")}
 
-    def renewal_due(self, now: float, policy: AlgorithmPolicy, margin: float) -> Dict:
+    def renewal_due(self, now: float, policy: Optional[AlgorithmPolicy] = None, margin: float = 0.0) -> Dict:
+        policy = policy or AlgorithmPolicy.nist_ir_8547()
         outer = self.records[-1]["alg"] if self.records else None
         b = policy.broken_after.get(outer) if outer else None
         if b is None:

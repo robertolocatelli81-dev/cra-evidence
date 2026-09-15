@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from .canonical import sha3_hex
+from .canonical import canonical_bytes, sha3_hex
 
 TIP_KIND = "cryptovalid_tip/1"
 
@@ -95,6 +95,15 @@ def pack_digest(pack: Dict[str, Any]) -> str:
     return sha3_hex({k: v for k, v in pack.items() if k != "pack_sha3"})
 
 
+SIG_KIND = "cra_pack_sig/1"
+
+
+def signed_payload(side: Dict[str, Any]) -> bytes:
+    """Domain-separated, canonical bytes that the sidecar signature covers."""
+    return canonical_bytes({"kind": SIG_KIND, "signed_pack_sha3": side["signed_pack_sha3"], "signer_id": side["signer_id"],
+                            "signed_utc": side["signed_utc"], "public_key_hex": side["public_key_hex"], "alg": side.get("alg", "Ed25519")})
+
+
 def sign_pack(pack_path: str, key: Tuple[Any, str], signer_id: str) -> Dict[str, Any]:
     sk, pk = key
     pack = json.loads(Path(pack_path).read_text(encoding="utf-8"))
@@ -103,8 +112,9 @@ def sign_pack(pack_path: str, key: Tuple[Any, str], signer_id: str) -> Dict[str,
         raise ValueError("pack_sha3 does not match the pack content: refusing to sign a broken pack")
     side = {"signer_id": signer_id, "public_key_hex": pk, "alg": "Ed25519",
             "fingerprint": hashlib.sha256(bytes.fromhex(pk)).hexdigest()[:16],
-            "signed_pack_sha3": digest, "signature_hex": sk.sign(digest.encode()).hex(),
-            "signed_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            "signed_pack_sha3": digest, "signed_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    # the signature covers WHO signed and WHEN, not only the digest (a sidecar with a rewritten signer_id must fail)
+    side["signature_hex"] = sk.sign(signed_payload(side)).hex()
     sidecar_path(pack_path).write_text(json.dumps(side, indent=1, sort_keys=True), encoding="utf-8")
     return {"signed": True, "sidecar": str(sidecar_path(pack_path)), "fingerprint": side["fingerprint"]}
 
@@ -120,14 +130,19 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         pack = json.loads(Path(pack_path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         return {"status": "FAIL", "detail": f"unreadable: {e}"}
-    digest = pack_digest(pack)
+    if not isinstance(side, dict) or not isinstance(pack, dict):
+        return {"status": "FAIL", "detail": "sidecar or pack is not a JSON object"}
+    try:
+        digest = pack_digest(pack)
+    except TypeError as e:
+        return {"status": "FAIL", "detail": f"pack not canonicalisable: {e}"}
     if pack.get("pack_sha3") != digest:
         return {"status": "FAIL", "detail": "content does not match pack_sha3 (modified after signing)"}
     if side.get("signed_pack_sha3") != digest:
         return {"status": "FAIL", "detail": "pack changed after signature (digest differs from the signed one)"}
     try:
         _, Ed25519PublicKey, _ = _ed()
-        Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), digest.encode())
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001
         return {"status": "FAIL", "detail": f"signature invalid for the declared key ({type(e).__name__})"}
     out = {"status": "PASS", "signer_id": side.get("signer_id"), "fingerprint": side.get("fingerprint"), "trusted": False}

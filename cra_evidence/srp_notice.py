@@ -32,51 +32,58 @@ STREAMS = ("vulnerability", "incident")
 _C = {"early_warning": "R", "notification": "R", "final_report": "R"}
 _O = {"early_warning": "O", "notification": "O", "final_report": "O"}
 COMMON_FIELDS: Dict[str, Dict[str, Any]] = {
-    "notification_type":         {"stages": _C, "format": "enum", "enum": ["Vulnerability", "Incident"]},
-    "title":                     {"stages": _C, "format": "text", "max": 255},
-    "summary":                   {"stages": _C, "format": "text", "max": 4000},
-    "manufacturer_name":         {"stages": _C, "format": "text", "max": 255, "note": "system-generated in the SRP"},
-    "member_states_available":   {"stages": _C, "format": "list", "note": "one or more EU Member States"},
-    "product_name":              {"stages": _C, "format": "text", "max": 255},
-    "product_version":           {"stages": _C, "format": "text", "max": 255},
-    "product_type":              {"stages": _O, "format": "enum", "enum": ["Default", "Important", "Critical"]},
-    "product_class":             {"stages": _O, "format": "enum", "enum": ["Class I", "Class II"]},
-    "product_category":          {"stages": _O, "format": "text", "max": 255},
-    "end_of_support":            {"stages": _O, "format": "enum", "enum": ["Yes", "No"]},
-    "component_name":            {"stages": _O, "format": "text", "max": 255},
-    "mitigating_measure_expected_shortly": {"stages": _O, "format": "enum", "enum": ["Yes", "No"]},
-    "user_action_reduce_impact": {"stages": _O, "format": "text", "max": 4000},
-    "sensitivity_justification": {"stages": {"early_warning": "O", "notification": "O", "final_report": "-"}, "format": "text", "max": 255},
-    "corrective_measures_taken": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 2000},
-    "user_measures":             {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000},
-    "attack_vector":             {"stages": {"early_warning": "-", "notification": "O", "final_report": "O"}, "format": "text", "max": 255},
+    "notification_type": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "enum", "enum": ["Vulnerability", "Incident"], "glossary_row": "1"},
+    "title": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "2"},
+    "summary": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "text", "max": 4000, "glossary_row": "3"},
+    "manufacturer_name": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "note": "system-generated in the SRP", "glossary_row": "4"},
+    "member_states_available": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "list", "note": "one or more EU Member States", "glossary_row": "5"},
+    "product_name": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "6"},
+    "product_version": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "7"},
+    "product_type": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "enum", "enum": ["Default", "Important", "Critical"], "glossary_row": "8"},
+    "product_class": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "enum", "enum": ["Class I", "Class II"], "glossary_row": "9"},
+    "product_category": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "10"},
+    "end_of_support": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "enum", "enum": ["Yes", "No"], "glossary_row": "11"},
+    "component_name": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "12"},
+    "mitigating_measure_expected_shortly": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "enum", "enum": ["Yes", "No"], "glossary_row": "13"},
+    "user_action_reduce_impact": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "text", "max": 4000, "glossary_row": "14"},
+    "sensitivity_justification": {"stages": {"early_warning": "O", "notification": "O", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "15"},
+    "corrective_measures_taken": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 2000, "glossary_row": "16"},
+    "user_measures": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "17"},
+    "attack_vector": {"stages": {"early_warning": "-", "notification": "O", "final_report": "O"}, "format": "text", "max": 255, "glossary_row": "18"},
 }
 VULN_FIELDS: Dict[str, Dict[str, Any]] = {
-    "cve_id":                    {"stages": _O, "format": "text", "max": 255},
-    "euvd_id":                   {"stages": _O, "format": "text", "max": 255},
-    "general_information":       {"stages": {"early_warning": "O", "notification": "R", "final_report": "O"}, "format": "text", "max": 4000},
-    "corrective_available_date": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "datetime-utc"},
-    "security_update_details":   {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 2000},
-    "severity_description":      {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000},
-    "impact_description":        {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000},
-    "awareness_datetime_utc":    {"stages": _C, "format": "datetime-utc"},
-    "malicious_actor":           {"stages": {"early_warning": "A", "notification": "O", "final_report": "A"}, "format": "text", "max": 100},
-    "particular_exceptional_circumstances": {"stages": {"early_warning": "-", "notification": "R", "final_report": "-"}, "format": "enum-list"},
-    "pec_delay_reason":          {"stages": {"early_warning": "-", "notification": "R", "final_report": "-"}, "format": "text"},
-    "further_information_cdac":  {"stages": _O, "format": "text", "max": 800},
+    "cve_id": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "v19"},
+    "euvd_id": {"stages": {"early_warning": "O", "notification": "C", "final_report": "C"}, "format": "text", "max": 255, "glossary_row": "v20"},
+    "general_information": {"stages": {"early_warning": "O", "notification": "R", "final_report": "C"}, "format": "text", "max": 4000, "glossary_row": "v21"},
+    "corrective_available_date": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "datetime-utc", "glossary_row": "v22"},
+    "security_update_details": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 2000, "glossary_row": "v23"},
+    "severity_description": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "v24"},
+    "impact_description": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "v25"},
+    "awareness_datetime_utc": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "datetime-utc", "glossary_row": "v26"},
+    "malicious_actor": {"stages": {"early_warning": "O", "notification": "O", "final_report": "A"}, "format": "text", "max": 100, "glossary_row": "v27"},
+    "particular_exceptional_circumstances": {"stages": {"early_warning": "-", "notification": "O", "final_report": "-"}, "format": "enum-list", "glossary_row": "v28", "enum": ["no_other_member_state", "contrary_to_essential_interests", "imminent_high_risk"]},
+    "pec_delay_reason": {"stages": {"early_warning": "-", "notification": "O", "final_report": "-"}, "format": "enum-list", "glossary_row": "v29", "enum": ["no_other_member_state", "contrary_to_essential_interests", "imminent_high_risk"]},
+    "further_information_cdac": {"stages": {"early_warning": "O", "notification": "O", "final_report": "C"}, "format": "text", "max": 800, "glossary_row": "v30"},
 }
 INCIDENT_FIELDS: Dict[str, Dict[str, Any]] = {
-    "suspected_malicious":       {"stages": _C, "format": "enum", "enum": ["Yes", "No", "Unknown"]},
-    "incident_nature":           {"stages": {"early_warning": "O", "notification": "R", "final_report": "O"}, "format": "text", "max": 4000},
-    "mitigation_measures":       {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000},
-    "severity_description":      {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000},
-    "impact_description":        {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000},
-    "threat_type_root_cause":    {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 255},
-    "awareness_datetime_utc":    {"stages": {"early_warning": "R", "notification": "R", "final_report": "-"}, "format": "datetime-utc"},
-    "incident_datetime_utc":     {"stages": {"early_warning": "O", "notification": "R", "final_report": "O"}, "format": "datetime-utc"},
-    "initial_assessment":        {"stages": {"early_warning": "O", "notification": "R", "final_report": "O"}, "format": "text", "max": 4000},
+    "suspected_malicious": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "enum", "enum": ["Yes", "No", "Unknown"], "glossary_row": "i31"},
+    "incident_nature": {"stages": {"early_warning": "O", "notification": "R", "final_report": "C"}, "format": "text", "max": 4000, "glossary_row": "i32"},
+    "mitigation_measures": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "i33"},
+    "severity_description": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "i34"},
+    "impact_description": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "i35"},
+    "threat_type_root_cause": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 255, "glossary_row": "i36"},
+    "awareness_datetime_utc": {"stages": {"early_warning": "R", "notification": "R", "final_report": "C"}, "format": "datetime-utc", "glossary_row": "i37"},
+    "incident_datetime_utc": {"stages": {"early_warning": "O", "notification": "R", "final_report": "O"}, "format": "datetime-utc", "glossary_row": "i38"},
+    "initial_assessment": {"stages": {"early_warning": "O", "notification": "R", "final_report": "C"}, "format": "text", "max": 4000, "glossary_row": "i39"},
 }
-SRP_GLOSSARY_SOURCE = "ENISA CRA SRP Glossary (39 fields), read 2026-09-15"
+PEC_OPTIONS = {   # Art. 16(2) third subparagraph, as listed in the glossary rows v28/v29 (checkbox options)
+    "no_other_member_state": "actively exploited, and according to the information available in no other Member State than the one of the coordinating CSIRT",
+    "contrary_to_essential_interests": "immediate further dissemination would likely supply information whose disclosure would be contrary to the essential interests of that Member State",
+    "imminent_high_risk": "the notified vulnerability poses an imminent high cybersecurity risk stemming from the further dissemination",
+}
+STAGE_CODES = {"R": "required at this stage", "O": "optional", "A": "required if such information is available",
+               "C": "carried forward from the previous stage (copied by default, may be updated)", "-": "not at this stage"}
+SRP_GLOSSARY_SOURCE = "ENISA CRA SRP Glossary (39 fields), read 2026-09-15 — snapshot vendored in spec/sources/enisa_srp_glossary_20260915.json; per-stage codes derived from it by tests/test_council_r2.py"
 
 
 def schema(stream: str) -> Dict[str, Dict[str, Any]]:
@@ -116,8 +123,11 @@ class SRPNotice:
             spec = sch[k]
             if spec.get("max") and _present(v) and len(str(v)) > spec["max"]:
                 raise ValueError(f"{k}: longer than the SRP maximum ({spec['max']})")
-            if spec.get("enum") and _present(v) and str(v) not in spec["enum"]:
-                raise ValueError(f"{k}: value {v!r} not in {spec['enum']}")
+            if spec.get("enum") and _present(v):
+                vals = v if (spec["format"] == "enum-list" and isinstance(v, list)) else [v]
+                for one in vals:
+                    if str(one) not in spec["enum"]:
+                        raise ValueError(f"{k}: value {one!r} not in {spec['enum']}")
             if spec["format"] == "datetime-utc" and _present(v):
                 parse_utc(str(v))
 

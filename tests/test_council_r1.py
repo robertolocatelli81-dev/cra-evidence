@@ -102,9 +102,11 @@ class TestCouncilR1(unittest.TestCase):
     # Gemini B.2 — severe incident could not be modelled in the vulnerability clock (README promised it)
     def test_incident_clock_one_month_after_notification(self):
         r = VulnerabilityRecord("p", "INC-1", True, "2026-09-01T00:00:00Z", kind="incident")
+        self.assertIsNone(r.deadlines()["final_report_due_utc"])   # Art. 14(4)(c): anchored to the SUBMISSION, unknown until recorded
+        r = VulnerabilityRecord("p", "INC-1", True, "2026-09-01T00:00:00Z", kind="incident", notification_sent_utc="2026-09-02T10:00:00Z")
         d = r.deadlines()
-        self.assertEqual(d["final_report_due_utc"], "2026-10-04T00:00:00+00:00")   # +72 h + 30 days
-        self.assertIn("one month", d["final_report_basis"])
+        self.assertEqual(d["final_report_due_utc"], "2026-10-02T10:00:00+00:00")   # one CALENDAR month after the submission
+        self.assertIn("one calendar month", d["final_report_basis"])
         with self.assertRaises(ValueError):
             VulnerabilityRecord("p", "x", True, "2026-09-01T00:00:00Z", kind="rumour")
 

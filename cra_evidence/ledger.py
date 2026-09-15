@@ -40,6 +40,10 @@ def _lock(f) -> bool:
         return False
 
 
+def _refuse_constant(name: str):
+    raise ValueError(f"non-JSON constant {name} in ledger line")
+
+
 def entry_hash(entry: Dict[str, Any]) -> str:
     return sha256_hex({k: v for k, v in entry.items() if k != "self_hash"})
 
@@ -54,7 +58,7 @@ def _tail_state(f) -> Tuple[int, str, str, bool]:
         if not line:
             continue
         try:
-            e = json.loads(line)
+            e = json.loads(line, parse_constant=_refuse_constant)
         except (ValueError, UnicodeDecodeError) as e:
             raise ValueError(f"ledger line {lineno} unparsable ({type(e).__name__}): chain not continuable — verify, repair, record the incident")
         if not isinstance(e, dict) or not isinstance(e.get("self_hash"), str) or len(e["self_hash"]) != 64:
@@ -70,7 +74,10 @@ class Ledger:
     """A single JSONL file. `append(data)` is O(n) (reads the tail under the lock) — fine for evidence lockers,
     where a product records dozens to thousands of events, not millions per second."""
 
-    def __init__(self, path: str, tip_key: Optional[object] = None):
+    def __init__(self, path: str, tip_key: Optional[object] = None, allow_unlocked: bool = False):
+        # allow_unlocked=True is the ONLY way to append on a filesystem without flock, and it is the caller's
+        # declared acceptance that concurrent appends may fork the chain (fail-closed by default)
+        self.allow_unlocked = allow_unlocked
         self.path = path
         self._tip_key = tip_key   # (sk, pk_hex) from cra_evidence.signing.load_key(): signed chain tip after each append
         d = os.path.dirname(os.path.abspath(path))
@@ -80,7 +87,9 @@ class Ledger:
     def append(self, data: Dict[str, Any], ts: Optional[str] = None) -> Dict[str, Any]:
         canonical_bytes(data)   # refuse floats / NaN EARLY (never store what the verifiers reject)
         with open(self.path, "ab+") as f:
-            _lock(f)
+            if not _lock(f) and not self.allow_unlocked:
+                raise RuntimeError("ledger: exclusive lock unavailable on this filesystem; refusing to append "
+                                   "(pass allow_unlocked=True to accept unserialised appends explicitly)")
             idx, prev, first, unterminated = _tail_state(f)
             entry = {"idx": idx, "ts": ts or _now_ts(), "prev_hash": prev, "data": data}
             entry["self_hash"] = entry_hash(entry)
@@ -103,7 +112,7 @@ class Ledger:
         with open(self.path, encoding="utf-8") as f:
             for line in f:
                 if line.strip():
-                    yield json.loads(line)
+                    yield json.loads(line, parse_constant=_refuse_constant)   # NaN/Infinity are not JSON: fail
 
     def verify(self) -> Dict[str, Any]:
         """Snapshot verification: every self_hash recomputes, every prev_hash links, idx contiguous, non-empty.
@@ -115,7 +124,7 @@ class Ledger:
                 if not isinstance(e, dict):
                     failures.append(f"entry {n}: not an object (JSON {type(e).__name__})")
                     break
-                if e.get("idx") != n:
+                if type(e.get("idx")) is not int or e.get("idx") != n:   # `true` == 1 in Python: refuse the type, not just the value
                     failures.append(f"entry {n}: idx {e.get('idx')!r} not sequential")
                 if e.get("prev_hash") != prev:
                     failures.append(f"entry {n}: prev_hash does not link")

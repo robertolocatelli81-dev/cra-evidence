@@ -49,8 +49,13 @@ class TestVuln(unittest.TestCase):
         t = datetime(2026, 9, 13, 9, 0, tzinfo=timezone.utc)
         self.assertTrue(v.overdue(t)["early_warning_overdue"]); self.assertFalse(v.overdue(t)["notification_overdue"])
         self.assertFalse(v.overdue(datetime(2026, 9, 12, 9, 0, tzinfo=timezone.utc))["early_warning_overdue"])
-        sent = VulnerabilityRecord("p", "CVE-2026-0001", True, AW, status="early_warning_sent")
-        self.assertFalse(sent.overdue(t)["early_warning_overdue"])
+        # CHANGED 15/09 (council r2): a status WORD cannot extinguish the obligation; the SUBMISSION instant does
+        worded = VulnerabilityRecord("p", "CVE-2026-0001", True, AW, status="early_warning_sent")
+        self.assertTrue(worded.overdue(t)["early_warning_overdue"])
+        sent = VulnerabilityRecord("p", "CVE-2026-0001", True, AW, early_warning_sent_utc="2026-09-12T20:00:00Z")
+        self.assertFalse(sent.overdue(t)["early_warning_overdue"]); self.assertEqual(sent.overdue(t)["late_submissions"], [])
+        late = VulnerabilityRecord("p", "CVE-2026-0001", True, AW, early_warning_sent_utc="2026-09-14T20:00:00Z")
+        self.assertFalse(late.overdue(t)["early_warning_overdue"]); self.assertEqual(late.overdue(t)["late_submissions"], ["early_warning"])
         ne = VulnerabilityRecord("p", "CVE-2026-0002", False, AW)
         o = ne.overdue(datetime(2027, 1, 1, tzinfo=timezone.utc)); self.assertFalse(o["reporting_applicable"]); self.assertFalse(o["early_warning_overdue"])
 
@@ -73,7 +78,8 @@ class TestSRPNotice(unittest.TestCase):
     def test_required_by_stage_from_glossary(self):
         ew = SRPNotice("vulnerability", "early_warning", dict(self.BASE)); self.assertTrue(ew.complete(), ew.missing())
         n72 = SRPNotice("vulnerability", "notification", dict(self.BASE))
-        self.assertEqual(set(n72.missing()), {"general_information", "particular_exceptional_circumstances", "pec_delay_reason"})
+        # ENISA glossary rows v28/v29: PEC fields are OPTIONAL at the 72 h notification (corrected 15/09 from the snapshot)
+        self.assertEqual(set(n72.missing()), {"general_information"})
         fr = SRPNotice("vulnerability", "final_report", dict(self.BASE))
         self.assertIn("corrective_available_date", fr.missing()); self.assertIn("severity_description", fr.missing())
         self.assertIn("corrective_measures_taken", fr.missing()); self.assertNotIn("attack_vector", fr.missing())

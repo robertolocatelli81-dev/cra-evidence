@@ -19,6 +19,8 @@ def floatfree(obj: Any) -> Any:
     if isinstance(obj, bool):
         return obj
     if isinstance(obj, float):
+        if obj != obj or obj in (float("inf"), float("-inf")):
+            raise TypeError("canonical: NaN/Infinity cannot become evidence (a computation went wrong upstream)")
         return repr(obj)
     if isinstance(obj, dict):
         for k in obj:
@@ -30,19 +32,35 @@ def floatfree(obj: Any) -> Any:
     return obj
 
 
-def _refuse_floats(obj: Any, path: str = "$") -> None:
+MAX_SAFE_INT = 2 ** 53 - 1     # beyond this JS/Go float64 readers change the number → hash divergence across verifiers
+MAX_DEPTH = 512                # cryptovalid acceptance profile
+
+
+def _refuse_floats(obj: Any, path: str = "$", depth: int = 0) -> None:
+    """Refuse what the independent verifiers (JS/Go/Rust) would reject or read differently: floats, non-string
+    keys, integers beyond ±(2^53−1), lone surrogates, nesting deeper than 512."""
+    if depth > MAX_DEPTH:
+        raise TypeError(f"canonical: nesting deeper than {MAX_DEPTH} at {path}")
     if isinstance(obj, bool):
         return
     if isinstance(obj, float):
         raise TypeError(f"canonical: float at {path} — hashed content must be float-free (use floatfree())")
+    if isinstance(obj, int) and abs(obj) > MAX_SAFE_INT:
+        raise TypeError(f"canonical: integer beyond ±2^53−1 at {path} (not portable across verifiers: store it as a string)")
+    if isinstance(obj, str):
+        try:
+            obj.encode("utf-8")
+        except UnicodeEncodeError:
+            raise TypeError(f"canonical: lone surrogate in string at {path}") from None
+        return
     if isinstance(obj, dict):
         for k, v in obj.items():
             if not isinstance(k, str):
                 raise TypeError(f"canonical: non-string key {k!r} at {path}")
-            _refuse_floats(v, f"{path}.{k}")
+            _refuse_floats(v, f"{path}.{k}", depth + 1)
     elif isinstance(obj, (list, tuple)):
         for i, v in enumerate(obj):
-            _refuse_floats(v, f"{path}[{i}]")
+            _refuse_floats(v, f"{path}[{i}]", depth + 1)
 
 
 def canonical_bytes(obj: Any) -> bytes:

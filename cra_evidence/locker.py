@@ -22,24 +22,35 @@ from .ledger import Ledger
 from .longterm import AlgorithmPolicy, LongTermEvidence, Signer
 from .sbom import SBOMRecord
 from .srp_notice import SRPNotice
-from .vuln import VulnerabilityRecord
+from .vuln import VulnerabilityRecord, parse_utc
 
 ATTACHMENT_FORMATS = {"cyclonedx-vex", "csaf-2.0", "openvex", "cyclonedx-sbom", "spdx-3.0"}
 RETENTION_YEARS = 10
 PACK_KIND = "cra_evidence_pack/1"
-LEGAL_BASIS = ("Reg. (EU) 2024/2847 (Cyber Resilience Act): Annex I Part II(1) SBOM; Art. 14 reporting (24 h / 72 h / "
-               "final report 14 days after a corrective measure is available; severe incident final report one month after "
-               "the 72 h notification) — obligations applying from 11 September 2026; technical documentation kept 10 years")
+LEGAL_BASIS = ("Reg. (EU) 2024/2847 (Cyber Resilience Act): Annex I Part II(1) SBOM; Art. 14(2) actively exploited "
+               "vulnerability (early warning 24 h, notification 72 h, final report 14 days after a corrective or mitigating "
+               "measure is available); Art. 14(4) severe incident (24 h, 72 h, final report one month after the submission of "
+               "the incident notification) — reporting obligations applying from 11 September 2026 (Art. 71); technical "
+               "documentation and EU declaration of conformity kept at least 10 years after placing on the market or for the "
+               "support period, whichever is longer (Art. 13(13))")
+HONEST_SCOPE_MARK = "NOT a conformity assessment"
 HONEST_SCOPE = ("firm-side evidence locker: proves that these records existed, in this order, unchanged since (hash chain, "
-                "offline-verifiable); it is NOT a conformity assessment, NOT CE marking, NOT the official CSIRT/ENISA "
+                "offline-verifiable); it is " + HONEST_SCOPE_MARK + ", NOT CE marking, NOT the official CSIRT/ENISA "
                 "channel (the SRP is a human portal), NOT an objective time anchor unless an RFC 3161 / OTS token is attached")
 RECORD_KINDS = ("cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor")
 
 
 class CRAEvidenceLocker:
-    def __init__(self, ledger_path: str, product_id: str, product_version: str, tip_key: Optional[Tuple[Any, str]] = None):
+    def __init__(self, ledger_path: str, product_id: str, product_version: str, tip_key: Optional[Tuple[Any, str]] = None,
+                 support_period_end: Optional[str] = None, allow_unlocked: bool = False):
+        """support_period_end: ISO-8601 instant; the CRA retention is 10 years OR the support period, whichever is
+        longer (Art. 13(13)) — recorded in the pack so the seal's renewal horizon is the right one."""
         self.product_id, self.product_version = product_id, product_version
-        self.ledger = Ledger(ledger_path, tip_key=tip_key)
+        self.support_period_end = support_period_end
+        if support_period_end:
+            parse_utc(support_period_end)
+        self.tip_key = tip_key
+        self.ledger = Ledger(ledger_path, tip_key=tip_key, allow_unlocked=allow_unlocked)
         self._lock = threading.Lock()
 
     def _append(self, entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,27 +77,49 @@ class CRAEvidenceLocker:
                 raise ValueError(f"attachment: format must be one of {sorted(ATTACHMENT_FORMATS)} and document a JSON object")
             doc = floatfree(doc)
             att.append({"format": fmt, "document": doc, "document_sha3": sha3_hex(doc)})
-        return self._append({"kind": "cra_vuln", **asdict(rec), "deadlines": rec.deadlines(), "overdue": rec.overdue(),
+        body = asdict(rec)
+        body["event_kind"] = body.pop("kind")     # the record's own kind (vulnerability|incident) must never shadow the ledger kind
+        return self._append({"kind": "cra_vuln", **body, "deadlines": rec.deadlines(), "overdue": rec.overdue(),
                              "attachments": att})
 
-    def record_notice(self, notice: SRPNotice, drop_result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def record_notice(self, notice: SRPNotice, drop_result: Optional[Dict[str, Any]] = None,
+                      divergence_reason: Optional[str] = None) -> Dict[str, Any]:
+        """The notice's awareness instant is bound to the vulnerability record already in the chain for the same id
+        (cve_id / euvd_id ↔ vuln_id): a different value is refused unless `divergence_reason` declares why — the legal
+        clock cannot be moved in a notice without touching the record that started it."""
+        bound_to, aw = [], notice.fields.get("awareness_datetime_utc")
+        ids = {str(notice.fields.get(k)).strip().upper() for k in ("cve_id", "euvd_id") if notice.fields.get(k)}
+        if ids:
+            for e in self.ledger.entries():
+                d = e.get("data") if isinstance(e, dict) else None
+                if isinstance(d, dict) and d.get("kind") == "cra_vuln" and str(d.get("vuln_id", "")).upper() in ids \
+                        and d.get("product_id") == self.product_id:
+                    bound_to.append(d.get("record_id"))
+                    if aw and parse_utc(str(aw)) != parse_utc(str(d.get("awareness_utc"))) and not divergence_reason:
+                        raise ValueError(f"awareness_datetime_utc {aw} differs from the recorded awareness {d.get('awareness_utc')} "
+                                         f"of {d.get('vuln_id')} (record {d.get('record_id')}): give divergence_reason or fix the notice")
         return self._append({"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
                              "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
                              "complete": notice.complete(), "missing_required": notice.missing(),
-                             "deadline_utc": notice.deadline_utc(), "drop": drop_result or {"status": "not_written"}})
+                             "deadline_utc": notice.deadline_utc(), "drop": drop_result or {"status": "not_written"},
+                             "bound_vuln_records": bound_to, "awareness_divergence_reason": divergence_reason})
 
     # ── verification with content-binding ────────────────────────────────
     def verify(self) -> Dict[str, Any]:
         r = self.ledger.verify()
         checked, mismatched = 0, 0
-        for e in self.ledger.entries():
-            d = e.get("data", {})
-            if not isinstance(d, dict) or d.get("kind") not in RECORD_KINDS:
-                continue
-            checked += 1
-            body = {k: v for k, v in d.items() if k != "record_sha3"}
-            if sha3_hex(body) != d.get("record_sha3"):
-                mismatched += 1
+        try:
+            for e in self.ledger.entries():
+                d = e.get("data", {}) if isinstance(e, dict) else None
+                if not isinstance(d, dict) or d.get("kind") not in RECORD_KINDS:
+                    continue
+                checked += 1
+                body = {k: v for k, v in d.items() if k != "record_sha3"}
+                if sha3_hex(body) != d.get("record_sha3"):
+                    mismatched += 1
+        except (ValueError, TypeError, AttributeError) as ex:   # a verdict, never a crash (fail-closed)
+            mismatched += 1
+            r["failures"] = (r.get("failures") or []) + [f"record scan aborted: {ex}"]
         r["records_checked"] = checked
         r["record_digests_bound"] = mismatched == 0
         if mismatched:
@@ -99,6 +132,8 @@ class CRAEvidenceLocker:
         v = self.verify()
         if v["entries"] == 0:
             raise ValueError("empty ledger: a pack over zero records would prove nothing (record an SBOM or an event first)")
+        if not v["chain_ok"]:
+            raise ValueError("ledger does not verify: refusing to write a pack over a broken chain: " + "; ".join(v["failures"][:3]))
         if not re.search(r"\bNOT\b", HONEST_SCOPE):
             raise ValueError("honest_scope must declare a limit")
         counts: Dict[str, int] = {}
@@ -109,6 +144,8 @@ class CRAEvidenceLocker:
         pack = {"kind": PACK_KIND, "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "legal_basis": LEGAL_BASIS, "honest_scope": HONEST_SCOPE, "product_id": self.product_id,
                 "product_version": self.product_version, "retention_years": RETENTION_YEARS,
+                "retention": {"minimum_years": RETENTION_YEARS, "support_period_end_utc": self.support_period_end,
+                              "rule": "10 years after placing on the market or the support period, whichever is longer (Art. 13(13))"},
                 "ledger_file": Path(self.ledger.path).name, "ledger_entries": v["entries"], "ledger_last_self_hash": v["last_self_hash"],
                 "record_counts": counts, "verification": {k: v[k] for k in ("chain_ok", "entries", "records_checked", "record_digests_bound")}}
         pack["pack_sha3"] = sha3_hex(pack)
@@ -117,9 +154,20 @@ class CRAEvidenceLocker:
         return pack
 
     def seal_longterm(self, pack_sha3: str, alg: str = "ed25519", ts_source: str = "asserted",
-                      t: Optional[float] = None) -> Dict[str, Any]:
-        lte = LongTermEvidence(evidence_digest=pack_sha3)
-        lte.seal(Signer(alg), t=t if t is not None else datetime.now(timezone.utc).timestamp(), ts_source=ts_source)
+                      t: Optional[float] = None, previous: Optional[Dict[str, Any]] = None,
+                      key: Optional[Tuple[Any, str]] = None, token_b64: Optional[str] = None) -> Dict[str, Any]:
+        """Seal (or RENEW, with `previous` = the last seal dict from the ledger) the pack digest. The signing key is the
+        locker's log key by default (identity = the key that signs the chain tip); with no key at all the seal is
+        ephemeral and says so. ts_source != "asserted" requires the token. Nothing here VERIFIES a time token: the
+        record carries it for the verifier's temporal oracle."""
+        lte = LongTermEvidence.from_dict(previous) if previous else LongTermEvidence(evidence_digest=pack_sha3)
+        if lte.evidence_digest != pack_sha3:
+            raise ValueError("previous seal is over a different digest")
+        k = key if key is not None else (self.tip_key if (alg == "ed25519" and self.tip_key is not None) else None)
+        signer = Signer(alg, key=k)
+        lte.seal(signer, t=t if t is not None else datetime.now(timezone.utc).timestamp(), ts_source=ts_source, token_b64=token_b64)
         d = lte.to_dict()
-        self._append({"kind": "cra_longterm_seal", "lte": d, "time_anchor": ts_source, "time_anchor_objective": ts_source != "asserted"})
+        self._append({"kind": "cra_longterm_seal", "lte": d, "chain_len": len(lte.records), "renewal": previous is not None,
+                      "time_anchor": ts_source, "time_anchor_verified_here": False, "signer_ephemeral": signer.ephemeral,
+                      "signer_pub": signer.pub})
         return d

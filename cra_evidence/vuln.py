@@ -9,6 +9,7 @@ The obligation arises only for ACTIVELY EXPLOITED vulnerabilities: a non-exploit
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -24,13 +25,28 @@ CLOCK_SKEW = timedelta(minutes=5)                        # tolerated skew betwee
 KINDS = ("vulnerability", "incident")
 
 
+STATUSES = ("aware", "early_warning_sent", "notified", "fixed", "final_reported")
+
+
 def parse_utc(ts: str) -> datetime:
-    """ISO-8601 → aware UTC datetime; a naive value is taken as UTC. Raises ValueError."""
+    """ISO-8601 WITH zone → aware UTC datetime. A naive value is REFUSED: a local time read as UTC would move the
+    legal clock by hours. Raises ValueError."""
     t = ts.strip()
     if t.endswith("Z") or t.endswith("z"):
         t = t[:-1] + "+00:00"
+    t = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", t)   # +0000 → +00:00 (Python < 3.11)
     d = datetime.fromisoformat(t)
-    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    if d.tzinfo is None:
+        raise ValueError(f"{ts!r}: timezone required (use Z or +hh:mm); a naive local time is not a legal instant")
+    return d.astimezone(timezone.utc)
+
+
+def add_months(d: datetime, months: int) -> datetime:
+    """Calendar-month arithmetic ('one month' in Art. 14(4)(c)); the day is clamped to the target month's length."""
+    y, m = divmod(d.month - 1 + months, 12)
+    y, m = d.year + y, m + 1
+    last = [31, 29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
+    return d.replace(year=y, month=m, day=min(d.day, last))
 
 
 @dataclass(frozen=True)
@@ -45,12 +61,23 @@ class VulnerabilityRecord:
     record_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     details: Dict[str, Any] = field(default_factory=dict)
     kind: str = "vulnerability"       # "vulnerability" (Art. 14(1)) | "incident" (severe incident, Art. 14(3))
+    # instants at which each stage was actually SUBMITTED (what overdue() is computed from — a status word cannot
+    # extinguish an obligation that was never fulfilled)
+    early_warning_sent_utc: Optional[str] = None
+    notification_sent_utc: Optional[str] = None
+    final_report_sent_utc: Optional[str] = None
 
     def __post_init__(self):
         if not str(self.vuln_id).strip():
             raise ValueError("vuln_id empty")
         if self.kind not in KINDS:
             raise ValueError(f"kind must be one of {KINDS}")
+        if self.status not in STATUSES:
+            raise ValueError(f"status must be one of {STATUSES}")
+        for f_ in ("early_warning_sent_utc", "notification_sent_utc", "final_report_sent_utc"):
+            v = getattr(self, f_)
+            if v is not None and parse_utc(v) < parse_utc(self.awareness_utc):
+                raise ValueError(f"{f_} earlier than awareness_utc")
         try:
             uuid.UUID(str(self.record_id))
         except ValueError:
@@ -66,8 +93,13 @@ class VulnerabilityRecord:
         t0 = parse_utc(self.awareness_utc)
         fix = parse_utc(self.corrective_available_utc) if self.corrective_available_utc else None
         if self.kind == "incident":
-            fr = (t0 + timedelta(hours=NOTIFICATION_HOURS) + INCIDENT_FINAL_AFTER_NOTIFICATION).isoformat(timespec="seconds")
-            basis = "severe incident: one month after the 72 h incident notification (Art. 14(4)(c))"
+            # Art. 14(4)(c): "within one month after the submission of the incident notification under point (b)" —
+            # anchored to the SUBMISSION instant; undetermined until the notification is recorded, never estimated
+            if self.notification_sent_utc:
+                fr = add_months(parse_utc(self.notification_sent_utc), 1).isoformat(timespec="seconds")
+                basis = "severe incident: one calendar month after the submission of the incident notification (Art. 14(4)(c))"
+            else:
+                fr, basis = None, "undetermined: record notification_sent_utc (one month after the submission, Art. 14(4)(c))"
         else:
             fr = (fix + timedelta(days=FINAL_REPORT_DAYS_AFTER_FIX)).isoformat(timespec="seconds") if fix else None
             basis = ("14 days after the corrective/mitigating measure is available" if fix else
@@ -79,13 +111,20 @@ class VulnerabilityRecord:
     def overdue(self, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
         now = now_utc or datetime.now(timezone.utc)
         d = self.deadlines()
-        applicable = bool(self.actively_exploited)
-        ew = applicable and self.status == "aware" and now > parse_utc(d["early_warning_due_utc"])
-        nt = applicable and self.status in ("aware", "early_warning_sent") and now > parse_utc(d["notification_due_utc"])
-        fr = (applicable and d["final_report_due_utc"] is not None and self.status != "final_reported"
-              and now > parse_utc(d["final_report_due_utc"]))
-        return {"reporting_applicable": applicable, "early_warning_overdue": ew, "notification_overdue": nt,
-                "final_report_overdue": fr}
+        applicable = bool(self.actively_exploited) or self.kind == "incident"
+        def _state(due_iso, sent_iso):
+            if not applicable or due_iso is None:
+                return {"overdue": False, "late": False}
+            due = parse_utc(due_iso)
+            if sent_iso:
+                return {"overdue": False, "late": parse_utc(sent_iso) > due, "sent_utc": sent_iso}
+            return {"overdue": now > due, "late": False, "sent_utc": None}
+        ew = _state(d["early_warning_due_utc"], self.early_warning_sent_utc)
+        nt = _state(d["notification_due_utc"], self.notification_sent_utc)
+        fr = _state(d["final_report_due_utc"], self.final_report_sent_utc)
+        return {"reporting_applicable": applicable, "early_warning_overdue": ew["overdue"], "notification_overdue": nt["overdue"],
+                "final_report_overdue": fr["overdue"], "late_submissions": [k for k, v in (("early_warning", ew), ("notification", nt), ("final_report", fr)) if v["late"]],
+                "any_overdue": ew["overdue"] or nt["overdue"] or fr["overdue"]}
 
     def canonical_hash(self) -> str:
         # includes record_id on purpose: this is the fingerprint of THIS record instance (what the ledger binds),

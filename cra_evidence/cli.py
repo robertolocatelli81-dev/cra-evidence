@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""`cra` command line. Every subcommand exits 0 only on a verified positive outcome; nothing is ever sent anywhere
-except the OSV/KEV/EUVD read-only queries when you ask for them."""
+"""`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
+overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
+is FAIL. Nothing is ever sent anywhere except the OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source
+cisa_kev|enisa_euvd` unless --assert-source)."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +16,9 @@ from .sbom import sbom_from_cyclonedx, sbom_from_installed
 from .signing import keygen, load_key, sign_pack
 from .srp_notice import DryRunDrop, SRPNotice, schema
 from .verify_pack import verify_pack
-from .vuln import VulnerabilityRecord
+from .vuln import STATUSES, VulnerabilityRecord
+from .longterm import LongTermEvidence
+from datetime import datetime, timezone
 
 
 def _p(obj: Any) -> None:
@@ -43,16 +47,24 @@ def main(argv: List[str] = None) -> int:
     s.add_argument("--id", required=True); s.add_argument("--aware", required=True, help="awareness instant, ISO-8601 UTC")
     s.add_argument("--exploited", action="store_true"); s.add_argument("--source", default="manual", choices=["manual", "cisa_kev", "enisa_euvd", "vendor_advisory"])
     s.add_argument("--incident", action="store_true", help="severe incident (Art. 14(3)): final report one month after the 72 h notification")
-    s.add_argument("--status", default="aware"); s.add_argument("--fix-available", help="ISO-8601 UTC when the corrective measure became available")
+    s.add_argument("--status", default="aware", choices=list(STATUSES)); s.add_argument("--fix-available", help="ISO-8601 UTC when the corrective measure became available")
+    s.add_argument("--ew-sent", help="instant the early warning was submitted (ISO-8601 with zone)")
+    s.add_argument("--notified", help="instant the 72 h notification was submitted (ISO-8601 with zone)")
+    s.add_argument("--final-sent", help="instant the final report was submitted (ISO-8601 with zone)")
+    s.add_argument("--assert-source", action="store_true", help="skip the live KEV/EUVD check for --source cisa_kev/enisa_euvd (recorded as 'asserted:…')")
+    s.add_argument("--allow-overdue", action="store_true", help="exit 0 even if an applicable deadline is overdue (default: exit 1)")
     s = sub.add_parser("notice", help="build an SRP-aligned Art. 14 notice (dry-run drop file, never submitted)"); common(s)
     s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"]); s.add_argument("--stage", required=True, choices=["early_warning", "notification", "final_report"])
     s.add_argument("--fields", required=True, help="JSON file with the SRP fields (see `cra schema`)"); s.add_argument("--drop", required=True, help="drop folder")
     s = sub.add_parser("schema", help="print the SRP field schema for a stream"); s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"])
     s = sub.add_parser("pack", help="write the evidence pack and anchor it in the ledger"); common(s); s.add_argument("--out", required=True)
     s = sub.add_parser("sign", help="sign a pack (Ed25519 sidecar)"); s.add_argument("pack"); s.add_argument("--key", required=True); s.add_argument("--signer-id", required=True)
-    s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp)"); common(s); s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted")
+    s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp); --tip-key = the sealing identity"); common(s)
+    s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted"); s.add_argument("--token-b64", help="RFC 3161 / OTS token (required when --ts-source is not 'asserted')")
+    s.add_argument("--renew", help="JSON file with the previous seal (lte dict) to extend the chain")
     s = sub.add_parser("verify", help="verify a pack offline (exit 0 only if authenticity is not FAIL)"); s.add_argument("pack")
     s.add_argument("--ledger"); s.add_argument("--trust-store", help="JSON {signer_id: public_key_hex}")
+    s.add_argument("--log-pubkey", help="trusted public key (hex) of the ledger's signed tip: detects a truncated tail")
     s = sub.add_parser("feeds", help="read-only network checks: OSV positive control, KEV/EUVD exploitation signal for ids"); s.add_argument("ids", nargs="*")
     a = p.parse_args(argv)
 
@@ -72,10 +84,24 @@ def main(argv: List[str] = None) -> int:
         return 0 if rec.components else 1
     if a.cmd == "vuln":
         lk = _locker(a)
+        source = a.source
+        if a.source in ("cisa_kev", "enisa_euvd"):
+            if a.assert_source:
+                source = f"asserted:{a.source}"
+            else:   # the provenance label is only stored as such when the feed confirms it now
+                from .feeds import cisa_kev_ids, euvd_kev_ids, exploitation_signal
+                feed = cisa_kev_ids() if a.source == "cisa_kev" else euvd_kev_ids()
+                if feed["error"]:
+                    print(f"feed {a.source} unavailable ({feed['error']}): use --assert-source to record an unverified provenance", file=sys.stderr); return 1
+                sig = exploitation_signal([a.id], feed if a.source == "cisa_kev" else None, feed if a.source == "enisa_euvd" else None)
+                if a.id.upper() not in {k.upper() for k in sig["actively_exploited"]}:
+                    print(f"{a.id} is NOT in {a.source} today: refusing to record that provenance (use --assert-source)", file=sys.stderr); return 1
         rec = VulnerabilityRecord(product_id=a.product, vuln_id=a.id, actively_exploited=a.exploited, awareness_utc=a.aware,
-                                  status=a.status, exploitation_source=a.source, corrective_available_utc=a.fix_available, kind=("incident" if a.incident else "vulnerability"))
-        e = lk.record_vulnerability(rec); _p({"recorded": e["idx"], "deadlines": rec.deadlines(), "overdue": rec.overdue()})
-        return 0
+                                  status=a.status, exploitation_source=source, corrective_available_utc=a.fix_available,
+                                  kind=("incident" if a.incident else "vulnerability"), early_warning_sent_utc=a.ew_sent,
+                                  notification_sent_utc=a.notified, final_report_sent_utc=a.final_sent)
+        e = lk.record_vulnerability(rec); od = rec.overdue(); _p({"recorded": e["idx"], "deadlines": rec.deadlines(), "overdue": od})
+        return 0 if (not od["any_overdue"] or a.allow_overdue) else 1
     if a.cmd == "notice":
         lk = _locker(a)
         with open(a.fields, encoding="utf-8") as f:
@@ -89,13 +115,18 @@ def main(argv: List[str] = None) -> int:
     if a.cmd == "sign":
         _p(sign_pack(a.pack, load_key(a.key), a.signer_id)); return 0
     if a.cmd == "seal":
-        lk = _locker(a); _p(lk.seal_longterm(a.pack_sha3, ts_source=a.ts_source)); return 0
+        lk = _locker(a)
+        prev = json.load(open(a.renew, encoding="utf-8")) if a.renew else None
+        d = lk.seal_longterm(a.pack_sha3, ts_source=a.ts_source, previous=prev, token_b64=a.token_b64)
+        v = LongTermEvidence.from_dict(d).verify(now=datetime.now(timezone.utc).timestamp())
+        _p({"seal": d, "verify": v})
+        return 0 if v["ok"] else 1
     if a.cmd == "verify":
         ts = None
         if a.trust_store:
             with open(a.trust_store, encoding="utf-8") as f:
                 ts = json.load(f)
-        r = verify_pack(a.pack, a.ledger, ts); _p(r)
+        r = verify_pack(a.pack, a.ledger, ts, a.log_pubkey); _p(r)
         return 0 if r["ok"] else 1
     if a.cmd == "feeds":
         from .feeds import cisa_kev_ids, euvd_kev_ids, exploitation_signal, osv_positive_control

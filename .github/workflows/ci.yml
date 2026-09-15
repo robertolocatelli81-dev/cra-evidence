@@ -13,7 +13,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install (with signing extra) + the INDEPENDENT cryptovalid verifier for the interop test
         run: |
-          pip install ".[sign]"
+          pip install ".[sign]" jsonschema referencing
           pip install https://github.com/robertolocatelli81-dev/cryptovalid-opencore/releases/download/v0.11.4/cryptovalid_opencore-0.11.4-py3-none-any.whl
       - name: Unit tests (every suite; interop against cryptovalid runs because the wheel is installed)
         run: |

@@ -57,18 +57,20 @@ class SBOMRecord:
         return sha3_hex(asdict(self))
 
     def to_cyclonedx_min(self) -> Dict[str, Any]:
-        return {"bomFormat": "CycloneDX", "specVersion": "1.6",
-                "profile": f"cra-evidence-min (depth: {self.depth})",
-                "depth_note": "'top-level-only' is the literal Annex I floor; most vulnerabilities live in transitive "
-                              "dependencies — prefer a transitive SBOM from a full generator when available",
-                "metadata": {"timestamp": self.generated_utc, "component": {"name": self.product_id, "version": self.product_version}},
+        # schema-valid CycloneDX 1.6 (root has additionalProperties:false): our extras live in metadata.properties
+        return {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+                "metadata": {"timestamp": self.generated_utc,
+                             "component": {"type": "application", "name": self.product_id, "version": self.product_version},
+                             "properties": [
+                                 {"name": "cra-evidence:profile", "value": f"cra-evidence-min (depth: {self.depth})"},
+                                 {"name": "cra-evidence:depth_note", "value": "'top-level-only' is the literal Annex I floor; most vulnerabilities live in transitive dependencies — prefer a transitive SBOM from a full generator when available"},
+                                 {"name": "cra-evidence:sbom_sha3", "value": self.canonical_hash()}]},
                 "components": [{"type": "library", "name": c.name, "version": c.version,
                                 **({"supplier": {"name": c.supplier}} if c.supplier else {}),
                                 **({"purl": c.purl} if c.purl else {}),
                                 **({"hashes": [{"alg": "SHA-256", "content": c.sha256}]} if c.sha256 else {}),
                                 **({"licenses": [{"license": {"id": c.license}}]} if c.license else {})}
-                               for c in dedup(self.components)],
-                "sbom_sha3": self.canonical_hash()}
+                               for c in dedup(self.components)]}
 
 
 _EXTRA_MARKER = re.compile(r"""extra\s*==\s*['"]""")
@@ -77,6 +79,28 @@ _EXTRA_MARKER = re.compile(r"""extra\s*==\s*['"]""")
 def _is_extra_requirement(req: str) -> bool:
     """PEP 508 marker `extra == "x"` in any spacing/quoting: an optional dependency, not part of the runtime SBOM."""
     return bool(_EXTRA_MARKER.search(req))
+
+
+def pypi_purl(name: str, version: str) -> str:
+    """purl for PyPI per the purl spec: name lowercased, runs of [-_.] → '-' (PEP 503 normalisation)."""
+    return f"pkg:pypi/{re.sub(r'[-_.]+', '-', name.lower())}@{version}"
+
+
+PURL_TYPE_TO_OSV = {"pypi": "PyPI", "npm": "npm", "cargo": "crates.io", "maven": "Maven", "golang": "Go", "nuget": "NuGet",
+                    "gem": "RubyGems", "composer": "Packagist", "hex": "Hex", "pub": "Pub", "swift": "SwiftURL", "cocoapods": "CocoaPods"}
+
+
+def components_for_osv(record: "SBOMRecord") -> List[Dict[str, str]]:
+    """Map an (ingested) SBOM's purls to OSV ecosystems so a Syft/Trivy SBOM of any ecosystem can be queried;
+    components without a mappable purl are returned with ecosystem "" (the caller sees what was NOT queried)."""
+    out = []
+    for c in record.components:
+        eco = ""
+        if c.purl.startswith("pkg:"):
+            typ = c.purl[4:].split("/", 1)[0].split("?")[0]
+            eco = PURL_TYPE_TO_OSV.get(typ, "")
+        out.append({"name": c.name, "version": c.version, "ecosystem": eco})
+    return out
 
 
 def _req_name(req: str) -> str:
@@ -105,7 +129,7 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
             dist = md.distribution(name)
             ver = dist.version
             lic = (dist.metadata.get("License") or "")[:80]
-            comps[key] = SBOMComponent(name=dist.metadata["Name"], version=ver, purl=f"pkg:pypi/{key}@{ver}", license=lic)
+            comps[key] = SBOMComponent(name=dist.metadata["Name"], version=ver, purl=pypi_purl(key, ver), license=lic)
             if transitive:
                 for r in dist.requires or []:
                     if _is_extra_requirement(r):
