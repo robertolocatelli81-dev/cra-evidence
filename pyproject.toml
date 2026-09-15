@@ -26,3 +26,6 @@ Homepage = "https://github.com/robertolocatelli81-dev/cra-evidence"
 
 [tool.setuptools]
 packages = ["cra_evidence"]
+
+[tool.setuptools.package-data]
+cra_evidence = ["data/*.json"]

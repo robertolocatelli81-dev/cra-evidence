@@ -145,7 +145,10 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001
         return {"status": "FAIL", "detail": f"signature invalid for the declared key ({type(e).__name__})"}
-    out = {"status": "PASS", "signer_id": side.get("signer_id"), "fingerprint": side.get("fingerprint"), "trusted": False}
+    fp = hashlib.sha256(bytes.fromhex(side["public_key_hex"])).hexdigest()[:16]   # recomputed, never echoed
+    if side.get("fingerprint") not in (None, fp):
+        return {"status": "FAIL", "detail": "declared fingerprint does not match the signing key"}
+    out = {"status": "PASS", "signer_id": side.get("signer_id"), "fingerprint": fp, "trusted": False}
     if trust_store is not None:
         expected = trust_store.get(side.get("signer_id", ""))
         out["trusted"] = bool(expected) and expected == side.get("public_key_hex")

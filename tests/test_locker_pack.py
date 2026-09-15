@@ -60,7 +60,9 @@ class TestLockerPack(unittest.TestCase):
         self.assertTrue(lte.verify(1_900_000_000.0, pol)["ok"]); self.assertTrue(lte.renewal_due(1_990_000_000.0, pol, 20_000_000.0)["due"])
         self.assertFalse(lte.verify(2_100_000_000.0, pol)["ok"])                                    # outer algorithm broken now
         lte.records[0]["rehash"] = "x"; self.assertFalse(lte.verify(1_900_000_000.0, pol)["ok"])
-        d = self.lk.seal_longterm("ab" * 32, t=1_800_000_000.0); self.assertEqual(d["format"], "CRA-LTA-1"); self.assertTrue(self.lk.verify()["chain_ok"])
+        d = self.lk.seal_longterm("ab" * 32, t=1_800_000_000.0, external_digest=True); self.assertEqual(d["format"], "CRA-LTA-1"); self.assertTrue(self.lk.verify()["chain_ok"])
+        with self.assertRaises(ValueError):
+            self.lk.seal_longterm("cd" * 32, t=1_800_000_000.0)      # not anchored here → refused by default
 
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography absent")
     def test_tip_written_and_checked(self):

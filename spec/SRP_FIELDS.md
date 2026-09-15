@@ -6,8 +6,9 @@ codes below are DERIVED from the vendored snapshot by `tests/test_council_r2.py`
 the snapshot disagree). Legend: **R** = required at this stage; **O** = optional; **A** = required if such information is available; **C** = carried forward from the previous stage (copied by default, may be updated); **-** = not at this stage. `manufacturer_name` is system-generated in the portal; here it is a plain
 field so the payload is self-contained. Field names are ours (snake_case) and map 1:1 to the glossary rows in order.
 
-Only **R** fields count as "missing"; **C** fields are carried forward from the previous stage (the portal copies
-them), **A** is the manufacturer's call. The SRP is a web portal (https://portal.cra-srp.enisa.europa.eu/, EU Login +
+**R** fields count as "missing" when absent; a **C** field is carried forward from the previous stage (pass the
+previous payload with `--previous` and it is copied) and counts as missing only if it was **R** at an earlier stage;
+**A** is the manufacturer's call. The SRP is a web portal (https://portal.cra-srp.enisa.europa.eu/, EU Login +
 MFA, Assigned Representative role); no machine-to-machine API was documented on 15/09/2026. This tool builds and
 validates the payload per stage and writes a dry-run drop file; submission is a human act. Deadlines: EW = awareness
 + 24 h; N = awareness + 72 h; FR (vulnerability) = 14 days after the corrective/mitigating measure is available

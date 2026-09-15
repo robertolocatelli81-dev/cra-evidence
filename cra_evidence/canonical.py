@@ -57,6 +57,7 @@ def _refuse_floats(obj: Any, path: str = "$", depth: int = 0) -> None:
         for k, v in obj.items():
             if not isinstance(k, str):
                 raise TypeError(f"canonical: non-string key {k!r} at {path}")
+            _refuse_floats(k, f"{path}.<key>", depth + 1)     # keys are strings too: same surrogate rule
             _refuse_floats(v, f"{path}.{k}", depth + 1)
     elif isinstance(obj, (list, tuple)):
         for i, v in enumerate(obj):

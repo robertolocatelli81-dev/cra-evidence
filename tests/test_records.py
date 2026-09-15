@@ -64,8 +64,7 @@ class TestVuln(unittest.TestCase):
             VulnerabilityRecord("p", "", True, AW)
         with self.assertRaises(ValueError):
             VulnerabilityRecord("p", "x", True, (datetime.now(timezone.utc) + timedelta(days=1)).isoformat())
-        with self.assertRaises(ValueError):
-            VulnerabilityRecord("p", "x", True, AW, corrective_available_utc="2026-09-01T00:00:00Z")
+        VulnerabilityRecord("p", "x", True, AW, corrective_available_utc="2026-09-01T00:00:00Z")   # a fix may precede awareness (council r3)
 
 
 class TestSRPNotice(unittest.TestCase):
@@ -93,7 +92,7 @@ class TestSRPNotice(unittest.TestCase):
         self.assertEqual(fr.deadline_utc(), "2026-10-04T00:00:00+00:00")
         self.assertIsNone(SRPNotice("vulnerability", "final_report", dict(self.BASE)).deadline_utc())
         inc = SRPNotice("incident", "final_report", {**self.BASE, "notification_type": "Incident"})
-        self.assertEqual(inc.deadline_utc(), "2026-10-15T08:00:00+00:00")   # awareness + 72 h + 30 days
+        self.assertIsNone(inc.deadline_utc())   # Art. 14(4)(c): one month from the SUBMISSION — not in this payload, never invented
         pl = n.payload(); self.assertIn("NOT submitted", pl["submission"]); self.assertEqual(pl["notice_sha3"], n.canonical_hash())
         with self.assertRaises(ValueError):
             SRPNotice("vulnerability", "early_warning", {**self.BASE, "product_type": "Huge"})

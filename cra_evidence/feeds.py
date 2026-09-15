@@ -12,12 +12,14 @@ positive control (a version with a known CVE) must light up before any "no vulne
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from typing import Any, Dict, List, Optional
 
 OSV_BATCH = "https://api.osv.dev/v1/querybatch"
 OSV_QUERY = "https://api.osv.dev/v1/query"
 OSV_BATCH_MAX = 1000   # queries per request (server-side cap of the OSV API implementation); larger inputs are chunked
+OSV_VULN = "https://api.osv.dev/v1/vulns/"   # querybatch answers are CONDENSED (id + modified only): aliases come from here
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 EUVD_KEV_DUMP = "https://euvdservices.enisa.europa.eu/api/kev/dump"
 POSITIVE_CONTROL = ("cryptography", "3.2", "PyPI")   # has public CVEs: if this returns nothing, the feed is broken
@@ -45,6 +47,7 @@ def osv_query_batch(components: List[Dict[str, str]], timeout: int = 30) -> Dict
     if not qs:
         return {"results": aligned, "by_component": {}, "queried": 0, "error": None}
     res: List[List[str]] = []
+    cache: Dict[str, List[str]] = {}
     try:
         for start in range(0, len(qs), OSV_BATCH_MAX):
             chunk = qs[start:start + OSV_BATCH_MAX]
@@ -53,7 +56,7 @@ def osv_query_batch(components: List[Dict[str, str]], timeout: int = 30) -> Dict
             if len(batch) != len(chunk):
                 raise ValueError(f"OSV returned {len(batch)} results for {len(chunk)} queries")
             for q, r in zip(chunk, batch):
-                ids = _ids_with_aliases(r.get("vulns") or [])
+                ids = _ids_with_aliases(r.get("vulns") or [], timeout, cache)
                 token = r.get("next_page_token")
                 pages = 0
                 while token:   # documented pagination (google.github.io/osv.dev/post-v1-querybatch): follow it or under-report
@@ -61,7 +64,7 @@ def osv_query_batch(components: List[Dict[str, str]], timeout: int = 30) -> Dict
                     if pages > 50:
                         raise ValueError("OSV pagination did not terminate")
                     more = _post_json(OSV_QUERY, {**q, "page_token": token}, timeout)
-                    ids += _ids_with_aliases(more.get("vulns") or [])
+                    ids += _ids_with_aliases(more.get("vulns") or [], timeout, cache)
                     token = more.get("next_page_token")
                 res.append(sorted(set(ids)))
     except Exception as e:  # noqa: BLE001 — network/shape: declared, not hidden; NEVER a partial list passed off as complete
@@ -73,12 +76,24 @@ def osv_query_batch(components: List[Dict[str, str]], timeout: int = 30) -> Dict
     return {"results": aligned, "by_component": by, "queried": len(qs), "error": None}
 
 
-def _ids_with_aliases(vulns: List[Dict[str, Any]]) -> List[str]:
+def _ids_with_aliases(vulns: List[Dict[str, Any]], timeout: int = 30, cache: Optional[Dict[str, List[str]]] = None) -> List[str]:
+    """Each id plus its aliases (GHSA ↔ CVE ↔ PYSEC). The batch endpoint returns only {id, modified} (verified
+    live 15/09/2026), so aliases are fetched per id from /v1/vulns/{id} (cached); a failed lookup raises — a list
+    without aliases would silently miss the CVE that KEV/EUVD key on."""
     out: List[str] = []
+    cache = cache if cache is not None else {}
     for v in vulns:
-        if isinstance(v, dict):
-            out += [str(v.get("id"))] if v.get("id") else []
-            out += [str(a) for a in (v.get("aliases") or []) if a]
+        if not isinstance(v, dict) or not v.get("id"):
+            continue
+        vid = str(v["id"])
+        aliases = v.get("aliases")
+        if aliases is None:
+            if vid not in cache:
+                full = _get_json(OSV_VULN + vid, timeout)
+                cache[vid] = [str(a) for a in (full.get("aliases") or []) if a]
+            aliases = cache[vid]
+        out.append(vid)
+        out += [str(a) for a in aliases if a]
     return out
 
 
@@ -86,9 +101,12 @@ KEV_POSITIVE_CONTROL = "CVE-2021-44228"   # Log4Shell: in CISA KEV since 2021-12
 
 
 def osv_positive_control(timeout: int = 30) -> Dict[str, Any]:
+    """The control passes only if the known-vulnerable version returns ids AND at least one CVE alias was resolved
+    (the alias path is what KEV/EUVD matching depends on)."""
     r = osv_query_batch([{"name": POSITIVE_CONTROL[0], "version": POSITIVE_CONTROL[1], "ecosystem": POSITIVE_CONTROL[2]}], timeout)
-    ok = r["error"] is None and bool(r["results"]) and bool(r["results"][0])
-    return {"ok": ok, "control": POSITIVE_CONTROL, "hits": r["results"][0] if r["results"] else [], "error": r["error"]}
+    hits = r["results"][0] if r["results"] and r["results"][0] else []
+    ok = r["error"] is None and bool(hits) and any(h.upper().startswith("CVE-") for h in hits)
+    return {"ok": ok, "control": POSITIVE_CONTROL, "hits": hits, "error": r["error"]}
 
 
 def cisa_kev_ids(timeout: int = 60) -> Dict[str, Any]:
@@ -115,7 +133,7 @@ def euvd_kev_ids(timeout: int = 60) -> Dict[str, Any]:
                 for k in ("id", "aliases", "cveId", "cve"):
                     val = v.get(k)
                     if isinstance(val, str):
-                        ids.update(x.strip() for x in val.split(",") if x.strip())
+                        ids.update(x.strip() for x in re.split(r"[,\s]+", val) if x.strip())   # EUVD joins aliases with newlines
                     elif isinstance(val, list):
                         ids.update(str(x) for x in val)
         ids = {i.upper() for i in ids}

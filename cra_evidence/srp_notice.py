@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .canonical import sha3_hex
-from .vuln import parse_utc, EARLY_WARNING_HOURS, NOTIFICATION_HOURS, FINAL_REPORT_DAYS_AFTER_FIX, INCIDENT_FINAL_AFTER_NOTIFICATION, CLOCK_SKEW
+from .vuln import parse_utc, EARLY_WARNING_HOURS, NOTIFICATION_HOURS, FINAL_REPORT_DAYS_AFTER_FIX, CLOCK_SKEW
 
 STAGES = ("early_warning", "notification", "final_report")
 STREAMS = ("vulnerability", "incident")
@@ -103,10 +103,16 @@ class SRPNotice:
     fields: Dict[str, Any]
     generated_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
     notice_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    previous_fields: Optional[Dict[str, Any]] = None   # the previous stage's payload: "C" fields are carried from it
 
     def __post_init__(self):
         if self.stream not in STREAMS or self.stage not in STAGES:
             raise ValueError("unknown stream/stage")
+        if self.previous_fields:
+            # "By default copied from previous step, or updated": copy what this payload does not override
+            for k, spec in schema(self.stream).items():
+                if spec["stages"][self.stage] == "C" and not _present(self.fields.get(k)) and _present(self.previous_fields.get(k)):
+                    self.fields[k] = self.previous_fields[k]
         try:
             uuid.UUID(str(self.notice_id))
         except ValueError:
@@ -132,24 +138,31 @@ class SRPNotice:
                 parse_utc(str(v))
 
     def missing(self) -> List[str]:
-        """Fields REQUIRED at this stage and absent. Required-if-available ("A") is never counted as missing:
-        the manufacturer decides; the payload records the choice."""
-        return [k for k, spec in schema(self.stream).items()
-                if spec["stages"].get(self.stage) == "R" and not _present(self.fields.get(k))]
+        """Fields REQUIRED ("R") or CARRIED ("C") at this stage and absent: a carried field the portal would copy
+        from the previous step is missing here unless this payload carries it (pass previous_fields). Required-if-
+        available ("A") is never counted as missing: the manufacturer decides; the payload records the choice."""
+        earlier = STAGES[:STAGES.index(self.stage)]
+        def needed(spec):
+            code = spec["stages"].get(self.stage)
+            return code == "R" or (code == "C" and any(spec["stages"].get(s0) == "R" for s0 in earlier))
+        return [k for k, spec in schema(self.stream).items() if needed(spec) and not _present(self.fields.get(k))]
 
     def complete(self) -> bool:
         return not self.missing()
 
     def deadline_utc(self) -> Optional[str]:
+        """None = undetermined (never invented): the incident final report runs one calendar month from the
+        SUBMISSION of the incident notification (Art. 14(4)(c)) — that instant lives in the vulnerability record
+        (`notification_sent_utc`), not in this payload."""
         if not _present(self.fields.get("awareness_datetime_utc")):
-            return None   # e.g. incident final report (awareness is "-" at that stage): undetermined here, never invented
+            return None
         aw = parse_utc(str(self.fields["awareness_datetime_utc"]))
         if self.stage == "early_warning":
             return (aw + timedelta(hours=EARLY_WARNING_HOURS)).isoformat(timespec="seconds")
         if self.stage == "notification":
             return (aw + timedelta(hours=NOTIFICATION_HOURS)).isoformat(timespec="seconds")
         if self.stream == "incident":
-            return (aw + timedelta(hours=NOTIFICATION_HOURS) + INCIDENT_FINAL_AFTER_NOTIFICATION).isoformat(timespec="seconds")
+            return None
         cad = self.fields.get("corrective_available_date")
         if not _present(cad):
             return None   # honest: undetermined until a corrective measure is available (Art. 14(2)(c))

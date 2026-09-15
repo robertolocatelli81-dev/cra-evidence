@@ -20,7 +20,6 @@ from .canonical import sha3_hex
 EARLY_WARNING_HOURS = 24
 NOTIFICATION_HOURS = 72
 FINAL_REPORT_DAYS_AFTER_FIX = 14
-INCIDENT_FINAL_AFTER_NOTIFICATION = timedelta(days=30)   # counted from the 72 h notification deadline (awareness + 72 h)
 CLOCK_SKEW = timedelta(minutes=5)                        # tolerated skew between the recorder's clock and this host's
 KINDS = ("vulnerability", "incident")
 
@@ -86,8 +85,8 @@ class VulnerabilityRecord:
         # a self-asserted awareness in the future would produce fictitious deadlines and overdue=False forever
         if aw > datetime.now(timezone.utc) + CLOCK_SKEW:
             raise ValueError(f"awareness_utc {self.awareness_utc} is in the future")
-        if self.corrective_available_utc is not None and parse_utc(self.corrective_available_utc) < aw:
-            raise ValueError("corrective_available_utc earlier than awareness_utc")
+        if self.corrective_available_utc is not None:
+            parse_utc(self.corrective_available_utc)   # may legitimately PRECEDE awareness (a fix shipped before the exploitation was known)
 
     def deadlines(self) -> Dict[str, Optional[str]]:
         t0 = parse_utc(self.awareness_utc)

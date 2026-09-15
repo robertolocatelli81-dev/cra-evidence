@@ -9,5 +9,8 @@ floats/NaN/unportable ints/lone surrogates refused, signed chain tip), evidence 
 signature covers signer and time, crypto-agile seal (renewable chain, pinned key, hash named per record, NIST IR 8547
 dates as default policy, time token stored when given), offline verifier with layers and authenticity levels (tip
 checked with a trusted log key), OSV (chunked, paginated, aliases, aligned to input) / CISA KEV / ENISA EUVD feeds with
-positive controls. Interop measured against cryptovalid v0.11.4. Two council rounds (five models, two providers):
-31 findings → tests.
+positive controls (OSV aliases resolved per id, since the batch endpoint is condensed). Seal signs its own fields;
+hash policy applied to every record; carried-forward SRP fields copied from the previous stage or counted missing;
+incident final-report deadline never invented in a notice; licences exported as SPDX id or free-text name; pack
+written atomically after its anchor; a required ledger that is missing is a FAIL. Interop measured against
+cryptovalid v0.11.4. Three council rounds (five models, two providers): 44 findings → tests.

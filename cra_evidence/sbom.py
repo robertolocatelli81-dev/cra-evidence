@@ -11,6 +11,7 @@ and add what they lack — tamper-evident, offline-verifiable evidence with Art.
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -69,7 +70,7 @@ class SBOMRecord:
                                 **({"supplier": {"name": c.supplier}} if c.supplier else {}),
                                 **({"purl": c.purl} if c.purl else {}),
                                 **({"hashes": [{"alg": "SHA-256", "content": c.sha256}]} if c.sha256 else {}),
-                                **({"licenses": [{"license": {"id": c.license}}]} if c.license else {})}
+                                **({"licenses": [{"license": ({"id": c.license} if is_spdx_id(c.license) else {"name": c.license})}]} if c.license else {})}
                                for c in dedup(self.components)]}
 
 
@@ -79,6 +80,28 @@ _EXTRA_MARKER = re.compile(r"""extra\s*==\s*['"]""")
 def _is_extra_requirement(req: str) -> bool:
     """PEP 508 marker `extra == "x"` in any spacing/quoting: an optional dependency, not part of the runtime SBOM."""
     return bool(_EXTRA_MARKER.search(req))
+
+
+_SPDX_IDS: Optional[set] = None
+
+
+def is_spdx_id(value: str) -> bool:
+    """True only for an identifier in the SPDX license list vendored with the package (CycloneDX `license.id` is an
+    enum of those); anything else is exported as `license.name` (free text), which the schema allows."""
+    global _SPDX_IDS
+    if _SPDX_IDS is None:
+        try:
+            p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "spdx.schema.json")
+            with open(p, encoding="utf-8") as f:
+                _SPDX_IDS = set(json.load(f).get("enum", []))
+        except (OSError, ValueError):
+            _SPDX_IDS = set()
+    return value in _SPDX_IDS
+
+
+def resolved_components(record: "SBOMRecord") -> List[SBOMComponent]:
+    """Components with a real version (a declared-but-NOT-INSTALLED dependency is not evidence of anything)."""
+    return [c for c in record.components if c.version and c.version != "NOT-INSTALLED"]
 
 
 def pypi_purl(name: str, version: str) -> str:

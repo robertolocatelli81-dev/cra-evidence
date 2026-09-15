@@ -16,7 +16,7 @@ lk.record_vulnerability(v)
 n = SRPNotice("vulnerability", "early_warning", {"notification_type": "Vulnerability", "title": "example (not a real report)",
               "summary": "illustrative payload in the ENISA SRP vocabulary; never submitted", "manufacturer_name": "example manufacturer",
               "member_states_available": ["IT"], "product_name": "cra-evidence", "product_version": "0.1.0", "awareness_datetime_utc": "2026-09-15T08:00:00Z"})
-lk.record_notice(n, DryRunDrop(os.path.join(out, "drop")).prepare(n))
+lk.record_notice(n, DryRunDrop(os.path.join(out, "drop")).prepare(n))   # no cve_id: no vulnerability record to bind to
 pack = lk.evidence_pack(os.path.join(out, "cra_pack.json"))
 lk.seal_longterm(pack["pack_sha3"], t=1_789_459_200.0)   # 2026-09-15T00:00:00Z, explicit
 print(json.dumps(verify_pack(os.path.join(out, "cra_pack.json")), indent=1))

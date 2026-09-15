@@ -120,11 +120,12 @@ class TestCouncilR1(unittest.TestCase):
                                     for i in range(len(body["queries"]))]}
             return {"vulns": [{"id": "V0-page2"}]}      # /v1/query with page_token
         old = feeds._post_json; feeds._post_json = fake_post
+        oldg = feeds._get_json; feeds._get_json = lambda url, timeout: {"aliases": []}   # alias lookups (r3) stubbed
         try:
             comps = [{"name": f"p{i}", "version": "1", "ecosystem": "PyPI"} for i in range(1200)]
             r = feeds.osv_query_batch(comps)
         finally:
-            feeds._post_json = old
+            feeds._post_json = old; feeds._get_json = oldg
         self.assertIsNone(r["error"]); self.assertEqual(len(r["results"]), 1200)
         self.assertEqual(sum(1 for u, _ in calls if u.endswith("querybatch")), 2)     # 1000 + 200
         self.assertIn("V0-page2", r["results"][0])

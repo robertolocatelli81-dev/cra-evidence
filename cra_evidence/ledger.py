@@ -44,6 +44,19 @@ def _refuse_constant(name: str):
     raise ValueError(f"non-JSON constant {name} in ledger line")
 
 
+def _no_dup_keys(pairs):
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise ValueError(f"duplicate key {k!r} in ledger line (the profile forbids it: readers disagree on which wins)")
+        d[k] = v
+    return d
+
+
+def parse_line(line: str):
+    return json.loads(line, parse_constant=_refuse_constant, object_pairs_hook=_no_dup_keys)
+
+
 def entry_hash(entry: Dict[str, Any]) -> str:
     return sha256_hex({k: v for k, v in entry.items() if k != "self_hash"})
 
@@ -58,7 +71,7 @@ def _tail_state(f) -> Tuple[int, str, str, bool]:
         if not line:
             continue
         try:
-            e = json.loads(line, parse_constant=_refuse_constant)
+            e = parse_line(line)
         except (ValueError, UnicodeDecodeError) as e:
             raise ValueError(f"ledger line {lineno} unparsable ({type(e).__name__}): chain not continuable — verify, repair, record the incident")
         if not isinstance(e, dict) or not isinstance(e.get("self_hash"), str) or len(e["self_hash"]) != 64:
@@ -112,7 +125,7 @@ class Ledger:
         with open(self.path, encoding="utf-8") as f:
             for line in f:
                 if line.strip():
-                    yield json.loads(line, parse_constant=_refuse_constant)   # NaN/Infinity are not JSON: fail
+                    yield parse_line(line)   # NaN/Infinity are not JSON: fail
 
     def verify(self) -> Dict[str, Any]:
         """Snapshot verification: every self_hash recomputes, every prev_hash links, idx contiguous, non-empty.
@@ -132,8 +145,8 @@ class Ledger:
                     failures.append(f"entry {n}: self_hash mismatch")
                 prev = e.get("self_hash", prev) if isinstance(e.get("self_hash"), str) else prev
                 n += 1
-        except (ValueError, TypeError) as ex:
-            failures.append(f"unparsable line: {ex}")
+        except (ValueError, TypeError, RecursionError) as ex:
+            failures.append(f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}")
         if n == 0:
             failures.append("empty_ledger: zero entries, nothing to verify")
         return {"chain_ok": not failures, "entries": n, "failures": failures[:10], "last_self_hash": prev}

@@ -67,8 +67,8 @@ class TestCouncilR2(unittest.TestCase):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
-        first = lk.seal_longterm("ab" * 32, t=1_800_000_000.0)
-        second = lk.seal_longterm("ab" * 32, t=1_900_000_000.0, previous=first)
+        first = lk.seal_longterm("ab" * 32, t=1_800_000_000.0, external_digest=True)
+        second = lk.seal_longterm("ab" * 32, t=1_900_000_000.0, previous=first, external_digest=True)
         lte = LongTermEvidence.from_dict(second); self.assertEqual(len(lte.records), 2)
         self.assertFalse(lte.records[0]["ephemeral_key"]); self.assertEqual(lte.records[0]["pub"], key[1])
         v = lte.verify(now=1_950_000_000.0, timestamp_trust_fn=lambda r: True, trusted_pubs={key[1]})
@@ -76,9 +76,9 @@ class TestCouncilR2(unittest.TestCase):
         self.assertFalse(lte.verify(now=1_950_000_000.0, timestamp_trust_fn=lambda r: True, trusted_pubs={"00" * 32})["ok"])
         self.assertFalse(lte.verify(now=1_950_000_000.0)["ok"])          # renewal on UNVERIFIED times is not ok
         with self.assertRaises(ValueError):
-            lk.seal_longterm("cd" * 32, previous=first)                     # previous seal over another digest
-        with self.assertRaises(ValueError):                                # label without token
-            lk.seal_longterm("ab" * 32, ts_source="rfc3161")
+            lk.seal_longterm("cd" * 32, previous=first, external_digest=True)   # previous seal over another digest
+        with self.assertRaises(ValueError):                                     # label without token
+            lk.seal_longterm("ab" * 32, ts_source="rfc3161", external_digest=True)
 
     # Sonnet A5 — default policy is NIST IR 8547, never "valid forever"
     def test_default_policy_is_time_bounded(self):

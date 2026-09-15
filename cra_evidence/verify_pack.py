@@ -61,7 +61,10 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex) -> Dict[str, Any]:
     lp = ledger_path or (os.path.join(os.path.dirname(os.path.abspath(path)), os.path.basename(str(pack.get("ledger_file"))))
                          if pack.get("ledger_file") else None)
     anchored = False
-    if lp and os.path.exists(lp):
+    if (ledger_path or log_pubkey_hex) and not (lp and os.path.isfile(lp)):
+        # the caller asked for a chain/tip check by name: a missing ledger is a FAIL, never a silent skip
+        layers.append(_layer("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key given) but not found"))
+    elif lp and os.path.isfile(lp):
         led = Ledger(lp)
         lv = led.verify()
         if not lv["chain_ok"]:
@@ -70,7 +73,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex) -> Dict[str, Any]:
             bound, anchor, anchor_idx, entries = True, False, None, []
             for e in led.entries():
                 entries.append(e)
-                d = e.get("data") or {}
+                d = e.get("data") if isinstance(e.get("data"), dict) else {}
                 if d.get("kind") in RECORD_KINDS:
                     if sha3_hex({k: v for k, v in d.items() if k != "record_sha3"}) != d.get("record_sha3"):
                         bound = False
@@ -91,7 +94,9 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex) -> Dict[str, Any]:
                                  f"declared entries={n} last={str(pack.get('ledger_last_self_hash'))[:12]}…; anchor idx={anchor_idx}"))
             # signed tip: the only thing that sees a truncated TAIL (records after the anchor silently dropped)
             tip_path = lp + ".tip.json"
-            if log_pubkey_hex:
+            if not entries:
+                layers.append(_layer("signed-tip", "FAIL", "ledger has no entries"))
+            elif log_pubkey_hex:
                 if not os.path.exists(tip_path):
                     layers.append(_layer("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"))
                 else:

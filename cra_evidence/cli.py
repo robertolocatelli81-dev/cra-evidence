@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from . import __version__
 from .locker import CRAEvidenceLocker
-from .sbom import sbom_from_cyclonedx, sbom_from_installed
+from .sbom import resolved_components, sbom_from_cyclonedx, sbom_from_installed
 from .signing import keygen, load_key, sign_pack
 from .srp_notice import DryRunDrop, SRPNotice, schema
 from .verify_pack import verify_pack
@@ -27,7 +27,7 @@ def _p(obj: Any) -> None:
 
 def _locker(a) -> CRAEvidenceLocker:
     key = load_key(a.tip_key) if getattr(a, "tip_key", None) else None
-    return CRAEvidenceLocker(a.ledger, a.product, a.version, tip_key=key)
+    return CRAEvidenceLocker(a.ledger, a.product, a.version, tip_key=key, support_period_end=getattr(a, "support_period_end", None))
 
 
 def main(argv: List[str] = None) -> int:
@@ -38,6 +38,7 @@ def main(argv: List[str] = None) -> int:
     def common(s):
         s.add_argument("--ledger", required=True); s.add_argument("--product", required=True); s.add_argument("--version", dest="version", required=True)
         s.add_argument("--tip-key", help="Ed25519 seed file: sign the chain tip after each append (cryptovalid_tip/1)")
+        s.add_argument("--support-period-end", help="ISO-8601 end of the product's support period (retention = 10 years or this, whichever is longer)")
 
     s = sub.add_parser("keygen", help="generate an Ed25519 seed file (0600)"); s.add_argument("path")
     s = sub.add_parser("sbom", help="record an SBOM"); common(s)
@@ -55,8 +56,11 @@ def main(argv: List[str] = None) -> int:
     s.add_argument("--allow-overdue", action="store_true", help="exit 0 even if an applicable deadline is overdue (default: exit 1)")
     s = sub.add_parser("notice", help="build an SRP-aligned Art. 14 notice (dry-run drop file, never submitted)"); common(s)
     s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"]); s.add_argument("--stage", required=True, choices=["early_warning", "notification", "final_report"])
-    s.add_argument("--fields", required=True, help="JSON file with the SRP fields (see `cra schema`)"); s.add_argument("--drop", required=True, help="drop folder")
-    s = sub.add_parser("schema", help="print the SRP field schema for a stream"); s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"])
+    s.add_argument("--fields", required=True, help="JSON file with the SRP fields (see `cra schema --template`)"); s.add_argument("--drop", required=True, help="drop folder")
+    s.add_argument("--previous", help="JSON file with the previous stage's fields: carried-forward fields are copied from it")
+    s.add_argument("--divergence-reason", help="why this notice's awareness differs from the recorded vulnerability event")
+    s = sub.add_parser("schema", help="print the SRP field schema for a stream, or a fillable template for a stage"); s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"])
+    s.add_argument("--template", choices=["early_warning", "notification", "final_report"], help="print {field: \"\"} for the fields of this stage (R/C/O/A), ready for `cra notice --fields`")
     s = sub.add_parser("pack", help="write the evidence pack and anchor it in the ledger"); common(s); s.add_argument("--out", required=True)
     s = sub.add_parser("sign", help="sign a pack (Ed25519 sidecar)"); s.add_argument("pack"); s.add_argument("--key", required=True); s.add_argument("--signer-id", required=True)
     s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp); --tip-key = the sealing identity"); common(s)
@@ -71,6 +75,9 @@ def main(argv: List[str] = None) -> int:
     if a.cmd == "keygen":
         _p(keygen(a.path)); return 0
     if a.cmd == "schema":
+        if a.template:
+            sch = schema(a.stream)
+            _p({k: ("" if spec["format"] not in ("list", "enum-list") else []) for k, spec in sch.items() if spec["stages"][a.template] != "-"}); return 0
         _p({"stream": a.stream, "fields": schema(a.stream)}); return 0
     if a.cmd == "sbom":
         lk = _locker(a)
@@ -80,11 +87,12 @@ def main(argv: List[str] = None) -> int:
             rec = sbom_from_installed(a.product, a.version, a.installed, transitive=a.transitive)
         else:
             p.error("sbom: give --from-cyclonedx or --installed")
-        e = lk.record_sbom(rec); _p({"recorded": e["idx"], "components": len(rec.components), "depth": rec.depth, "floor_met": len(rec.components) > 0})
-        return 0 if rec.components else 1
+        e = lk.record_sbom(rec); n = len(resolved_components(rec))
+        _p({"recorded": e["idx"], "components": len(rec.components), "resolved": n, "depth": rec.depth, "floor_met": e["data"]["sbom_floor_met"]})
+        return 0 if e["data"]["sbom_floor_met"] else 1
     if a.cmd == "vuln":
         lk = _locker(a)
-        source = a.source
+        source, exploited = a.source, a.exploited
         if a.source in ("cisa_kev", "enisa_euvd"):
             if a.assert_source:
                 source = f"asserted:{a.source}"
@@ -96,7 +104,8 @@ def main(argv: List[str] = None) -> int:
                 sig = exploitation_signal([a.id], feed if a.source == "cisa_kev" else None, feed if a.source == "enisa_euvd" else None)
                 if a.id.upper() not in {k.upper() for k in sig["actively_exploited"]}:
                     print(f"{a.id} is NOT in {a.source} today: refusing to record that provenance (use --assert-source)", file=sys.stderr); return 1
-        rec = VulnerabilityRecord(product_id=a.product, vuln_id=a.id, actively_exploited=a.exploited, awareness_utc=a.aware,
+                exploited = True     # confirmed in a known-exploited catalogue: the clock and the provenance cannot diverge
+        rec = VulnerabilityRecord(product_id=a.product, vuln_id=a.id, actively_exploited=exploited, awareness_utc=a.aware,
                                   status=a.status, exploitation_source=source, corrective_available_utc=a.fix_available,
                                   kind=("incident" if a.incident else "vulnerability"), early_warning_sent_utc=a.ew_sent,
                                   notification_sent_utc=a.notified, final_report_sent_utc=a.final_sent)
@@ -106,8 +115,9 @@ def main(argv: List[str] = None) -> int:
         lk = _locker(a)
         with open(a.fields, encoding="utf-8") as f:
             fields = json.load(f)
-        n = SRPNotice(stream=a.stream, stage=a.stage, fields=fields)
-        r = DryRunDrop(a.drop).prepare(n); lk.record_notice(n, r); _p(r)
+        prev = json.load(open(a.previous, encoding="utf-8")) if a.previous else None
+        n = SRPNotice(stream=a.stream, stage=a.stage, fields=fields, previous_fields=prev)
+        r = DryRunDrop(a.drop).prepare(n); lk.record_notice(n, r, divergence_reason=a.divergence_reason); _p(r)
         return 0 if r["complete"] else 1
     if a.cmd == "pack":
         lk = _locker(a); pk = lk.evidence_pack(a.out); _p({"pack": a.out, "pack_sha3": pk["pack_sha3"], "verification": pk["verification"]})
@@ -136,7 +146,7 @@ def main(argv: List[str] = None) -> int:
         if a.ids:
             out["signal"] = exploitation_signal(a.ids, kev, eu)
         _p(out)
-        return 0 if pc["ok"] else 1
+        return 0 if (pc["ok"] and not kev["error"] and not eu["error"]) else 1
     return 2
 
 

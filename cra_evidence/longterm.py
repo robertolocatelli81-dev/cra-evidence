@@ -5,8 +5,9 @@
 Each record signs the evidence digest + the WHOLE previous chain (+ an optional stronger re-hash), so a renewal
 cannot be grafted, reordered or applied to a different digest without breaking every later signature. The
 algorithm registry starts with Ed25519 (the optional `cryptography` dependency); a hybrid ML-DSA-65 + Ed25519 signer can be
-registered by the caller (see `register_algorithm`) — NIST IR 8547 deprecates the pre-quantum algorithms by 2030
-and disallows them by 2035, inside the retention window that starts today, so the seal MUST be renewable.
+registered by the caller (see `register_algorithm`) — NIST IR 8547 (an initial public DRAFT, not a final standard)
+proposes deprecating the quantum-vulnerable signatures after 2030 and disallowing them after 2035, inside the
+retention window that starts today, so the seal MUST be renewable.
 
 Honest scope: with ts_source="asserted" the time is the prover's claim, NOT an objective anchor; pass
 ts_source="rfc3161" (or "ots") only after obtaining a third-party timestamp, and inject `timestamp_trust_fn`
@@ -105,9 +106,13 @@ class LongTermEvidence:
     evidence_digest: str
     records: List[Dict] = field(default_factory=list)
 
-    def _msg(self, prefix_len: int, rehash: str = "", hash_alg: str = DEFAULT_HASH) -> bytes:
-        # a JSON structure, not string concatenation: no separator can be forged from inside a field
-        return bytes.fromhex(_digest(hash_alg, _canon([self.evidence_digest, self.records[:prefix_len], rehash]).encode()))
+    def _msg(self, prefix_len: int, current: Dict, hash_alg: str = DEFAULT_HASH) -> bytes:
+        """Signed message of record `prefix_len`: the digest, EVERY previous record, and the current record's own
+        fields (t, ts_source, token, pub, alg, hash, rehash…) minus its signature — like an ERS archive timestamp
+        covering its own time. Without that, the outer seal's time and time-source could be rewritten freely
+        (council round 3, four minds)."""
+        own = {k: v for k, v in current.items() if k != "sig"}
+        return bytes.fromhex(_digest(hash_alg, _canon([self.evidence_digest, self.records[:prefix_len], own]).encode()))
 
     def seal(self, signer: Signer, t: float, ts_source: str = "asserted", stronger_digest: Optional[str] = None,
              hash_alg: str = DEFAULT_HASH, token_b64: Optional[str] = None) -> Dict:
@@ -117,12 +122,12 @@ class LongTermEvidence:
             raise ValueError(f"ts_source={ts_source!r} needs the timestamp token (token_b64); without it the time is 'asserted'")
         rehash = stronger_digest or ""
         # t is stored as repr(float): Python's repr is the shortest round-trip string, float(repr(x)) == x exactly
-        rec = {"alg": signer.alg, "hash": hash_alg, "t": repr(float(t)), "pub": signer.pub,
-               "sig": signer.sign(self._msg(len(self.records), rehash, hash_alg)), "ts_source": ts_source, "rehash": rehash,
-               "ephemeral_key": signer.ephemeral}
+        rec = {"alg": signer.alg, "hash": hash_alg, "t": repr(float(t)), "pub": signer.pub, "ts_source": ts_source,
+               "rehash": rehash, "ephemeral_key": signer.ephemeral}
         if token_b64:
             rec["token_b64"] = token_b64
             rec["token_sha3"] = hashlib.sha3_256(token_b64.encode()).hexdigest()
+        rec["sig"] = signer.sign(self._msg(len(self.records), rec, hash_alg))
         self.records.append(rec)
         return rec
 
@@ -134,6 +139,15 @@ class LongTermEvidence:
         policy = policy or AlgorithmPolicy.nist_ir_8547()
         if not self.records:
             return {"ok": False, "reasons": ["empty chain (no archive timestamp)"], "temporal_trust": "n/a"}
+        for i, rec in enumerate(self.records):   # shape first: a malformed record is a reason, never a KeyError
+            if not isinstance(rec, dict) or not all(isinstance(rec.get(k), str) for k in ("alg", "pub", "sig", "t")):
+                return {"ok": False, "reasons": [f"record {i}: malformed (alg/pub/sig/t must be strings)"], "temporal_trust": "n/a",
+                        "chain_len": len(self.records)}
+            try:
+                float(rec["t"])
+            except ValueError:
+                return {"ok": False, "reasons": [f"record {i}: time {rec['t']!r} is not numeric"], "temporal_trust": "n/a",
+                        "chain_len": len(self.records)}
         if trusted_pubs is not None and self.records[0].get("pub") not in trusted_pubs:
             reasons.append("record 0: sealing key not in trusted_pubs (identity NOT established)")
         if any(r.get("ephemeral_key") for r in self.records):
@@ -146,7 +160,7 @@ class LongTermEvidence:
             if rec.get("hash", DEFAULT_HASH) not in HASHES:
                 reasons.append(f"record {i}: unknown hash {rec.get('hash')}")
                 continue
-            if not REGISTRY[rec["alg"]]["verify"](rec["pub"], rec["sig"], self._msg(i, rec.get("rehash", ""), rec.get("hash", DEFAULT_HASH))):
+            if not REGISTRY[rec["alg"]]["verify"](rec["pub"], rec["sig"], self._msg(i, rec, rec.get("hash", DEFAULT_HASH))):
                 reasons.append(f"record {i}: invalid signature (chain tampered)")
         if timestamp_trust_fn is not None:
             attested = True
@@ -171,7 +185,10 @@ class LongTermEvidence:
         for i in range(last):
             if not policy.trusted_at(self.records[i]["alg"], times[i + 1]):
                 reasons.append(f"record {i} ({self.records[i]['alg']}) renewed too late (algorithm already broken)")
-        unpoliced = sorted({r["alg"] for r in self.records if r["alg"] not in policy.broken_after})
+            if not policy.trusted_at(self.records[i].get("hash", DEFAULT_HASH), times[i + 1]):
+                reasons.append(f"record {i} (hash {self.records[i].get('hash', DEFAULT_HASH)}) renewed too late (hash already broken)")
+        unpoliced = sorted({r["alg"] for r in self.records if r["alg"] not in policy.broken_after} |
+                           {r.get("hash", DEFAULT_HASH) for r in self.records if r.get("hash", DEFAULT_HASH) not in policy.broken_after})
         return {"ok": not reasons, "reasons": reasons, "chain_len": len(self.records),
                 "algorithms": [r["alg"] for r in self.records], "temporal_trust": temporal,
                 "policy_note": ("every algorithm has an expiry in the policy" if not unpoliced else
@@ -180,10 +197,12 @@ class LongTermEvidence:
     def renewal_due(self, now: float, policy: Optional[AlgorithmPolicy] = None, margin: float = 0.0) -> Dict:
         policy = policy or AlgorithmPolicy.nist_ir_8547()
         outer = self.records[-1]["alg"] if self.records else None
-        b = policy.broken_after.get(outer) if outer else None
-        if b is None:
-            return {"due": False, "outer_alg": outer, "reason": "outer algorithm not marked broken"}
-        return {"due": bool((now + margin) >= b), "outer_alg": outer, "breaks_at": b}
+        outer_hash = self.records[-1].get("hash", DEFAULT_HASH) if self.records else None
+        bs = [b for b in (policy.broken_after.get(outer) if outer else None, policy.broken_after.get(outer_hash) if outer_hash else None) if b is not None]
+        if not bs:
+            return {"due": False, "outer_alg": outer, "outer_hash": outer_hash, "reason": "neither the outer signature nor its hash has an expiry in the policy: renewal horizon UNKNOWN"}
+        b = min(bs)
+        return {"due": bool((now + margin) >= b), "outer_alg": outer, "outer_hash": outer_hash, "breaks_at": b}
 
     def to_dict(self) -> Dict:
         return {"evidence_digest": self.evidence_digest, "records": self.records, "format": "CRA-LTA-1",

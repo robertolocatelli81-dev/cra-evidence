@@ -37,14 +37,16 @@ cra sbom  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.c
 cra vuln  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key \
           --id CVE-2026-32202 --aware 2026-09-12T08:00:00Z --exploited --source cisa_kev   # checked against KEV now
 cra vuln  ... --ew-sent 2026-09-12T20:00:00Z --notified 2026-09-14T09:00:00Z                # exit 1 while a deadline is overdue
-cra schema --stream vulnerability > fields.json                              # fill the SRP fields
+cra schema --stream vulnerability --template early_warning > ew.json         # fillable template for that stage
 cra notice --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key \
-          --stage early_warning --fields fields.json --drop ./srp_drop         # exit 1 while required fields are missing
-cra pack  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --out cra_pack.json
+          --stage early_warning --fields ew.json --drop ./srp_drop             # exit 1 while required fields are missing
+cra notice ... --stage notification --fields n72.json --previous ew.json ...  # carried-forward fields copied from the previous stage
+cra pack  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --out cra_pack.json \
+          --support-period-end 2031-12-31T00:00:00Z                           # retention = 10 years or support period, whichever is longer
 cra sign  cra_pack.json --key ~/.cra/log.key --signer-id myapp-ci
 cra seal  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --pack-sha3 <pack_sha3>
 cra verify cra_pack.json --trust-store trust.json --log-pubkey <hex>          # exit 0 only if authenticity is not FAIL
-cra feeds CVE-2026-32202                                                     # OSV positive control + KEV/EUVD signal
+cra feeds CVE-2026-32202                                                     # OSV positive control (with CVE alias) + KEV/EUVD signal; exit 1 if any feed fails
 ```
 
 `cra verify` reports layers (pack JSON, kind, declared limits, pack digest, the pack's own verification snapshot,
@@ -69,9 +71,15 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 - Standard documents travel with the record: a CycloneDX VEX, CSAF 2.0 or OpenVEX document is embedded verbatim and
   content-bound next to the vulnerability event, so the vendor-neutral exchange format is what the auditor sees.
 - OSV pagination is followed and batches are chunked; a truncated answer is an explicit error, never a shorter list.
-- Pre-publication review by five models (two providers) in two rounds, plus the author: 31 findings turned into
-  tests (`tests/test_council_r1.py`, `tests/test_council_r2.py`), each red before its fix; the legal points were
-  re-read on EUR-Lex and ENISA before the fix.
+  The batch endpoint returns condensed records (id + modified — verified live), so aliases (GHSA ↔ CVE ↔ PYSEC) are
+  resolved per id and the positive control passes only when a CVE alias comes back: KEV and EUVD key on CVEs.
+- A `--source cisa_kev|enisa_euvd` provenance is stored only after the catalogue confirms the id now (or is labelled
+  `asserted:` on request), and a confirmed catalogue hit sets the exploitation flag: provenance and clock cannot diverge.
+- The seal signs its own time, time-source and token together with the whole previous chain; the verifier's policy
+  defaults to the NIST IR 8547 draft dates for both the signature and the hash, and says when a renewal is due.
+- Pre-publication review by five models (two providers) in three rounds, plus the author: 44 findings turned into
+  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; the legal points were re-read on EUR-Lex
+  and ENISA, and the OSV API behaviour checked live, before the fix.
 - The SRP schema is the 39-field ENISA glossary, stage by stage, derived by a test from the dated snapshot vendored
   in `spec/sources/` (`spec/SRP_FIELDS.md`); "complete" is never declared by silence — the payload lists what is
   missing; a notice cannot carry an awareness instant different from the recorded vulnerability event without a

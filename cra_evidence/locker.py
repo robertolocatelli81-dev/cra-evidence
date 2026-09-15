@@ -10,6 +10,7 @@ self-asserted seal is NOT an objective time anchor (RFC 3161 / OpenTimestamps ar
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from dataclasses import asdict
@@ -20,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .canonical import floatfree, sha3_hex
 from .ledger import Ledger
 from .longterm import AlgorithmPolicy, LongTermEvidence, Signer
-from .sbom import SBOMRecord
+from .sbom import SBOMRecord, resolved_components
 from .srp_notice import SRPNotice
 from .vuln import VulnerabilityRecord, parse_utc
 
@@ -40,6 +41,16 @@ HONEST_SCOPE = ("firm-side evidence locker: proves that these records existed, i
 RECORD_KINDS = ("cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor")
 
 
+def _bind(entry: Dict[str, Any]) -> Dict[str, Any]:
+    entry = floatfree(entry)
+    entry["record_sha3"] = sha3_hex(entry)      # content-binding: recomputed by verify()
+    return entry
+
+
+def _present(v: Any) -> bool:
+    return v is not None and str(v).strip() != ""
+
+
 class CRAEvidenceLocker:
     def __init__(self, ledger_path: str, product_id: str, product_version: str, tip_key: Optional[Tuple[Any, str]] = None,
                  support_period_end: Optional[str] = None, allow_unlocked: bool = False):
@@ -54,22 +65,24 @@ class CRAEvidenceLocker:
         self._lock = threading.Lock()
 
     def _append(self, entry: Dict[str, Any]) -> Dict[str, Any]:
-        entry = floatfree(entry)
-        entry["record_sha3"] = sha3_hex(entry)      # content-binding: recomputed by verify()
         with self._lock:
-            return self.ledger.append(entry)
+            return self.ledger.append(_bind(entry))
 
     def record_sbom(self, sbom: SBOMRecord) -> Dict[str, Any]:
         cdx = sbom.to_cyclonedx_min()
+        resolved = len(resolved_components(sbom))
         return self._append({"kind": "cra_sbom", "product_id": self.product_id, "product_version": self.product_version,
-                             "sbom": cdx, "component_count": len(cdx["components"]),
-                             # conservative by design: zero listed components never EVIDENCES the Annex I floor, even for a
-                             # product that truly has no dependencies (state that in the SBOM's note instead)
-                             "sbom_floor_met": len(cdx["components"]) > 0})
+                             "sbom": cdx, "component_count": len(cdx["components"]), "resolved_components": resolved,
+                             # conservative by design: zero RESOLVED components (a declared-but-NOT-INSTALLED dependency
+                             # is not one) never EVIDENCES the Annex I floor, even for a product that truly has no
+                             # dependencies (state that in the SBOM's note instead)
+                             "sbom_floor_met": resolved > 0})
 
     def record_vulnerability(self, rec: VulnerabilityRecord, attachments: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """attachments: standard documents embedded content-bound, e.g. [{"format": "cyclonedx-vex", "document": {...}}]
         (formats: ATTACHMENT_FORMATS) — what Dependency-Track/Snyk exchange natively, kept verbatim next to the record."""
+        if rec.product_id != self.product_id:
+            raise ValueError(f"record is for product {rec.product_id!r}, this locker is for {self.product_id!r}")
         att = []
         for a in attachments or []:
             fmt, doc = a.get("format"), a.get("document")
@@ -89,15 +102,22 @@ class CRAEvidenceLocker:
         clock cannot be moved in a notice without touching the record that started it."""
         bound_to, aw = [], notice.fields.get("awareness_datetime_utc")
         ids = {str(notice.fields.get(k)).strip().upper() for k in ("cve_id", "euvd_id") if notice.fields.get(k)}
+        latest: Dict[str, Dict[str, Any]] = {}     # the LAST record per vuln_id is the current legal state
         if ids:
             for e in self.ledger.entries():
                 d = e.get("data") if isinstance(e, dict) else None
-                if isinstance(d, dict) and d.get("kind") == "cra_vuln" and str(d.get("vuln_id", "")).upper() in ids \
-                        and d.get("product_id") == self.product_id:
-                    bound_to.append(d.get("record_id"))
-                    if aw and parse_utc(str(aw)) != parse_utc(str(d.get("awareness_utc"))) and not divergence_reason:
-                        raise ValueError(f"awareness_datetime_utc {aw} differs from the recorded awareness {d.get('awareness_utc')} "
-                                         f"of {d.get('vuln_id')} (record {d.get('record_id')}): give divergence_reason or fix the notice")
+                if isinstance(d, dict) and d.get("kind") == "cra_vuln" and d.get("product_id") == self.product_id:
+                    vid = str(d.get("vuln_id", "")).strip().upper()
+                    if vid in ids:
+                        latest[vid] = d
+            for d in latest.values():
+                bound_to.append(d.get("record_id"))
+                if not _present(aw):
+                    raise ValueError(f"awareness_datetime_utc is absent but the notice refers to {d.get('vuln_id')}: carry the recorded "
+                                     f"awareness {d.get('awareness_utc')} (the legal clock cannot be dropped by omission)")
+                if parse_utc(str(aw)) != parse_utc(str(d.get("awareness_utc"))) and not divergence_reason:
+                    raise ValueError(f"awareness_datetime_utc {aw} differs from the recorded awareness {d.get('awareness_utc')} "
+                                     f"of {d.get('vuln_id')} (record {d.get('record_id')}): give divergence_reason or fix the notice")
         return self._append({"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
                              "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
                              "complete": notice.complete(), "missing_required": notice.missing(),
@@ -117,7 +137,7 @@ class CRAEvidenceLocker:
                 body = {k: v for k, v in d.items() if k != "record_sha3"}
                 if sha3_hex(body) != d.get("record_sha3"):
                     mismatched += 1
-        except (ValueError, TypeError, AttributeError) as ex:   # a verdict, never a crash (fail-closed)
+        except (ValueError, TypeError, AttributeError, RecursionError) as ex:   # a verdict, never a crash (fail-closed)
             mismatched += 1
             r["failures"] = (r.get("failures") or []) + [f"record scan aborted: {ex}"]
         r["records_checked"] = checked
@@ -129,6 +149,10 @@ class CRAEvidenceLocker:
 
     # ── evidence pack ─────────────────────────────────────────────────────
     def evidence_pack(self, out_path: str) -> Dict[str, Any]:
+        with self._lock:      # snapshot, pack and anchor must be one step: no record may slip in between
+            return self._evidence_pack_locked(out_path)
+
+    def _evidence_pack_locked(self, out_path: str) -> Dict[str, Any]:
         v = self.verify()
         if v["entries"] == 0:
             raise ValueError("empty ledger: a pack over zero records would prove nothing (record an SBOM or an event first)")
@@ -138,7 +162,8 @@ class CRAEvidenceLocker:
             raise ValueError("honest_scope must declare a limit")
         counts: Dict[str, int] = {}
         for e in self.ledger.entries():
-            k = (e.get("data") or {}).get("kind")
+            d = e.get("data") if isinstance(e, dict) else None
+            k = d.get("kind") if isinstance(d, dict) else None
             if k:
                 counts[k] = counts.get(k, 0) + 1
         pack = {"kind": PACK_KIND, "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -149,17 +174,31 @@ class CRAEvidenceLocker:
                 "ledger_file": Path(self.ledger.path).name, "ledger_entries": v["entries"], "ledger_last_self_hash": v["last_self_hash"],
                 "record_counts": counts, "verification": {k: v[k] for k in ("chain_ok", "entries", "records_checked", "record_digests_bound")}}
         pack["pack_sha3"] = sha3_hex(pack)
-        Path(out_path).write_text(json.dumps(pack, indent=1, sort_keys=True), encoding="utf-8")
-        self._append({"kind": "cra_pack_anchor", "anchored_pack_sha3": pack["pack_sha3"], "pack_file": Path(out_path).name})
+        tmp = Path(str(out_path) + ".tmp")
+        tmp.write_text(json.dumps(pack, indent=1, sort_keys=True), encoding="utf-8")
+        try:
+            self.ledger.append(_bind({"kind": "cra_pack_anchor", "anchored_pack_sha3": pack["pack_sha3"], "pack_file": Path(out_path).name}))
+        except Exception:
+            tmp.unlink(missing_ok=True)      # never leave an un-anchored pack on disk
+            raise
+        os.replace(tmp, out_path)             # the pack appears only once its anchor is in the chain
         return pack
 
     def seal_longterm(self, pack_sha3: str, alg: str = "ed25519", ts_source: str = "asserted",
                       t: Optional[float] = None, previous: Optional[Dict[str, Any]] = None,
-                      key: Optional[Tuple[Any, str]] = None, token_b64: Optional[str] = None) -> Dict[str, Any]:
+                      key: Optional[Tuple[Any, str]] = None, token_b64: Optional[str] = None,
+                      external_digest: bool = False) -> Dict[str, Any]:
         """Seal (or RENEW, with `previous` = the last seal dict from the ledger) the pack digest. The signing key is the
         locker's log key by default (identity = the key that signs the chain tip); with no key at all the seal is
         ephemeral and says so. ts_source != "asserted" requires the token. Nothing here VERIFIES a time token: the
         record carries it for the verifier's temporal oracle."""
+        if not re.fullmatch(r"[0-9a-f]{64}", str(pack_sha3)):
+            raise ValueError("pack_sha3 must be a 64-hex SHA3-256 digest")
+        if not external_digest:   # by default only a pack ANCHORED in this ledger can be sealed (a seal over nothing is noise)
+            anchored = any(isinstance(e, dict) and isinstance(e.get("data"), dict) and e["data"].get("kind") == "cra_pack_anchor"
+                           and e["data"].get("anchored_pack_sha3") == pack_sha3 for e in self.ledger.entries())
+            if not anchored:
+                raise ValueError("digest is not anchored in this ledger (write the pack first, or pass external_digest=True for a foreign digest)")
         lte = LongTermEvidence.from_dict(previous) if previous else LongTermEvidence(evidence_digest=pack_sha3)
         if lte.evidence_digest != pack_sha3:
             raise ValueError("previous seal is over a different digest")
