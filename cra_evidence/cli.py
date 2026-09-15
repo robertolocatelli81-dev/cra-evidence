@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from . import __version__
 from .locker import CRAEvidenceLocker
-from .sbom import resolved_components, sbom_from_cyclonedx, sbom_from_installed
+from .sbom import resolved_components, sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx
 from .signing import keygen, load_key, sign_pack
 from .srp_notice import DryRunDrop, SRPNotice, schema
 from .verify_pack import verify_pack
@@ -43,6 +43,7 @@ def main(argv: List[str] = None) -> int:
     s = sub.add_parser("keygen", help="generate an Ed25519 seed file (0600)"); s.add_argument("path")
     s = sub.add_parser("sbom", help="record an SBOM"); common(s)
     s.add_argument("--from-cyclonedx", help="ingest a CycloneDX JSON (Syft, Trivy, cdxgen…)")
+    s.add_argument("--from-spdx", help="ingest an SPDX 2.2/2.3 JSON or SPDX 3.0 JSON-LD document (Syft, Yocto, Parlay…)")
     s.add_argument("--installed", nargs="*", help="top-level PyPI names resolved from this environment"); s.add_argument("--transitive", action="store_true")
     s = sub.add_parser("vuln", help="record a vulnerability-handling event"); common(s)
     s.add_argument("--id", required=True); s.add_argument("--aware", required=True, help="awareness instant, ISO-8601 UTC")
@@ -84,12 +85,16 @@ def main(argv: List[str] = None) -> int:
         _p({"stream": a.stream, "fields": schema(a.stream)}); return 0
     if a.cmd == "sbom":
         lk = _locker(a)
+        if sum(1 for x in (a.from_cyclonedx, a.from_spdx, a.installed is not None) if x) > 1:
+            p.error("sbom: --from-cyclonedx, --from-spdx and --installed are mutually exclusive")
         if a.from_cyclonedx:
             rec = sbom_from_cyclonedx(a.from_cyclonedx, a.product, a.version)
+        elif a.from_spdx:
+            rec = sbom_from_spdx(a.from_spdx, a.product, a.version)
         elif a.installed is not None:
             rec = sbom_from_installed(a.product, a.version, a.installed, transitive=a.transitive)
         else:
-            p.error("sbom: give --from-cyclonedx or --installed")
+            p.error("sbom: give --from-cyclonedx, --from-spdx or --installed")
         e = lk.record_sbom(rec); n = len(resolved_components(rec))
         _p({"recorded": e["idx"], "components": len(rec.components), "resolved": n, "depth": rec.depth, "floor_met": e["data"]["sbom_floor_met"]})
         return 0 if e["data"]["sbom_floor_met"] else 1

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — 2026-09-15
+SPDX ingest: `sbom_from_spdx()` / `cra sbom --from-spdx` read SPDX 2.2/2.3 JSON (`packages`, purl external refs,
+SHA-256 checksums, supplier/originator, concluded→declared licence) and SPDX 3.0 JSON-LD (`software_Package`,
+`software_packageUrl`, `verifiedUsing` Hash, `suppliedBy` resolved to the agent, licences via hasConcludedLicense /
+hasDeclaredLicense relationships); the product described by the document is not a component; `NOASSERTION` versions
+are not resolved and never meet the Annex I floor. Field names checked on the official spdx/spdx-examples documents,
+vendored as fixtures. Suggested by the Gemini Pro competitor review of 15/09/2026 (Yocto and other industrial
+generators emit SPDX natively).
+
 ## 0.1.1 — 2026-09-15
 Independent verifiers in JavaScript (Node, no dependencies), Go (standard library) and Rust (pure-Rust JSON/SHA-256/
 SHA3-256 + ed25519-dalek) with the same CLI and verdict as `cra verify`; differential oracle on 26 intact/tampered

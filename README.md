@@ -33,7 +33,7 @@ pip install ".[sign]"
 
 ```
 cra keygen ~/.cra/log.key                                                    # once
-cra sbom  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --from-cyclonedx syft.cdx.json
+cra sbom  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --from-cyclonedx syft.cdx.json   # or --from-spdx sbom.spdx.json
 cra vuln  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key \
           --id CVE-2026-32202 --aware 2026-09-12T08:00:00Z --exploited --source cisa_kev   # checked against KEV now
 cra vuln  ... --ew-sent 2026-09-12T20:00:00Z --notified 2026-09-14T09:00:00Z                # exit 1 while a deadline is overdue
@@ -91,8 +91,8 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 
 ## Where it stands against the field (read on 15/09/2026)
 
-Syft/Trivy/cdxgen generate better SBOMs than any Python-only floor — so this tool ingests their CycloneDX instead of
-competing with them. Dependency-Track, Mend, Snyk, Cloudsmith, Anchore track vulnerabilities and licences at scale
+Syft/Trivy/cdxgen generate better SBOMs than any Python-only floor — so this tool ingests their CycloneDX or SPDX
+instead of competing with them. Dependency-Track, Mend, Snyk, Cloudsmith, Anchore track vulnerabilities and licences at scale
 — this tool does not replace them; their VEX/CSAF documents can be embedded verbatim, content-bound, next to the
 event. Sigstore/cosign, in-toto and SLSA already give signed, tamper-evident, offline-verifiable attestations of
 artefacts and SBOMs. Dedicated CRA products (e.g. "CRA Evidence") draft the notices and track the deadlines as a
