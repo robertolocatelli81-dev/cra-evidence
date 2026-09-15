@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 — 2026-09-15
+Independent verifiers in JavaScript (Node, no dependencies), Go (standard library) and Rust (pure-Rust JSON/SHA-256/
+SHA3-256 + ed25519-dalek) with the same CLI and verdict as `cra verify`; differential oracle on 26 intact/tampered
+fixtures (0 divergences), required in CI. `cra sign --aws-kms-key-id`: Ed25519 signing in AWS KMS (SigV4, standard
+library; derivation validated on the official AWS vector). Release packs signed with the author's KMS key; trust
+store published with each release. Clean-clone bench: 5 passes, 7/7 suites (67 tests) each.
+
 ## 0.1.0 — 2026-09-15
 First public release. SBOM records (schema-valid CycloneDX 1.6 subset; ingest of any CycloneDX; VEX/CSAF documents
 embedded content-bound), Art. 14 clock on recorded submission instants (vulnerabilities and severe incidents; calendar
