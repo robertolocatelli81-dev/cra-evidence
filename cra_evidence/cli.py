@@ -62,7 +62,10 @@ def main(argv: List[str] = None) -> int:
     s = sub.add_parser("schema", help="print the SRP field schema for a stream, or a fillable template for a stage"); s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"])
     s.add_argument("--template", choices=["early_warning", "notification", "final_report"], help="print {field: \"\"} for the fields of this stage (R/C/O/A), ready for `cra notice --fields`")
     s = sub.add_parser("pack", help="write the evidence pack and anchor it in the ledger"); common(s); s.add_argument("--out", required=True)
-    s = sub.add_parser("sign", help="sign a pack (Ed25519 sidecar)"); s.add_argument("pack"); s.add_argument("--key", required=True); s.add_argument("--signer-id", required=True)
+    s = sub.add_parser("sign", help="sign a pack (Ed25519 sidecar) with a seed file or an AWS KMS Ed25519 key (the key never leaves the HSM)"); s.add_argument("pack")
+    s.add_argument("--key", help="Ed25519 seed file"); s.add_argument("--signer-id", required=True)
+    s.add_argument("--aws-kms-key-id", help="KMS key id/ARN (key spec ECC_NIST_EDWARDS25519); credentials from AWS_* env or --aws-creds-file")
+    s.add_argument("--aws-region"); s.add_argument("--aws-creds-file", help="KEY=VALUE file with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY [/ AWS_SESSION_TOKEN]")
     s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp); --tip-key = the sealing identity"); common(s)
     s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted"); s.add_argument("--token-b64", help="RFC 3161 / OTS token (required when --ts-source is not 'asserted')")
     s.add_argument("--renew", help="JSON file with the previous seal (lte dict) to extend the chain")
@@ -123,6 +126,15 @@ def main(argv: List[str] = None) -> int:
         lk = _locker(a); pk = lk.evidence_pack(a.out); _p({"pack": a.out, "pack_sha3": pk["pack_sha3"], "verification": pk["verification"]})
         return 0 if pk["verification"]["chain_ok"] else 1
     if a.cmd == "sign":
+        if a.aws_kms_key_id:
+            from .kms import KMSSigner, load_creds_file
+            if not a.aws_region:
+                p.error("sign: --aws-region is required with --aws-kms-key-id")
+            creds = load_creds_file(a.aws_creds_file) if a.aws_creds_file else {}
+            signer = KMSSigner(a.aws_kms_key_id, a.aws_region, creds.get("AWS_ACCESS_KEY_ID"), creds.get("AWS_SECRET_ACCESS_KEY"), creds.get("AWS_SESSION_TOKEN"))
+            r = sign_pack(a.pack, signer.as_key(), a.signer_id); r["public_key_hex"] = signer.public_key_hex; r["backend"] = "aws-kms"; _p(r); return 0
+        if not a.key:
+            p.error("sign: give --key or --aws-kms-key-id")
         _p(sign_pack(a.pack, load_key(a.key), a.signer_id)); return 0
     if a.cmd == "seal":
         lk = _locker(a)

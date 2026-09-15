@@ -111,6 +111,21 @@ registry is pluggable (a hybrid ML-DSA-65 signer plugs in with three functions) 
 named per record and replaceable too. A time token (RFC 3161 / OpenTimestamps) is stored with a seal when you have
 one; this tool does not verify it — your verifier's temporal oracle does.
 
+## Independent verifiers (JavaScript, Go, Rust)
+
+`verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
+(standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
+command line and the same verdict, plus a differential oracle that CI runs on 26 intact and tampered fixtures: the
+four verifiers must agree on every one (measured 15/09/2026: 0 divergences). An auditor can therefore verify a pack,
+its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
+
+## Signing with AWS KMS
+
+`cra sign pack.json --signer-id <id> --aws-kms-key-id <id> --aws-region <region>` signs the sidecar with an Ed25519
+key held in AWS KMS (key spec ECC_NIST_EDWARDS25519): the private key never leaves the HSM, the request is SigV4 over
+HTTPS with the standard library only, and the public key goes into your trust store for `trusted-signed`. The
+release packs of this repository are signed that way.
+
 ## Licence
 
 AGPL-3.0-or-later for this repository; a commercial licence of the same code is available from the author for

@@ -8,3 +8,5 @@ build/
 *.pem
 .pytest_cache/
 exports/
+verifiers/rust/target/
+verifiers/rust/Cargo.lock

@@ -1,0 +1,13 @@
+[package]
+name = "cra-verify"
+version = "0.1.0"
+edition = "2021"
+description = "Independent Rust verifier of a cra-evidence pack: strict JSON + canonical encoder + SHA-256/SHA3-256 are pure-Rust (from cryptovalid's verifier); Ed25519 via ed25519-dalek."
+license = "AGPL-3.0-or-later"
+
+[[bin]]
+name = "cra-verify"
+path = "src/main.rs"
+
+[dependencies]
+ed25519-dalek = "2"
