@@ -383,17 +383,24 @@ func ifs(c bool, a, b string) string {
 func main() {
 	var pack, ledger, trustFile, key string
 	args := os.Args[1:]
+	next := func(i int) string { // a flag without its value is a usage error, never a panic
+		if i+1 >= len(args) {
+			fmt.Fprintln(os.Stderr, "usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex]")
+			os.Exit(2)
+		}
+		return args[i+1]
+	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--ledger":
+			ledger = next(i)
 			i++
-			ledger = args[i]
 		case "--trust-store":
+			trustFile = next(i)
 			i++
-			trustFile = args[i]
 		case "--log-pubkey":
+			key = next(i)
 			i++
-			key = args[i]
 		default:
 			pack = args[i]
 		}
