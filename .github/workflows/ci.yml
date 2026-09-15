@@ -1,0 +1,43 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (with signing extra) + the INDEPENDENT cryptovalid verifier for the interop test
+        run: |
+          pip install ".[sign]"
+          pip install https://github.com/robertolocatelli81-dev/cryptovalid-opencore/releases/download/v0.11.4/cryptovalid_opencore-0.11.4-py3-none-any.whl
+      - name: Unit tests (every suite; interop against cryptovalid runs because the wheel is installed)
+        run: |
+          for t in tests/test_*.py; do echo "== $t"; python "$t"; done
+      - name: Gate — a tampered pack MUST fail, an intact one MUST pass (exit codes)
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, sys, tempfile
+          d = tempfile.mkdtemp(); led = os.path.join(d, "l.jsonl"); pack = os.path.join(d, "p.json")
+          base = ["python", "-m", "cra_evidence.cli"]
+          c = base + ["sbom", "--ledger", led, "--product", "p", "--version", "1", "--installed", "pip"]
+          assert subprocess.run(c).returncode == 0
+          assert subprocess.run(base + ["pack", "--ledger", led, "--product", "p", "--version", "1", "--out", pack]).returncode == 0
+          assert subprocess.run(base + ["verify", pack]).returncode == 0, "intact pack must PASS"
+          p = json.load(open(pack)); p["product_id"] = "x"; json.dump(p, open(pack, "w"))
+          assert subprocess.run(base + ["verify", pack]).returncode != 0, "tampered pack must FAIL"
+          print("gate ok")
+          PY
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: gitleaks (no secrets in history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

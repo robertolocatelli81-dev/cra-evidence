@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/
+*.key
+*.seed
+*.pem
+.pytest_cache/
+exports/

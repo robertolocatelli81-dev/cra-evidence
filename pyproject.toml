@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cra-evidence"
+version = "0.1.0"
+description = "Firm-side, offline-verifiable evidence for the EU Cyber Resilience Act: SBOM records, the Art. 14 clock, SRP-aligned notices, a 10-year crypto-agile seal — in the cryptovalid ledger profile"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "AGPL-3.0-or-later"}
+authors = [{name = "Roberto Locatelli"}]
+keywords = ["cyber-resilience-act", "CRA", "SBOM", "CycloneDX", "vulnerability-reporting", "ENISA", "evidence", "audit", "hash-chain"]
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+               "Topic :: Security", "Intended Audience :: Developers", "Operating System :: OS Independent"]
+dependencies = []
+
+[project.optional-dependencies]
+sign = ["cryptography>=41"]
+
+[project.scripts]
+cra = "cra_evidence.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/robertolocatelli81-dev/cra-evidence"
+
+[tool.setuptools]
+packages = ["cra_evidence"]
