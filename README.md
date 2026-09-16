@@ -111,7 +111,13 @@ registry is pluggable (a hybrid ML-DSA-65 signer plugs in with three functions) 
 named per record and replaceable too. A time token (RFC 3161 / OpenTimestamps) is stored with a seal when you have
 one; this tool does not verify it — your verifier's temporal oracle does.
 
-## Independent verifiers (JavaScript, Go, Rust)
+## Independent verifiers (JavaScript, Go, Rust — and a JDK-only Java verifier for the ledger)
+
+The ledger inside every pack follows the cryptovalid profile, so it can also be re-verified by cryptovalid's
+single-file Java verifier (`verifiers/java/CvVerify.java` in cryptovalid-opencore ≥ 0.13.0, JDK standard library
+only: hash chain, Ed25519 and — from JDK 24 — ML-DSA-65 signatures, signed chain tip). For a firm whose toolchain is
+the JVM this means the CRA evidence is checkable with nothing but a JDK; the pack layers above the ledger (sidecar
+signature, trust store, seal) are checked by the four verifiers of this repository.
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
