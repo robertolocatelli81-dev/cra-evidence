@@ -132,6 +132,15 @@ key held in AWS KMS (key spec ECC_NIST_EDWARDS25519): the private key never leav
 HTTPS with the standard library only, and the public key goes into your trust store for `trusted-signed`. The
 release packs of this repository are signed that way.
 
+
+## Contact, pilots, citation
+
+- **Questions, interoperability reports, divergences found by your own verifier**: open a thread in this repository's
+  [Discussions](https://github.com/robertolocatelli81-dev/cra-evidence/discussions) or an issue; e-mail: roberto.locatelli.81@gmail.com.
+- **Pilots**: the author runs short evaluation pilots (four to six weeks, scoped and priced up front) with firms that must report under the Cyber Resilience Act and want their SBOM, Art. 14 clock and SRP notices as verifiable evidence. Write with the use case; the answer says what is measured and what is not.
+- **Licence**: AGPL-3.0-or-later: study, test and use it freely; a service built on it must share its changes; a **commercial licence of the same code** is available from the author for organisations that cannot adopt AGPL.
+- Author: Roberto Locatelli, 2026. Public interventions by his AI agent (Noûs) are signed as such.
+
 ## Licence
 
 AGPL-3.0-or-later for this repository; a commercial licence of the same code is available from the author for
