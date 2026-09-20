@@ -185,8 +185,8 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
         let (mut prev, mut n) = (GENESIS.to_string(), 0i64);
         for line in text.split('\n') {
             let line = line.strip_suffix('\r').unwrap_or(line);   // exactly one terminator; a run of \r is content and counts
+            if line.len() > MAX_LINE_BYTES { failures.push(format!("entry {n}: line exceeds {MAX_LINE_BYTES} bytes")); break; }   // bound BEFORE the blank test
             if line.trim_matches(|c| c == ' ' || c == '\t').is_empty() { continue; }   // blank = ASCII space/tab only
-            if line.len() > MAX_LINE_BYTES { failures.push(format!("entry {n}: line exceeds {MAX_LINE_BYTES} bytes")); break; }
             let e = match parse_obj(line) { Ok(o) => o, Err(err) => { failures.push(format!("entry {n}: unparsable: {err}")); break; } };
             if gi(&e, "idx") != Some(n) { failures.push(format!("entry {n}: idx not sequential")); }
             if gs(&e, "prev_hash") != Some(prev.as_str()) { failures.push(format!("entry {n}: prev_hash does not link")); }
@@ -273,7 +273,10 @@ fn check_tip(count: i64, first: &str, last: &str, tip_path: &str, pub_hex: &str)
 
 fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str, trust: Option<&BTreeMap<String, Json>>) -> (String, String, bool) {
     let sp = format!("{pack_path}.sig.json");
-    if !Path::new(&sp).exists() && std::fs::symlink_metadata(&sp).is_err() { return ("SKIP".into(), "pack not signed".into(), false); }   // SKIP only when there is NO sidecar
+    if let Err(e) = std::fs::symlink_metadata(&sp) {   // one rule in the four: ENOENT/ENOTDIR = no sidecar; any other lstat error is never "not signed"
+        if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(20) { return ("SKIP".into(), "pack not signed".into(), false); }
+        return ("FAIL".into(), format!("sidecar path unusable ({e})"), false);
+    }
     let raw = match std::fs::read_to_string(&sp) { Ok(r) => r, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
     let side = match parse_obj(&raw) { Ok(o) => o, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
     let dg = sha3_of(pack, "pack_sha3");

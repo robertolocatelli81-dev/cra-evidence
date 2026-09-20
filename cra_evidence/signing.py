@@ -158,8 +158,12 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
     """PASS / FAIL / SKIP. Content-binding first (digest recomputed), then signature-binding, then the optional
     trust store {signer_id: public_key_hex} — a valid signature from an unknown signer is 'signed', not 'trusted'."""
     sp = sidecar_path(pack_path)
-    if not sp.exists() and not os.path.lexists(sp):   # SKIP only when there is NO sidecar entry at all (a dangling symlink is one that cannot be read)
+    try:                                                # one rule in the four: lstat ENOENT/ENOTDIR = no sidecar; any other error = a sidecar path that cannot be used
+        os.lstat(sp)
+    except (FileNotFoundError, NotADirectoryError):
         return {"status": "SKIP", "detail": "pack not signed"}
+    except OSError as e:
+        return {"status": "FAIL", "detail": f"sidecar path unusable ({e.errno}: {e.strerror})"}
     try:
         side = parse_line(sp.read_text(encoding="utf-8"))          # strict: duplicate keys / NaN refused like the verifiers
         if pack is None:

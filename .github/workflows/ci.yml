@@ -17,7 +17,17 @@ jobs:
           pip install https://github.com/robertolocatelli81-dev/cryptovalid-opencore/releases/download/v0.15.0/cryptovalid_opencore-0.15.0-py3-none-any.whl
       - name: Unit tests (every suite; interop against cryptovalid runs because the wheel is installed)
         run: |
-          for t in tests/test_*.py; do echo "== $t"; python "$t"; done
+          python -B -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee /tmp/ut.log
+          python - <<'PY'
+          # round 7 (Fable): a `__main__` block above a class hid two tests from the per-file loop — every test class in every file must have run
+          import ast, glob, re
+          ran = open("/tmp/ut.log").read()
+          for f in glob.glob("tests/test_*.py"):
+              for node in ast.parse(open(f).read()).body:
+                  if isinstance(node, ast.ClassDef) and any(isinstance(b, ast.Attribute) and b.attr == "TestCase" for b in node.bases):
+                      assert re.search(r"\(" + re.escape(node.name) + r"[.)]|\." + re.escape(node.name) + r"\)", ran), f"{f}:{node.name} did not run"
+          print("every TestCase class ran")
+          PY
       - name: Gate — a tampered pack MUST fail, an intact one MUST pass (exit codes)
         run: |
           python - <<'PY'
@@ -43,7 +53,7 @@ jobs:
         run: |
           pip install ".[sign]"
           python -c "import jsonschema" 2>/dev/null && { echo "jsonschema must not be installed here"; exit 1; } || true
-          for t in tests/test_*.py; do echo "== $t"; python "$t"; done
+          python -B -m unittest discover -s tests -p 'test_*.py'
   test-minimal:
     # the optional-dependency paths, measured: no cryptography (signing/seal/tip tests skip, everything else runs),
     # no jsonschema, no cryptovalid wheel — a regression in the fallback code or in the skip detection goes red here
@@ -56,7 +66,7 @@ jobs:
         run: |
           python -c "import cryptography" 2>/dev/null && { echo "cryptography must not be installed here"; exit 1; } || true
           python -c "import jsonschema" 2>/dev/null && { echo "jsonschema must not be installed here"; exit 1; } || true
-          for t in tests/test_*.py; do echo "== $t"; python "$t"; done
+          python -B -m unittest discover -s tests -p 'test_*.py'
   secrets:
     runs-on: ubuntu-latest
     steps:

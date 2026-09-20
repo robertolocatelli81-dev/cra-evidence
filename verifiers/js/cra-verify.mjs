@@ -189,8 +189,8 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
     try { ledgerText = readText(lp); } catch (e) { ledgerText = null; failures.push("ledger not UTF-8: " + e.message); }
     for (let line of ledgerText === null ? [] : ledgerText.split("\n")) {
       if (line.endsWith("\r")) line = line.slice(0, -1);   // exactly one terminator (\n or \r\n); a run of \r is content and counts
+      if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }   // the bound comes BEFORE the blank test (a 65 MiB run of spaces is refused too)
       if (/^[ \t]*$/.test(line)) continue;                  // blank = ASCII space/tab only (U+00A0, U+2028, U+0085, U+FEFF are unparsable lines)
-      if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }
       let e;
       try { e = strictParse(line); } catch (err) { failures.push(`unparsable line: ${err.message}`); break; }
       if (!isObj(e)) { failures.push(`entry ${n}: not an object`); break; }
@@ -262,7 +262,7 @@ function checkTip(count, first, last, tipPath, pubHex) {
 
 function verifySidecar(packPath, pack, trustStore) {
   const sp = packPath + ".sig.json";
-  try { lstatSync(sp); } catch { return { status: "SKIP", detail: "pack not signed" }; }   // SKIP only when there is NO sidecar entry (a dangling symlink is one that cannot be read)
+  try { lstatSync(sp); } catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return { status: "SKIP", detail: "pack not signed" }; return { status: "FAIL", detail: `sidecar path unusable (${e.code})` }; }   // one rule in the four
   let side; try { side = strictParse(readText(sp)); } catch (e) { return { status: "FAIL", detail: "unreadable: " + e.message }; }
   if (!isObj(side)) return { status: "FAIL", detail: "sidecar is not a JSON object" };
   let digest; try { digest = sha3(Buffer.from(canon(without(pack, "pack_sha3")), "utf-8")); } catch (e) { return { status: "FAIL", detail: "pack not canonicalisable" }; }

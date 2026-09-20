@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -172,12 +174,12 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 		for sc.Scan() {
 			line := sc.Bytes()
 			// bufio.ScanLines already drops exactly one trailing \r (dropCR): no second strip here — a run of \r is content
-			if len(strings.Trim(string(line), " \t")) == 0 { // blank = ASCII space/tab only (Unicode spaces are an unparsable line)
-				continue
-			}
-			if len(line) > maxLineBytes {
+			if len(line) > maxLineBytes { // bound BEFORE the blank test
 				failures = append(failures, fmt.Sprintf("entry %d: line exceeds %d bytes", n, maxLineBytes))
 				break
+			}
+			if len(strings.Trim(string(line), " \t")) == 0 { // blank = ASCII space/tab only (Unicode spaces are an unparsable line)
+				continue
 			}
 			e, err := parseObject(line)
 			if err != nil {
@@ -350,8 +352,11 @@ func checkTip(count int, first, last, tipPath, pubHex string) (bool, string) {
 
 func verifySidecar(packPath string, pack *Object, declared string, trust map[string]string, haveTrust bool) (string, string, bool) {
 	sp := packPath + ".sig.json"
-	if _, err := os.Lstat(sp); err != nil && os.IsNotExist(err) {
-		return "SKIP", "pack not signed", false // SKIP only when there is NO sidecar; one that exists but cannot be read is a FAIL
+	if _, err := os.Lstat(sp); err != nil {
+		if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+			return "SKIP", "pack not signed", false // one rule in the four: ENOENT/ENOTDIR = no sidecar
+		}
+		return "FAIL", "sidecar path unusable: " + err.Error(), false // any other lstat error (ENAMETOOLONG, EACCES…) is never "not signed"
 	}
 	raw, err := os.ReadFile(sp)
 	if err != nil {

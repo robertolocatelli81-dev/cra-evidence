@@ -1,12 +1,12 @@
 {
- "generated_utc": "2026-09-20T17:52:49+00:00",
+ "generated_utc": "2026-09-20T18:17:13+00:00",
  "honest_scope": "firm-side evidence locker: proves that these records existed, in this order, unchanged since (hash chain, offline-verifiable); it is NOT a conformity assessment, NOT CE marking, NOT the official CSIRT/ENISA channel (the SRP is a human portal), NOT an objective time anchor unless an RFC 3161 / OTS token is attached",
  "kind": "cra_evidence_pack/1",
  "ledger_entries": 4,
  "ledger_file": "cra.ledger.jsonl",
- "ledger_last_self_hash": "b6085f0c92dc3a2a3c17e0251fea4485c0a20ea96350b2758d699316caf6555b",
+ "ledger_last_self_hash": "2db1cbc2f256e87c7a6afdc09956354cbe1c2f721961219d3fa5303910fcca58",
  "legal_basis": "Reg. (EU) 2024/2847 (Cyber Resilience Act): Annex I Part II(1) SBOM; Art. 14(2) actively exploited vulnerability (early warning 24 h, notification 72 h, final report 14 days after a corrective or mitigating measure is available); Art. 14(4) severe incident (24 h, 72 h, final report one month after the submission of the incident notification) \u2014 reporting obligations applying from 11 September 2026 (Art. 71); technical documentation and EU declaration of conformity kept at least 10 years after placing on the market or for the support period, whichever is longer (Art. 13(13))",
- "pack_sha3": "a118ba1b07ad77328b293b72a6546e3621514706ad79106842517a16837e6932",
+ "pack_sha3": "42b246ad07d49651c20df9c2d286083e5a2203f835402bb8b013fbab130fbedb",
  "product_id": "cra-evidence",
  "product_version": "0.3.0",
  "record_counts": {

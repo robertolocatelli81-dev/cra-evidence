@@ -95,7 +95,7 @@ def parse_line(line: str, allow_floats: bool = False):
                            parse_float=(float if allow_floats else _refuse_float), parse_int=(int if allow_floats else _refuse_int))
     except RecursionError:
         raise ValueError("json_too_deep: the parser could not hold this nesting") from None
-    if not allow_floats and _has_lone_surrogate(v):
+    if _has_lone_surrogate(v):   # for generator documents too: such a string could never be indexed or canonicalised
         raise ValueError("lone surrogate in a JSON string (the profile forbids it: it has no UTF-8 encoding)")
     return v
 
@@ -145,10 +145,10 @@ def _tail_state(f) -> Tuple[int, str, str, bool]:
             raise ValueError(f"ledger line {lineno} exceeds {MAX_LINE_BYTES} bytes: chain not continuable — verify, repair, record the incident")
         unterminated = not raw.endswith(b"\n")
         line = line_content(raw)
-        if is_blank_line(line):
-            continue
         if len(line) > MAX_LINE_BYTES:
             raise ValueError(f"ledger line {lineno} exceeds {MAX_LINE_BYTES} bytes: chain not continuable — verify, repair, record the incident")
+        if is_blank_line(line):
+            continue
         try:
             e = parse_line(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError, RecursionError) as e:
@@ -214,19 +214,21 @@ class Ledger:
                 if not raw.endswith(b"\n") and len(raw) == MAX_LINE_BYTES + 2:
                     raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
                 content = line_content(raw)
+                if len(content) > MAX_LINE_BYTES:             # the bound is on the content, terminator excluded, BEFORE the blank test, in all four
+                    raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
                 if is_blank_line(content):
                     continue
-                if len(content) > MAX_LINE_BYTES:             # the bound is on the content, terminator excluded, in all four verifiers
-                    raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
                 yield parse_line(content.decode("utf-8"))   # NaN/Infinity are not JSON: fail; invalid UTF-8: fail
 
-    def verify(self) -> Dict[str, Any]:
+    def verify(self, entries: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Snapshot verification: every self_hash recomputes, every prev_hash links, idx contiguous, non-empty.
-        Does NOT see a truncated tail (a shorter prefix is a valid chain): use the signed tip / cryptovalid."""
+        Does NOT see a truncated tail (a shorter prefix is a valid chain): use the signed tip / cryptovalid.
+        `entries`: an already-read list (the verifier reads the file ONCE and verifies that snapshot); a list is
+        appended to only while the file is being read here, so a caller can pass `[]` to collect what was parsed."""
         failures: List[str] = []
         prev, n = GENESIS, 0
         try:
-            for e in self.entries():
+            for e in (self.entries() if entries is None else entries):
                 if not isinstance(e, dict):
                     failures.append(f"entry {n}: not an object (JSON {type(e).__name__})")
                     break

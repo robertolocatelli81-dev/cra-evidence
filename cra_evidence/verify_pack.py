@@ -138,13 +138,16 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
         layers.append(_layer("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"))
     elif lp and os.path.isfile(lp):
         led = Ledger(lp)
-        lv = led.verify()
+        try:                                            # the file is read ONCE; chain, binding, anchor, sources and tip all judge this snapshot
+            entries = list(led.entries())
+            lv = led.verify(entries)
+        except (ValueError, TypeError, RecursionError, OSError) as ex:
+            entries, lv = [], {"chain_ok": False, "failures": [f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}"], "entries": 0}
         if not lv["chain_ok"]:
             layers.append(_layer("ledger-chain", "FAIL", "; ".join(lv["failures"][:3])))
         else:
-            bound, anchor, anchor_idx, entries = True, False, None, []
-            for e in led.entries():
-                entries.append(e)
+            bound, anchor, anchor_idx = True, False, None
+            for e in entries:
                 d = e.get("data") if isinstance(e.get("data"), dict) else {}
                 if d.get("kind") in RECORD_KINDS:
                     if sha3_hex({k: v for k, v in d.items() if k != "record_sha3"}) != d.get("record_sha3"):

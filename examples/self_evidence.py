@@ -7,7 +7,7 @@ out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "self_evidence")
 os.makedirs(out, exist_ok=True)
 led = os.path.join(out, "cra.ledger.jsonl")
 import shutil
-for stale in (led, led + ".tip.json"):
+for stale in (led, led + ".tip.json", os.path.join(out, "cra_pack.json.sig.json"), os.path.join(out, "trust.json")):
     if os.path.exists(stale):
         os.remove(stale)
 shutil.rmtree(led + ".sources", ignore_errors=True)
@@ -26,4 +26,10 @@ n = SRPNotice("vulnerability", "early_warning", {"notification_type": "Vulnerabi
 lk.record_notice(n, DryRunDrop(os.path.join(out, "drop")).prepare(n))   # no cve_id: no vulnerability record to bind to
 pack = lk.evidence_pack(os.path.join(out, "cra_pack.json"))
 lk.seal_longterm(pack["pack_sha3"], t=1_789_459_200.0)   # 2026-09-15T00:00:00Z, explicit
-print(json.dumps(verify_pack(os.path.join(out, "cra_pack.json")), indent=1))
+# signed with an ephemeral key generated here (the seed is not kept): the public key goes into trust.json so the
+# reader can reach `trusted-signed`; a real deployment signs with a held key (or AWS KMS: `cra sign --aws-kms-key-id`)
+from cra_evidence.signing import keygen, load_key, sign_pack
+seed = os.path.join(out, "example.key"); keygen(seed); key = load_key(seed); os.remove(seed)
+sign_pack(os.path.join(out, "cra_pack.json"), key, "example-signer")
+json.dump({"example-signer": key[1]}, open(os.path.join(out, "trust.json"), "w"), indent=1)
+print(json.dumps(verify_pack(os.path.join(out, "cra_pack.json"), trust_store={"example-signer": key[1]}), indent=1))

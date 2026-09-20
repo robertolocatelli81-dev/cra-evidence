@@ -262,6 +262,21 @@ class TestSourceStore(unittest.TestCase):
         self.assertIn("refused unread", str(cm.exception))
         self.assertNotIn(big, opened)
 
+    def test_schema_bounds_and_product_type_from_the_document(self):
+        from cra_evidence.sbom import SCHEMA_TEXT_MAX
+        p = os.path.join(self.d, "long.json")
+        with open(p, "w") as f:
+            json.dump({"bomFormat": "CycloneDX", "specVersion": "1.7", "metadata": {"component": {"type": "firmware", "name": "fw", "version": "1"}},
+                       "components": [{"type": "library", "name": "a", "version": "9" * 1100}]}, f)
+        r = sbom_from_cyclonedx(p, "tiny-cra-sample", "1.0.0")
+        self.assertEqual(len(r.components[0].version), SCHEMA_TEXT_MAX)                      # bounded to the schema's maxLength, never exported invalid
+        self.assertEqual(r.product_type, "firmware")                                          # the generator's metadata.component.type, not a default
+        self.assertEqual(r.to_cyclonedx_min("1.7")["metadata"]["component"]["type"], "firmware")
+        with self.assertRaises(ValueError):
+            SBOMRecord("p", "v" * 1100, [SBOMComponent("a", "1")]).to_cyclonedx_min()
+        syft = ingest(os.path.join(HERE, "fixtures", "real_tools", "syft-1.52.0_cyclonedx-1.7.json"))
+        self.assertEqual(syft.product_type, "file")                                           # Syft declares the scanned directory as `file`
+
     def test_deeply_nested_and_duplicate_key_documents_are_malformed_not_crashes(self):
         deep = os.path.join(self.d, "deep.json")
         with open(deep, "w") as f:
@@ -275,6 +290,11 @@ class TestSourceStore(unittest.TestCase):
             sbom_from_cyclonedx(dup, "p", "1")
         with self.assertRaises(ValueError):
             sbom_from_spdx(deep, "p", "1")
+        sur = os.path.join(self.d, "sur.json")
+        with open(sur, "w") as f:                                                              # a lone surrogate escape has no UTF-8 encoding: malformed, not a TypeError at record time
+            f.write('{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"a\\ud800","version":"1"}]}')
+        with self.assertRaises(ValueError):
+            sbom_from_cyclonedx(sur, "p", "1")
 
     def test_a_mutated_index_is_refused_even_with_the_right_document(self):
         """found by Sonnet in round 2: the index was only co-located with the bytes, not a function of them"""
@@ -318,7 +338,7 @@ class TestSourceStore(unittest.TestCase):
                 {"spdxVersion": "SPDX-2.3", "packages": [{"name": "a", "externalRefs": 3, "checksums": {"a": 1}, "versionInfo": "1"}]},
                 {"@graph": [{"type": "software_Package", "spdxId": ["p1"], "name": "a"}, {"type": "SpdxDocument", "rootElement": [["r"]]},
                             {"type": "Relationship", "relationshipType": "describes", "from": ["x"], "to": [{"a": 1}]},
-                            {"type": "software_Package", "spdxId": "p2", "name": "b", "verifiedUsing": 7, "externalIdentifier": "cpe"}]}]
+                            {"type": "software_Package", "spdxId": "p2", "name": "b", "verifiedUsing": 7, "externalIdentifier": [{"externalIdentifierType": "cpe23", "identifier": ["cpe:2.3:a:x"]}]}]}]
         for i, doc in enumerate(docs):
             p = os.path.join(self.d, f"tc{i}.json")
             with open(p, "w") as f:

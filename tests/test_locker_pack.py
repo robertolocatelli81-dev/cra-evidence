@@ -76,8 +76,6 @@ class TestLockerPack(unittest.TestCase):
         self.assertEqual(verify_tip(tip, pk, 2, es[0]["self_hash"], es[1]["self_hash"])["error"], "tail_truncated")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestSignedFixtureEveryConfig(unittest.TestCase):
@@ -118,3 +116,7 @@ class TestSignedFixtureEveryConfig(unittest.TestCase):
         self.assertFalse(r["ok"])
         sig = next(l for l in r["layers"] if l["layer"] == "producer-signature")
         self.assertIn("NOT checkable", sig["detail"]); self.assertNotIn("invalid", sig["detail"])
+
+
+if __name__ == "__main__":
+    unittest.main()

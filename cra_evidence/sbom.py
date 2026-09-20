@@ -84,6 +84,8 @@ class SBOMRecord:
         lives in the stored source, it is never re-invented."""
         if spec_version not in CYCLONEDX_EXPORT_VERSIONS:
             raise ValueError(f"spec_version must be one of {sorted(CYCLONEDX_EXPORT_VERSIONS)}")
+        if len(self.product_version) > SCHEMA_TEXT_MAX:
+            raise ValueError(f"product_version longer than {SCHEMA_TEXT_MAX} characters cannot be exported as CycloneDX (schema maxLength)")
         from . import __version__
         comps = dedup(self.components)
         refs, used = [], set()
@@ -391,6 +393,9 @@ def _fingerprint_bytes(raw: bytes, path: str) -> Dict[str, Any]:
     return {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(path)}
 
 
+SCHEMA_TEXT_MAX = 1024   # CycloneDX 1.6/1.7 `version` maxLength: a longer value would make the index export schema-invalid
+
+
 def _s(v: Any) -> str:
     """A text field of a generator document: only a string is text; anything else is empty, never stringified."""
     return v if isinstance(v, str) else ""
@@ -448,7 +453,7 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
                     if lic:
                         break
             sup = c.get("supplier")
-            comps.append(SBOMComponent(name=c["name"], version=_s(c.get("version")),
+            comps.append(SBOMComponent(name=c["name"], version=_s(c.get("version"))[:SCHEMA_TEXT_MAX],
                                        supplier=_s(sup.get("name")) if isinstance(sup, dict) else "",
                                        purl=_s(c.get("purl")), sha256=sha, license=_s(lic)[:512],   # the FIRST licence entry; the document has them all
                                        type=typ if typ in CYCLONEDX_COMPONENT_TYPES else "library", cpe=_s(c.get("cpe"))))
@@ -464,8 +469,11 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
               "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": sum(len(x["dependsOn"]) for x in deps if isinstance(x, dict) and isinstance(x.get("dependsOn"), list)),
               "dependencies_declared": len(deps), "component_types": dict(sorted(types.items()))}
     source.update(_fingerprint_bytes(raw, path))
+    md_comp = (d.get("metadata") or {}).get("component") if isinstance(d.get("metadata"), dict) else None
+    ptype = _s(md_comp.get("type")) if isinstance(md_comp, dict) else ""
     return SBOMRecord(product_id=product_id, product_version=product_version, components=comps,
-                      depth=f"external:cyclonedx:{gen or 'unknown'}", source=source)
+                      depth=f"external:cyclonedx:{gen or 'unknown'}", source=source,
+                      product_type=ptype if ptype in CYCLONEDX_COMPONENT_TYPES else "application")
 
 
 # ── SPDX ingest (2.2 / 2.3 JSON and 3.0 JSON-LD) ──────────────────────────────────────────
@@ -546,7 +554,7 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
         sha = next((c.get("checksumValue", "") for c in _lst(p.get("checksums"))
                     if isinstance(c, dict) and str(c.get("algorithm", "")).upper() == "SHA256"), "")
         lic = _clean(p.get("licenseConcluded")) or _clean(p.get("licenseDeclared"))
-        comps.append(SBOMComponent(name=_clean(p["name"]), version=_clean(p.get("versionInfo")) or "NOASSERTION",
+        comps.append(SBOMComponent(name=_clean(p["name"]), version=_clean(p.get("versionInfo"))[:SCHEMA_TEXT_MAX] or "NOASSERTION",
                                    supplier=_agent_name(p.get("supplier")) or _agent_name(p.get("originator")),   # cleaned BEFORE the fallback
                                    purl=_clean(purl), sha256=_sha256_or_empty(sha), license=lic,
                                    type=SPDX_PURPOSE_TO_TYPE.get(str(p.get("primaryPackagePurpose", "")).upper(), "library"), cpe=_clean(cpe)))
@@ -611,8 +619,8 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
         purpose = _ld_prop(e, "software_primaryPurpose", "primaryPurpose")
         purpose = str(purpose[0] if isinstance(purpose, list) and purpose else purpose or "").rsplit("/", 1)[-1].upper().replace("OPERATINGSYSTEM", "OPERATING-SYSTEM")
         ext = _lst(_ld_prop(e, "externalIdentifier"))
-        cpe = next((str(x.get("identifier", "")) for x in ext if isinstance(x, dict) and str(_ld_prop(x, "externalIdentifierType") or "").rsplit("/", 1)[-1] in ("cpe22", "cpe23")), "")
-        comps.append(SBOMComponent(name=_clean(e["name"]), version=_clean(_ld_prop(e, "software_packageVersion", "packageVersion")) or "NOASSERTION",
+        cpe = next((_clean(x.get("identifier")) for x in ext if isinstance(x, dict) and str(_ld_prop(x, "externalIdentifierType") or "").rsplit("/", 1)[-1] in ("cpe22", "cpe23")), "")
+        comps.append(SBOMComponent(name=_clean(e["name"]), version=_clean(_ld_prop(e, "software_packageVersion", "packageVersion"))[:SCHEMA_TEXT_MAX] or "NOASSERTION",
                                    supplier=supplier, purl=_clean(_ld_prop(e, "software_packageUrl", "packageUrl")), sha256=_sha256_or_empty(sha),
                                    license=lic_of.get(_ld_id(e), ""), type=SPDX_PURPOSE_TO_TYPE.get(purpose, "library"), cpe=_clean(cpe)))
     tools = [e.get("name") for e in g if _ld_type(e) == "Tool" and e.get("name")]

@@ -75,7 +75,7 @@ def cases(base):
     def case(name, fn, **kw):
         d = os.path.join(base, name); os.makedirs(d)
         args = fn(d) or {}
-        out.append((name, os.path.join(d, "p.json"), {**kw, **args}))
+        out.append((name, args.pop("pack", os.path.join(d, "p.json")), {**kw, **args}))
     case("intact_unsigned", lambda d: build(d)[3] and None)
     case("signed", lambda d: build(d, sign=True)[3] and None)
     def trusted(d):
@@ -421,6 +421,10 @@ def cases(base):
                                 "resolved_components": 0, "sbom_floor_met": False, "source": {"format": "cyclonedx-json", "generator": "syft"}}))
         lk.evidence_pack(os.path.join(d, "p.json")); return {"require_sources": True}
     case("sbom_external_format_without_hash_required", external_without_hash)
+    def long_name(d):   # a 250-byte pack name is legal; its sidecar name (263 bytes) is not: lstat ENAMETOOLONG must be the same verdict in the four
+        lk, key, pack, pk = build(d); newp = os.path.join(d, "p" * 246 + ".json"); os.rename(pack, newp); shutil.move(os.path.join(d, "l.jsonl"), os.path.join(d, "l.jsonl"))
+        j = json.load(open(newp)); json.dump(j, open(newp, "w")); return {"pack": newp}
+    case("pack_name_too_long_for_sidecar", long_name)
     if os.geteuid() != 0:
         def ledger_mode0(d):
             build(d); os.chmod(os.path.join(d, "l.jsonl"), 0)
@@ -428,7 +432,11 @@ def cases(base):
     if os.environ.get("CRA_ORACLE_BIG") == "1":
         def cr_padding_big(d):   # 66 MiB of \r before the newline: content above the bound in all four (Python must not buffer it whole)
             build(d); p = os.path.join(d, "l.jsonl"); b = open(p, "rb").read(); i = b.index(b"\n"); open(p, "wb").write(b[:i] + b"\r" * (66 << 20) + b[i:])
-        case("ledger_line_cr_padding_66MiB", cr_padding_big)   # 65 MiB line after the anchor: a scanner that stops silently would accept the prefix
+        case("ledger_line_cr_padding_66MiB", cr_padding_big)
+        def blank_big(d, n):   # a run of spaces above the bound is refused in all four; at exactly the bound it is a blank line
+            build(d); p = os.path.join(d, "l.jsonl"); lines = open(p).read().splitlines(); open(p, "w").write(lines[0] + "\n" + " " * n + "\n" + "\n".join(lines[1:]) + "\n")
+        case("ledger_blank_line_exactly_64MiB", lambda d: blank_big(d, 64 << 20))
+        case("ledger_blank_line_64MiB_plus_1", lambda d: blank_big(d, (64 << 20) + 1))   # 65 MiB line after the anchor: a scanner that stops silently would accept the prefix
         def big_line(d):
             build(d); open(os.path.join(d, "l.jsonl"), "a").write('{"idx": 3, "ts": "x", "prev_hash": "y", "data": {"pad": "' + "a" * (65 << 20) + '"}, "self_hash": "z"}\n')
         case("ledger_line_65MiB_after_anchor", big_line)
@@ -463,7 +471,7 @@ def run_cli(cmd, pack, opts):
     if opts.get("key") is not None: args += ["--log-pubkey", opts["key"]]
     if opts.get("require_sources"): args += ["--require-sources"]
     args += opts.get("raw_args", [])
-    r = subprocess.run(args, capture_output=True, text=True, timeout=120)
+    r = subprocess.run(args, capture_output=True, text=True, timeout=120, cwd=ROOT, env={**os.environ, "PYTHONPATH": ROOT})
     try:
         j = json.loads(r.stdout)
     except ValueError:
@@ -485,6 +493,9 @@ def main():
         vs["go"] = [gob]
     rb = os.environ.get("CRA_VERIFY_RUST") or (os.path.join(ROOT, "verifiers", "rust", "target", "release", "cra-verify") if os.path.exists(os.path.join(ROOT, "verifiers", "rust", "target", "release", "cra-verify")) else None)
     if rb:
+        rs_dir = os.path.join(ROOT, "verifiers", "rust", "src")
+        if os.path.getmtime(rb) < max(os.path.getmtime(os.path.join(rs_dir, f)) for f in os.listdir(rs_dir) if f.endswith(".rs")):
+            print(f"Rust binary {rb} is older than verifiers/rust/src/*.rs: rebuild it before measuring"); return 2
         vs["rust"] = [rb]
     missing = require - set(vs)
     if missing:

@@ -59,7 +59,8 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 
 - Every tamper the tests can build — a pack field, a ledger record with a stale digest, a re-chained record, a
   pack from another ledger, a pack re-hashed after signing, a wrong key pinned, a truncated tail (with the signed
-  tip), a torn last line, four processes appending at once — is a named FAIL; the tests are red on the previous
+  tip), a torn last line — is a named FAIL; four processes appending at once produce one valid chain (exclusive
+  flock; a filesystem without it refuses to append unless `allow_unlocked=True`); the tests are red on the previous
   behaviour before each guard was added.
 - The generator's SBOM is the evidence, not our re-encoding of it (0.3.0). `cra sbom --from-cyclonedx/--from-spdx`
   hashes the exact bytes of the document (SHA-256) into the record and stores a copy in `<ledger>.sources/`; the
@@ -92,7 +93,9 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 - A `--source cisa_kev|enisa_euvd` provenance is stored only after the catalogue confirms the id now (or is labelled
   `asserted:` on request), and a confirmed catalogue hit sets the exploitation flag: provenance and clock cannot diverge.
 - The seal signs its own time, time-source and token together with the whole previous chain; the verifier's policy
-  defaults to the NIST IR 8547 draft dates for both the signature and the hash, and says when a renewal is due.
+  is applied to the signature and to the hash alike, its default carries the NIST IR 8547 draft date for Ed25519 and
+  no expiry for SHA3-256 (the verdict then says so: "their trust is NOT bounded in time"), and it says when a renewal
+  is due.
 - Pre-publication review by five models (two providers) in three rounds, plus the author: 44 findings turned into
   tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; 0.3.0: review rounds on 20/09/2026 (Opus, Sonnet, Haiku, then Fable 5.1;
   Gemini Pro out of credits) — every finding of every round is listed in the CHANGELOG, each re-measured and turned into an
@@ -150,7 +153,7 @@ by the four verifiers of this repository.
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 122 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 123 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 20/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

@@ -1,0 +1,9 @@
+{
+ "alg": "Ed25519",
+ "fingerprint": "cae0f333346abc58",
+ "public_key_hex": "d08db21e09dddfbef45bb60dd3fc9ac7ec9df2a3fc2479f5d2704bc419c7bdab",
+ "signature_hex": "0e23467e13121b15e6f4ed2e29a79ff2e17d248f75e0fb2f12276db61edb781fa9c315f4dcd44c3b4f3f1934931019c62a8f31f88bd208221792c23c6158ee0d",
+ "signed_pack_sha3": "42b246ad07d49651c20df9c2d286083e5a2203f835402bb8b013fbab130fbedb",
+ "signed_utc": "2026-09-20T18:17:13+00:00",
+ "signer_id": "example-signer"
+}
