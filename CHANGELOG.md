@@ -16,7 +16,7 @@ read. Export: CycloneDX 1.6 or 1.7 (official 1.7 schema vendored), with serialNu
 from edges the producer knows — the installed floor's Requires-Dist graph as walked, with PEP 508 markers evaluated for this interpreter (`packaging` when importable, else a small evaluator; an unevaluable marker keeps the edge and is counted): `dependsOn: []` is emitted only for a component whose metadata was read, everything else is declared an `unknown` composition (CycloneDX's own value for "inconclusive") — never re-invented for an ingested graph; the installed floor reads PEP 639
 `License-Expression` (cryptography ships it since 46.0.0 with the legacy `License` field empty, measured on PyPI metadata 20/09/2026 — with such a distribution 0.2.0 recorded no licence).
 Validated with the official CycloneDX CLI 0.33.1 and pyspdxtools 0.8.5 in CI (positive controls included) and with jsonschema in the tests.
-Six unmodified generator documents vendored as fixtures. Differential oracle: 66 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing; a stored document made unreadable), and the failing layers must
+Six unmodified generator documents vendored as fixtures. Differential oracle: 93 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing; a stored document made unreadable), and the failing layers must
 agree too (ablation caught; before the fix Go/Rust skipped a non-string hash while Python/JS failed — found by self-review and by Haiku in round 1). Interop re-measured against cryptovalid 0.15.0. Found by the round-1 review (Opus) and fixed: the Python reference parsed pack, sidecar, tip and trust store with plain `json.loads` (duplicate keys accepted, first-wins for a reader, last-wins for the verifier — JS/Go/Rust refuse them) → strict parser everywhere; Python `verify_tip` did not check `kind` / `log_pubkey_hex` (the three did); the Go verifier ignored the scanner error (a line above 64 MiB ended the scan silently and the prefix verified); a `source_path` could be bound to an index not read from it; an ingested SBOM recorded without `source_path` carried a hash nothing re-verified (Sonnet) — now refused; a generator document nested too deep crashed the ingest instead of raising (Sonnet) — malformed now; the JS verifier built a 65 M-node string on a 65 MiB pad and died (fast path added); all four verifiers and the producer now share cryptovalid's 64 MiB line bound. Round 2 (Opus, Sonnet): the JS verifier accepted integral floats (`10.0` parses to 10 and hashes alike) while the other
 three refused them → number tokens with `.`/`e` refused in JS and in the Python parser (generator documents excepted: they are
 bytes, never canonicalised); the trust store was read laxly by JS and Go (a duplicate `signer_id` gave `trusted-signed` there and
@@ -38,8 +38,25 @@ graph and profile label rode through with the right document) → covered; gener
 being read at ingest and at record time; an anchor is matched only against a 64-hex `pack_sha3` (a pack without one matched
 an anchor without one in three verifiers); a stale `__pycache__` had stamped the day's scored exports as 0.2.0 → cache
 cleared, exports regenerated and re-scored (Syft 5.3, cdxgen 5.5, Trivy 4.8, installed floor 4.5); 39 fields vs 44 glossary
-rows reconciled in the texts; CI runs three dependency configurations. Round 4: no material issues. Oracle: 66 cases in CI,
-70 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
+rows reconciled in the texts; CI runs three dependency configurations. Oracle after round 3: 66 cases in CI, 70 with
+`CRA_ORACLE_BIG=1`, 0 divergences.
+Round 4 (Opus, Sonnet, Haiku) — input hygiene was still four rules, not one: a blank ledger line was ASCII-whitespace in
+Python and Unicode-whitespace in the three (a U+00A0 line broke the chain in the reference and passed elsewhere) → blank =
+ASCII space/tab only; the line terminator was "any run of `\r`/`\n`" in Python (66 MiB of `\r` padding verified there and
+was refused by the three) → exactly one `\n`, then at most one `\r`, and the reference reads lines bounded (never buffers a
+hostile line whole); integers outside ±(2^53-1) were refused at parse in Go/Rust and only at hashing in Python/JS (a signed
+sidecar or tip with such a field was `trusted-signed` in two verifiers) → refused at parse in all four; the JS verifier
+decoded every input but the pack lossily (one invalid byte in a sidecar read as `signed`/`trusted-signed`) and dropped a
+UTF-8 BOM (a pack with a BOM verified in JS only) → strict decoding, BOM kept, on every input; Go and Rust treated a sidecar
+that exists but cannot be read (directory, mode 0, not UTF-8) as "not signed" → SKIP only when there is no sidecar; the Rust
+JSON module accepted `+10`, `010` and raw control characters in strings (canonical form unchanged, so a byte-tampered pack
+verified `signed` in Rust alone) → RFC 8259 grammar (the same module is cryptovalid's: to be fixed there too); `ledger_file`
+was resolved four ways (a non-string, an array, a trailing slash) → must be a plain file name in all four, else FAIL;
+`honest_scope` must be a string; a lone surrogate escape in a pack failed at different layers → refused at parse
+everywhere; a sidecar missing `signed_utc` (or with a non-string field) threw past the JS signature check → an invalid
+signature; the tip `ts` is checked by shape in all four (JS validated the calendar alone). A public sentence "Round 4: no
+material issues" had been written before round 4 ran — removed; this paragraph is what round 4 found. Oracle: 93 cases in
+CI, 98 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
 FAQ: no API at initial release; glossary unchanged; Digital Omnibus 2025/0360(COD) still a proposal).
 
 ## 0.2.0 — 2026-09-15

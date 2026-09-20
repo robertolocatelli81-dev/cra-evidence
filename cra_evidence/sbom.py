@@ -63,6 +63,7 @@ class SBOMRecord:
     # (component count incl. nested, dependency edges, component types) and what the index did to it (merged
     # duplicates) — and, when `source_fingerprint()` was applied, the SHA-256 of its exact bytes
     source: Dict[str, Any] = field(default_factory=dict)
+    product_type: str = "application"   # CycloneDX type of metadata.component (application, library, firmware, device…)
     # dependency edges KNOWN to the producer, as [parent_key, child_key] over `name.lower()` ("" = the product): the
     # installed floor fills them from importlib.metadata `Requires-Dist`; an ingested document leaves them empty (its
     # graph lives in the stored source and is never re-invented)
@@ -100,7 +101,8 @@ class SBOMRecord:
         out = {"bomFormat": "CycloneDX", "specVersion": spec_version, "serialNumber": f"urn:uuid:{self.record_id}", "version": 1,
                "metadata": {"timestamp": self.generated_utc,
                             "tools": {"components": [{"type": "application", "name": "cra-evidence", "version": __version__}]},
-                            "component": {"type": "application", "bom-ref": primary_ref, "name": self.product_id, "version": self.product_version},
+                            "component": {"type": self.product_type if self.product_type in CYCLONEDX_COMPONENT_TYPES else "application",
+                                          "bom-ref": primary_ref, "name": self.product_id, "version": self.product_version},
                             "properties": [
                                 {"name": "cra-evidence:profile", "value": f"cra-evidence-min (depth: {self.depth})"},
                                 {"name": "cra-evidence:depth_note", "value": "'top-level-only' is the literal Annex I floor; most vulnerabilities live in transitive dependencies — prefer a transitive SBOM from a full generator when available"},
@@ -535,7 +537,9 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
                                    supplier=_agent_name(p.get("supplier")) or _agent_name(p.get("originator")),   # cleaned BEFORE the fallback
                                    purl=_clean(purl), sha256=_sha256_or_empty(sha), license=lic,
                                    type=SPDX_PURPOSE_TO_TYPE.get(str(p.get("primaryPackagePurpose", "")).upper(), "library"), cpe=_clean(cpe)))
-    tool = next((c for c in ((d.get("creationInfo") or {}).get("creators") or []) if str(c).startswith("Tool:")), "")
+    ci = d.get("creationInfo") if isinstance(d.get("creationInfo"), dict) else {}
+    creators = ci.get("creators") if isinstance(ci.get("creators"), list) else []
+    tool = next((c for c in creators if str(c).startswith("Tool:")), "")
     depth = f"external:{_clean(d.get('spdxVersion')) or 'SPDX-2.x'}:{_agent_name(tool.replace('Tool:', '')) or 'unknown-tool'}"
     if not roots:
         depth += ":no-root-declared"   # the document names no described product: it may be counted among the components (declared)

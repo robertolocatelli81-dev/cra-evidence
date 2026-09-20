@@ -94,8 +94,8 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 - The seal signs its own time, time-source and token together with the whole previous chain; the verifier's policy
   defaults to the NIST IR 8547 draft dates for both the signature and the hash, and says when a renewal is due.
 - Pre-publication review by five models (two providers) in three rounds, plus the author: 44 findings turned into
-  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; 0.3.0: four more rounds (Opus, Sonnet, Haiku;
-  Gemini Pro out of credits that day) until "no material issues", every finding listed in the CHANGELOG, each re-measured and
+  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; 0.3.0: review rounds (Opus, Sonnet, Haiku;
+  Gemini Pro out of credits that day) until a round found nothing material, every finding listed in the CHANGELOG, each re-measured and
   turned into an oracle case or a test; CI runs the suites in three dependency configurations (all optional dependencies,
   cryptography only, none); the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.
@@ -148,7 +148,7 @@ signature, trust store, seal) are checked by the four verifiers of this reposito
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 66 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 93 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 20/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

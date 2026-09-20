@@ -14,6 +14,8 @@ import { basename, dirname, join } from "node:path";
 
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
 const RECORD_KINDS = new Set(["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"]);
+const INSTANT_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$/;
+const ledgerFileNameOk = (v) => typeof v === "string" && v !== "" && v !== "." && v !== ".." && !v.includes("/") && !v.includes("\\");
 const TIP_KIND = "cryptovalid_tip/1", SPKI = Buffer.from("302a300506032b6570032100", "hex"), HEX64 = /^[0-9a-f]{64}$/;
 
 const MAX_LINE_BYTES = 64 << 20, MAX_SOURCE_BYTES = 256 << 20;   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
@@ -108,27 +110,12 @@ function hasLoneSurrogate(text) {
 function tipPayload(entries, ledgerId, tipSha256, ts) {
   return Buffer.from(`{"entries":${entries},"kind":"${TIP_KIND}","ledger_id":"${ledgerId}","tip_sha256":"${tipSha256}","ts":"${ts}"}`, "utf-8");
 }
-function parseInstant(s) {
-  if (typeof s !== "string") return null;
-  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|[+-][0-9]{2}:[0-9]{2})$/.exec(s);
-  if (!m) return null;
-  const [y, mo, d, h, mi, sec] = m.slice(1, 7).map(Number);
-  if (y < 1 || y > 9999 || mo < 1 || mo > 12 || h > 23 || mi > 59 || sec > 59) return null;
-  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
-  const dim = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
-  if (d < 1 || d > dim) return null;
-  let offSec = 0;
-  if (m[8] !== "Z") { const oh = Number(m[8].slice(1, 3)), om = Number(m[8].slice(4, 6)); if (oh > 23 || om > 59) return null; offSec = (oh * 3600 + om * 60) * (m[8][0] === "-" ? -1 : 1); }
-  const dt = new Date(0); dt.setUTCFullYear(y, mo - 1, d); dt.setUTCHours(h, mi, sec, 0);   // year-safe, no Date.UTC quirk
-  const nanos = Number(((m[7] || "0") + "000000000").slice(0, 9));
-  return [Math.floor(dt.getTime() / 1000) - offSec, nanos];
-}
 
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 const sha3 = (b) => createHash("sha3-256").update(b).digest("hex");
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const without = (o, k) => { const c = {}; for (const x of Object.keys(o)) if (x !== k) c[x] = o[x]; return c; };
-function hasFloatToken(text) {   // a number token with '.', 'e' or 'E' outside strings: 10.0 would JSON.parse to 10 and hash alike
+function badNumberToken(text) {   // outside strings: a token with '.', 'e', 'E' (10.0 would JSON.parse to 10 and hash alike) or an integer outside ±(2^53-1)
   let inStr = false, esc = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
@@ -136,15 +123,19 @@ function hasFloatToken(text) {   // a number token with '.', 'e' or 'E' outside 
     if (c === '"') { inStr = true; continue; }
     if (c === "-" || (c >= "0" && c <= "9")) {
       let j = i; while (j < text.length && /[-+0-9.eE]/.test(text[j])) j++;
-      if (/[.eE]/.test(text.slice(i, j))) return true;
+      const tok = text.slice(i, j);
+      if (/[.eE]/.test(tok)) return "floating-point number (the profile forbids floats)";
+      if (tok.replace("-", "").length > 15 && (BigInt(tok) > 9007199254740991n || BigInt(tok) < -9007199254740991n)) return "integer outside ±(2^53-1) (the profile forbids it)";
       i = j - 1;
     }
   }
-  return false;
+  return null;
 }
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });   // strict: one invalid byte is unreadable, never U+FFFD; a BOM stays in the text (JSON.parse refuses it, as the other three)
+const readText = (p) => UTF8.decode(readFileSync(p));
 function strictParse(text) {   // JSON.parse alone hides what the profile forbids
   if (/\b(NaN|Infinity)\b/.test(text) && !/"[^"]*\b(NaN|Infinity)\b[^"]*"/.test(text)) throw new Error("non-JSON constant");
-  if (hasFloatToken(text)) throw new Error("floating-point number (the profile forbids floats)");
+  const bad = badNumberToken(text); if (bad) throw new Error(bad);
   if (hasDuplicateKeys(text)) throw new Error("duplicate key");
   if (hasLoneSurrogate(text)) throw new Error("lone surrogate");
   if (jsonNestingDepth(text) > 512) throw new Error("nesting deeper than 512");
@@ -168,29 +159,35 @@ export function verifyPack(packPath, { ledgerPath = null, trustStore = null, log
 function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources = false) {
   const layers = [];
   let pack;
-  try { pack = strictParse(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(packPath))); layers.push(L("pack-json", "PASS")); }
+  try { pack = strictParse(readText(packPath)); layers.push(L("pack-json", "PASS")); }
   catch (e) { return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("pack-json", "FAIL", String(e.message))], pack_sha3: null }; }
   if (!isObj(pack)) return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("pack-json", "FAIL", "pack is not a JSON object")], pack_sha3: null };
   layers.push(L("pack-kind", pack.kind === PACK_KIND ? "PASS" : "FAIL", String(pack.kind)));
-  const scope = String(pack.honest_scope ?? "");
-  layers.push(L("honest-scope", scope.includes(SCOPE_MARK) ? "PASS" : "FAIL", scope.includes(SCOPE_MARK) ? "declared limits present" : `missing the declared limit '${SCOPE_MARK}'`));
+  const scopeOk = typeof pack.honest_scope === "string" && pack.honest_scope.includes(SCOPE_MARK);   // a string, not a list that contains the mark
+  layers.push(L("honest-scope", scopeOk ? "PASS" : "FAIL", scopeOk ? "declared limits present" : `missing the declared limit '${SCOPE_MARK}' (honest_scope must be a string containing it)`));
   let computed = null;
   try { computed = sha3(Buffer.from(canon(without(pack, "pack_sha3")), "utf-8")); }
   catch (e) { layers.push(L("pack-sha3", "FAIL", "pack not canonicalisable: " + e.message)); }
   if (computed !== null) layers.push(L("pack-sha3", pack.pack_sha3 === computed ? "PASS" : "FAIL", `declared ${String(pack.pack_sha3).slice(0, 16)}… computed ${computed.slice(0, 16)}…`));
   const pv = isObj(pack.verification) ? pack.verification : {};
   layers.push(L("pack-self-verification", pv.chain_ok === true && pv.record_digests_bound === true ? "PASS" : "FAIL", `chain_ok=${pv.chain_ok} record_digests_bound=${pv.record_digests_bound}`));
-  const lp = ledgerPath || (pack.ledger_file ? join(dirname(packPath), basename(String(pack.ledger_file))) : null);
+  const lf = pack.ledger_file;
+  const lfBad = lf !== undefined && lf !== null && !ledgerFileNameOk(lf);
+  const lp = ledgerPath || (lf !== undefined && lf !== null && !lfBad ? join(dirname(packPath), lf) : null);
   let anchored = false;
   const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
-  if ((ledgerPath || logPubkeyHex || requireSources) && !(lp && isFile(lp))) {
+  if (lfBad) {
+    layers.push(L("ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"));
+  } else if ((ledgerPath || logPubkeyHex || requireSources) && !(lp && isFile(lp))) {
     layers.push(L("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"));
   } else if (lp && isFile(lp)) {
     const entries = [], failures = [];
     let prev = GENESIS, n = 0;
-    for (let line of readFileSync(lp, "utf-8").split("\n")) {
-      if (line.endsWith("\r")) line = line.slice(0, -1);   // the bound is on the content, terminator (\n or \r\n) excluded
-      if (!line.trim()) continue;
+    let ledgerText;
+    try { ledgerText = readText(lp); } catch (e) { ledgerText = null; failures.push("ledger not UTF-8: " + e.message); }
+    for (let line of ledgerText === null ? [] : ledgerText.split("\n")) {
+      if (line.endsWith("\r")) line = line.slice(0, -1);   // exactly one terminator (\n or \r\n); a run of \r is content and counts
+      if (/^[ \t]*$/.test(line)) continue;                  // blank = ASCII space/tab only (U+00A0, U+2028, U+0085, U+FEFF are unparsable lines)
       if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }
       let e;
       try { e = strictParse(line); } catch (err) { failures.push(`unparsable line: ${err.message}`); break; }
@@ -247,11 +244,11 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
 }
 
 function checkTip(count, first, last, tipPath, pubHex) {
-  let tip; try { tip = strictParse(readFileSync(tipPath, "utf-8")); } catch (e) { return { ok: false, error: "tip_unreadable: " + e.message }; }
+  let tip; try { tip = strictParse(readText(tipPath)); } catch (e) { return { ok: false, error: "tip_unreadable: " + e.message }; }
   if (!isObj(tip) || tip.kind !== TIP_KIND) return { ok: false, error: "tip_invalid: not a cryptovalid_tip/1 document" };
   for (const k of ["entries", "ledger_id", "tip_sha256", "ts", "signature_hex"]) if (!(k in tip)) return { ok: false, error: `tip_invalid: tip missing field ${k}` };
   if (!Number.isInteger(tip.entries) || tip.entries < 0 || !["ledger_id", "tip_sha256", "ts", "signature_hex"].every((k) => typeof tip[k] === "string")) return { ok: false, error: "tip_invalid: bad field types" };
-  if (!HEX64.test(tip.ledger_id) || !HEX64.test(tip.tip_sha256) || parseInstant(tip.ts) === null) return { ok: false, error: "tip_invalid: not a cryptovalid_tip/1 document" };
+  if (!HEX64.test(tip.ledger_id) || !HEX64.test(tip.tip_sha256) || !INSTANT_RE.test(tip.ts)) return { ok: false, error: "tip_invalid: not a cryptovalid_tip/1 document" };   // shape, as the other three (values are the writer's)
   if (tip.log_pubkey_hex !== undefined && tip.log_pubkey_hex !== null && tip.log_pubkey_hex !== "" && tip.log_pubkey_hex !== pubHex) return { ok: false, error: "tip_invalid: tip log key differs from the trusted log key" };   // "" = absent (cryptovalid profile); a non-string never equals the key
   if (!edOk(pubHex, tipPayload(tip.entries, tip.ledger_id, tip.tip_sha256, tip.ts), tip.signature_hex)) return { ok: false, error: "tip_invalid: tip signature invalid" };
   if (tip.ledger_id !== first) return { ok: false, error: "tip_of_another_ledger" };
@@ -264,12 +261,14 @@ function checkTip(count, first, last, tipPath, pubHex) {
 function verifySidecar(packPath, pack, trustStore) {
   const sp = packPath + ".sig.json";
   if (!existsSync(sp)) return { status: "SKIP", detail: "pack not signed" };
-  let side; try { side = strictParse(readFileSync(sp, "utf-8")); } catch (e) { return { status: "FAIL", detail: "unreadable: " + e.message }; }
+  let side; try { side = strictParse(readText(sp)); } catch (e) { return { status: "FAIL", detail: "unreadable: " + e.message }; }
   if (!isObj(side)) return { status: "FAIL", detail: "sidecar is not a JSON object" };
   let digest; try { digest = sha3(Buffer.from(canon(without(pack, "pack_sha3")), "utf-8")); } catch (e) { return { status: "FAIL", detail: "pack not canonicalisable" }; }
   if (pack.pack_sha3 !== digest) return { status: "FAIL", detail: "content does not match pack_sha3 (modified after signing)" };
   if (side.signed_pack_sha3 !== digest) return { status: "FAIL", detail: "pack changed after signature (digest differs from the signed one)" };
-  if (typeof side.public_key_hex !== "string" || !edOk(side.public_key_hex, signedPayload(side), String(side.signature_hex))) return { status: "FAIL", detail: "signature invalid for the declared key" };
+  let sigOk = false;
+  try { sigOk = typeof side.public_key_hex === "string" && typeof side.signature_hex === "string" && edOk(side.public_key_hex, signedPayload(side), side.signature_hex); } catch { sigOk = false; }   // a payload that cannot be canonicalised (missing/odd fields) is an invalid signature, never an exception
+  if (!sigOk) return { status: "FAIL", detail: "signature invalid for the declared key" };
   const fp = sha256(Buffer.from(side.public_key_hex, "hex")).slice(0, 16);
   if (side.fingerprint !== undefined && side.fingerprint !== null && side.fingerprint !== fp) return { status: "FAIL", detail: "declared fingerprint does not match the signing key" };
   const out = { status: "PASS", signer_id: side.signer_id, fingerprint: fp, trusted: false };
@@ -311,7 +310,7 @@ function main(argv) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--ledger") ledger = args[++i];
     else if (args[i] === "--trust-store") {
-      try { trust = strictParse(readFileSync(args[++i], "utf-8")); if (!isObj(trust) || !Object.values(trust).every((v) => typeof v === "string")) throw new Error("not an object of strings"); }
+      try { trust = strictParse(readText(args[++i])); if (!isObj(trust) || !Object.values(trust).every((v) => typeof v === "string")) throw new Error("not an object of strings"); }
       catch (e) { console.error("trust store unreadable: " + e.message); return 2; }
     }
     else if (args[i] === "--log-pubkey") key = args[++i]; else if (args[i] === "--require-sources") requireSources = true; else pack = args[i];

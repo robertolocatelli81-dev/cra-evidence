@@ -125,7 +125,7 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 	layers = append(layers, layer{"pack-json", "PASS", ""})
 	kind, _ := getS(pack, "kind")
 	layers = append(layers, layer{"pack-kind", ifs(kind == packKind, "PASS", "FAIL"), kind})
-	scope, _ := getS(pack, "honest_scope")
+	scope, _ := getS(pack, "honest_scope") // getS: a non-string honest_scope is "" → FAIL (a list containing the mark is not a declaration)
 	layers = append(layers, layer{"honest-scope", ifs(strings.Contains(scope, scopeMark), "PASS", "FAIL"), ifs(strings.Contains(scope, scopeMark), "declared limits present", "missing the declared limit")})
 	declared, _ := getS(pack, "pack_sha3")
 	computed, err := digest("sha3_256", pack, "pack_sha3")
@@ -142,14 +142,20 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 	}
 	layers = append(layers, layer{"pack-self-verification", ifs(selfOK, "PASS", "FAIL"), fmt.Sprintf("snapshot ok=%v", selfOK)})
 	lp := ledgerPath
-	if lp == "" {
-		if lf, ok := getS(pack, "ledger_file"); ok && lf != "" {
-			lp = filepath.Join(filepath.Dir(packPath), filepath.Base(lf))
+	lfBad := false
+	if v, has := pack.Vals["ledger_file"]; has && v != nil {
+		lf, isStr := v.(string)
+		if !isStr || !ledgerFileNameOK(lf) {
+			lfBad = true // a non-string, an empty string or anything with a path separator: malformed pack field, never a path
+		} else if lp == "" {
+			lp = filepath.Join(filepath.Dir(packPath), lf)
 		}
 	}
 	isFile := func(p string) bool { st, e := os.Stat(p); return e == nil && st.Mode().IsRegular() }
 	anchored := false
-	if (ledgerPath != "" || logPub != "" || requireSources) && !(lp != "" && isFile(lp)) {
+	if lfBad {
+		layers = append(layers, layer{"ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"})
+	} else if (ledgerPath != "" || logPub != "" || requireSources) && !(lp != "" && isFile(lp)) {
 		layers = append(layers, layer{"ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"})
 	} else if lp != "" && isFile(lp) {
 		f, _ := os.Open(lp)
@@ -161,9 +167,9 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 		for sc.Scan() {
 			line := sc.Bytes()
 			if len(line) > 0 && line[len(line)-1] == '\r' {
-				line = line[:len(line)-1]
+				line = line[:len(line)-1] // exactly one terminator; a run of \r is content and counts against the bound
 			}
-			if len(strings.TrimSpace(string(line))) == 0 {
+			if len(strings.Trim(string(line), " \t")) == 0 { // blank = ASCII space/tab only (Unicode spaces are an unparsable line)
 				continue
 			}
 			if len(line) > maxLineBytes {
@@ -341,9 +347,12 @@ func checkTip(count int, first, last, tipPath, pubHex string) (bool, string) {
 
 func verifySidecar(packPath string, pack *Object, declared string, trust map[string]string, haveTrust bool) (string, string, bool) {
 	sp := packPath + ".sig.json"
+	if _, err := os.Lstat(sp); err != nil && os.IsNotExist(err) {
+		return "SKIP", "pack not signed", false // SKIP only when there is NO sidecar; one that exists but cannot be read is a FAIL
+	}
 	raw, err := os.ReadFile(sp)
 	if err != nil {
-		return "SKIP", "pack not signed", false
+		return "FAIL", "unreadable: " + err.Error(), false
 	}
 	side, err := parseObject(raw)
 	if err != nil {
@@ -397,6 +406,10 @@ func ifs(c bool, a, b string) string {
 		return a
 	}
 	return b
+}
+
+func ledgerFileNameOK(v string) bool {
+	return v != "" && v != "." && v != ".." && !strings.ContainsAny(v, "/\\")
 }
 
 const maxLineBytes = 64 << 20    // cryptovalid MaxLineBytes: content of one JSONL line, terminator excluded

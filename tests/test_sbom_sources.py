@@ -250,8 +250,17 @@ class TestSourceStore(unittest.TestCase):
         self.assertIn("refused unread", str(cm.exception))
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         from dataclasses import replace
-        with self.assertRaises(ValueError):                                                   # and at record time, before the read
-            self.lk.record_sbom(replace(sb, source={**sb.source, "sha256": "0" * 64}), source_path=big)
+        import cra_evidence.locker as lm
+        opened = []
+        real_open = open
+        lm.open = lambda path, *a, **k: (opened.append(str(path)), real_open(path, *a, **k))[1]
+        try:
+            with self.assertRaises(ValueError) as cm:                                         # and at record time, BEFORE any read
+                self.lk.record_sbom(replace(sb, source={**sb.source, "sha256": "0" * 64}), source_path=big)
+        finally:
+            del lm.open
+        self.assertIn("refused unread", str(cm.exception))
+        self.assertNotIn(big, opened)
 
     def test_deeply_nested_and_duplicate_key_documents_are_malformed_not_crashes(self):
         deep = os.path.join(self.d, "deep.json")

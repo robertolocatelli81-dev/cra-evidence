@@ -17,7 +17,8 @@ const PACK_KIND: &str = "cra_evidence_pack/1";
 const SCOPE_MARK: &str = "NOT a conformity assessment";
 const TIP_KIND: &str = "cryptovalid_tip/1";
 const MAX_LINE_BYTES: usize = 64 << 20;
-const MAX_SOURCE_BYTES: u64 = 256 << 20;   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
+const MAX_SOURCE_BYTES: u64 = 256 << 20;
+fn ledger_file_name_ok(v: &str) -> bool { !v.is_empty() && v != "." && v != ".." && !v.contains('/') && !v.contains('\\') }   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
 
@@ -161,26 +162,27 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
         _ => false,
     };
     l(&mut layers, "pack-self-verification", self_ok, format!("snapshot ok={self_ok}"));
+    // ledger_file must be a plain file name: a non-string, an empty string or anything with a path separator is a malformed field
+    let lf_bad = match pack.get("ledger_file") { None | Some(Json::Null) => false, Some(Json::Str(v)) => !ledger_file_name_ok(v), Some(_) => true };
     let lp: Option<String> = match ledger_path {
         Some(p) => Some(p.to_string()),
-        None => gs(&pack, "ledger_file").filter(|s| !s.is_empty()).map(|lf| {
-            let name = Path::new(lf).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            Path::new(pack_path).parent().unwrap_or(Path::new(".")).join(name).to_string_lossy().to_string()
-        }),
+        None => if lf_bad { None } else { gs(&pack, "ledger_file").map(|lf| Path::new(pack_path).parent().unwrap_or(Path::new(".")).join(lf).to_string_lossy().to_string()) },
     };
     let is_file = |p: &str| Path::new(p).is_file();
     let mut anchored = false;
     let required = ledger_path.is_some() || log_pub.is_some() || require_sources;
-    if required && !lp.as_deref().map(is_file).unwrap_or(false) {
+    if lf_bad {
+        layers.push(Layer("ledger-chain".into(), "FAIL".into(), "ledger_file malformed: must be a plain file name (string, no path separators)".into()));
+    } else if required && !lp.as_deref().map(is_file).unwrap_or(false) {
         layers.push(Layer("ledger-chain".into(), "FAIL".into(), "ledger explicitly required (ledger_path / log key / require_sources given) but not found".into()));
     } else if let Some(lp) = lp.filter(|p| is_file(p)) {
-        let text = std::fs::read_to_string(&lp).unwrap_or_default();
-        let mut entries: Vec<BTreeMap<String, Json>> = vec![];
         let mut failures: Vec<String> = vec![];
+        let text = match std::fs::read_to_string(&lp) { Ok(t) => t, Err(e) => { failures.push(format!("ledger unreadable or not UTF-8: {e}")); String::new() } };
+        let mut entries: Vec<BTreeMap<String, Json>> = vec![];
         let (mut prev, mut n) = (GENESIS.to_string(), 0i64);
         for line in text.split('\n') {
-            let line = line.strip_suffix('\r').unwrap_or(line);   // the bound is on the content, terminator excluded
-            if line.trim().is_empty() { continue; }
+            let line = line.strip_suffix('\r').unwrap_or(line);   // exactly one terminator; a run of \r is content and counts
+            if line.trim_matches(|c| c == ' ' || c == '\t').is_empty() { continue; }   // blank = ASCII space/tab only
             if line.len() > MAX_LINE_BYTES { failures.push(format!("entry {n}: line exceeds {MAX_LINE_BYTES} bytes")); break; }
             let e = match parse_obj(line) { Ok(o) => o, Err(err) => { failures.push(format!("entry {n}: unparsable: {err}")); break; } };
             if gi(&e, "idx") != Some(n) { failures.push(format!("entry {n}: idx not sequential")); }
@@ -268,7 +270,8 @@ fn check_tip(count: i64, first: &str, last: &str, tip_path: &str, pub_hex: &str)
 
 fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str, trust: Option<&BTreeMap<String, Json>>) -> (String, String, bool) {
     let sp = format!("{pack_path}.sig.json");
-    let Ok(raw) = std::fs::read_to_string(&sp) else { return ("SKIP".into(), "pack not signed".into(), false) };
+    if !Path::new(&sp).exists() && std::fs::symlink_metadata(&sp).is_err() { return ("SKIP".into(), "pack not signed".into(), false); }   // SKIP only when there is NO sidecar
+    let raw = match std::fs::read_to_string(&sp) { Ok(r) => r, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
     let side = match parse_obj(&raw) { Ok(o) => o, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
     let dg = sha3_of(pack, "pack_sha3");
     if declared != dg { return ("FAIL".into(), "content does not match pack_sha3 (modified after signing)".into(), false); }

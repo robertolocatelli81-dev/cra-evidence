@@ -250,7 +250,88 @@ def cases(base):
     def crlf(d):
         build(d); p = os.path.join(d, "l.jsonl"); t = open(p).read(); open(p, "w", newline="").write(t.replace("\n", "\r\n"))
     case("ledger_crlf", crlf)
-    if os.environ.get("CRA_ORACLE_BIG") == "1":   # 65 MiB line after the anchor: a scanner that stops silently would accept the prefix
+    # ---- round 4: input hygiene must be ONE rule in the four (blank lines, terminators, integers, UTF-8, unreadable sidecar, field types)
+    def ledger_extra_line(d, text):
+        build(d); p = os.path.join(d, "l.jsonl"); lines = open(p, encoding="utf-8").read().splitlines()
+        open(p, "w", encoding="utf-8", newline="").write(lines[0] + "\n" + text + "\n" + "\n".join(lines[1:]) + "\n")
+    for label, ch in (("nbsp", "\u00a0"), ("u2028", "\u2028"), ("nel_u0085", "\u0085"), ("bom_feff", "\ufeff")):
+        case(f"ledger_blank_line_{label}", (lambda ch: lambda d: ledger_extra_line(d, ch))(ch))
+    case("ledger_blank_line_ascii_tab_space", lambda d: ledger_extra_line(d, " \t "))
+    def cr_padding(d):   # a run of \r before the newline is CONTENT (one terminator only): the four must agree on what that content is
+        build(d); p = os.path.join(d, "l.jsonl"); b = open(p, "rb").read(); i = b.index(b"\n"); open(p, "wb").write(b[:i] + b"\r\r\r" + b[i:])
+    case("ledger_line_cr_padding", cr_padding)
+    def bigint_in(path, key="x"):
+        t = open(path, encoding="utf-8").read(); open(path, "w", encoding="utf-8").write(t[:1] + f'"{key}": 9007199254740993, ' + t[1:])
+    def side_bigint(d):
+        lk, key, pack, pk = build(d, sign=True); bigint_in(str(sidecar_path(pack))); json.dump({"acme-ci": key[1]}, open(os.path.join(d, "trust.json"), "w")); return {"trust": os.path.join(d, "trust.json")}
+    case("sidecar_integer_beyond_2p53", side_bigint)
+    def tip_bigint(d):
+        lk, key, pack, pk = build(d); bigint_in(os.path.join(d, "l.jsonl.tip.json")); return {"key": key[1]}
+    case("tip_integer_beyond_2p53", tip_bigint)
+    def pack_bigint(d):
+        build(d); bigint_in(os.path.join(d, "p.json"))
+    case("pack_integer_beyond_2p53", pack_bigint)
+    def inject_byte(path):
+        b = open(path, "rb").read(); open(path, "wb").write(b[:1] + b'"note": "\xff", ' + b[1:])
+    def side_ff(d):
+        lk, key, pack, pk = build(d, sign=True); inject_byte(str(sidecar_path(pack)))
+    case("sidecar_not_utf8", side_ff)
+    def side_ff_trust(d):
+        lk, key, pack, pk = build(d, sign=True); inject_byte(str(sidecar_path(pack))); json.dump({"acme-ci": key[1]}, open(os.path.join(d, "trust.json"), "w")); return {"trust": os.path.join(d, "trust.json")}
+    case("sidecar_not_utf8_with_trust", side_ff_trust)
+    def tip_ff(d):
+        lk, key, pack, pk = build(d); inject_byte(os.path.join(d, "l.jsonl.tip.json")); return {"key": key[1]}
+    case("tip_not_utf8", tip_ff)
+    def trust_ff(d):
+        lk, key, pack, pk = build(d, sign=True); open(os.path.join(d, "trust.json"), "wb").write(b'{"acme-ci": "' + key[1].encode() + b'", "other": "\xff"}'); return {"trust": os.path.join(d, "trust.json")}
+    case("trust_store_not_utf8", trust_ff)
+    def ledger_ff(d):
+        build(d); p = os.path.join(d, "l.jsonl"); b = open(p, "rb").read(); open(p, "wb").write(b.replace(b'"kind"', b'"k\xffnd"', 1))
+    case("ledger_line_not_utf8", ledger_ff)
+    def side_dir(d):
+        build(d); os.makedirs(os.path.join(d, "p.json.sig.json"))
+    case("sidecar_is_a_directory", side_dir)
+    if os.geteuid() != 0:
+        def side_mode0(d):
+            lk, key, pack, pk = build(d, sign=True); os.chmod(sidecar_path(pack), 0)
+        case("sidecar_unreadable", side_mode0)
+    def lf_int(d):
+        build(d); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["ledger_file"] = 1; json.dump(j, open(p, "w")); rehash(p)
+    case("ledger_file_not_string", lf_int)
+    def lf_slash(d):
+        build(d); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["ledger_file"] = "l.jsonl/"; json.dump(j, open(p, "w")); rehash(p)
+    case("ledger_file_trailing_slash", lf_slash)
+    def scope_list(d):
+        build(d); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["honest_scope"] = [j["honest_scope"]]; json.dump(j, open(p, "w")); rehash(p)
+    case("honest_scope_is_a_list", scope_list)
+    def tip_month_13(d):   # signed by the real log key: only its holder can produce it, the four must still agree
+        from cra_evidence.signing import tip_payload
+        lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl.tip.json"); t = json.load(open(p)); sk, pkh = key
+        t["ts"] = "2026-13-01T00:00:00Z"; t["signature_hex"] = sk.sign(tip_payload(t["entries"], t["ledger_id"], t["tip_sha256"], t["ts"])).hex()
+        json.dump(t, open(p, "w")); return {"key": key[1]}
+    case("tip_ts_month_13_signed", tip_month_13)
+    def pack_text(d, fn):   # rewrite the pack's TEXT (not its value) so the canonical form — and pack_sha3 — stays the same
+        build(d); p = os.path.join(d, "p.json"); t = open(p, encoding="utf-8").read(); open(p, "w", encoding="utf-8").write(fn(t))
+    case("pack_plus_number", lambda d: pack_text(d, lambda t: t.replace('"retention_years": 10', '"retention_years": +10', 1)))
+    case("pack_leading_zero_number", lambda d: pack_text(d, lambda t: t.replace('"retention_years": 10', '"retention_years": 010', 1)))
+    def raw_tab(d):   # a raw TAB byte inside a string: canonical form identical to the escaped one, so every digest still matches
+        keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
+        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prod\tuct", "1", tip_key=key)
+        lk.record_vulnerability(VulnerabilityRecord("prod\tuct", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
+        t = open(pack, encoding="utf-8").read(); assert "\\t" in t; open(pack, "w", encoding="utf-8").write(t.replace("\\t", "\t"))
+    case("pack_raw_control_char_same_digest", raw_tab)
+    case("pack_utf8_bom", lambda d: pack_text(d, lambda t: "\ufeff" + t))
+    case("pack_lone_surrogate_escape", lambda d: pack_text(d, lambda t: t.replace('"product_version": "1"', '"product_version": "1\\ud800"', 1)))
+    def side_missing_field(d):
+        lk, key, pack, pk = build(d, sign=True); s = json.load(open(sidecar_path(pack))); del s["signed_utc"]; json.dump(s, open(sidecar_path(pack), "w"))
+    case("sidecar_missing_signed_utc", side_missing_field)
+    def side_int_field(d):
+        lk, key, pack, pk = build(d, sign=True); s = json.load(open(sidecar_path(pack))); s["alg"] = 7; json.dump(s, open(sidecar_path(pack), "w"))
+    case("sidecar_alg_not_string", side_int_field)
+    if os.environ.get("CRA_ORACLE_BIG") == "1":
+        def cr_padding_big(d):   # 66 MiB of \r before the newline: content above the bound in all four (Python must not buffer it whole)
+            build(d); p = os.path.join(d, "l.jsonl"); b = open(p, "rb").read(); i = b.index(b"\n"); open(p, "wb").write(b[:i] + b"\r" * (66 << 20) + b[i:])
+        case("ledger_line_cr_padding_66MiB", cr_padding_big)   # 65 MiB line after the anchor: a scanner that stops silently would accept the prefix
         def big_line(d):
             build(d); open(os.path.join(d, "l.jsonl"), "a").write('{"idx": 3, "ts": "x", "prev_hash": "y", "data": {"pad": "' + "a" * (65 << 20) + '"}, "self_hash": "z"}\n')
         case("ledger_line_65MiB_after_anchor", big_line)

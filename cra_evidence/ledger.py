@@ -56,16 +56,52 @@ def _no_dup_keys(pairs):
     return d
 
 
+def line_content(raw: bytes) -> bytes:
+    """One JSONL line without its terminator: exactly one trailing \\n, then at most one \\r (the same rule in the four
+    verifiers — a run of \\r bytes is content, not a terminator, and counts against the bound)."""
+    if raw.endswith(b"\n"):
+        raw = raw[:-1]
+    if raw.endswith(b"\r"):
+        raw = raw[:-1]
+    return raw
+
+
+def is_blank_line(content: bytes) -> bool:
+    """Blank = only ASCII space / tab. Unicode spaces (U+00A0, U+2028, U+0085, U+FEFF…) are NOT blank: they are an
+    unparsable line, in all four verifiers."""
+    return content.strip(b" \t") == b""
+
+
+def _refuse_int(tok: str):
+    n = int(tok)
+    if abs(n) > 2 ** 53 - 1:
+        raise ValueError(f"integer {tok} outside ±(2^53-1) (the profile forbids it: a JavaScript reader would round it)")
+    return n
+
+
 def _refuse_float(tok: str):
     raise ValueError(f"floating-point number {tok} (the profile forbids floats: `10.0` and `10` would hash alike in one reader and not in another)")
 
 
 def parse_line(line: str, allow_floats: bool = False):
     """The profile's strict JSON: no NaN/Infinity, no duplicate keys, no floats (not even integral ones such as 10.0 —
-    JSON.parse would silently turn them into 10). allow_floats=True only for third-party generator documents, which
-    are stored as bytes, never canonicalised."""
-    return json.loads(line, parse_constant=_refuse_constant, object_pairs_hook=_no_dup_keys,
-                      parse_float=(float if allow_floats else _refuse_float))
+    JSON.parse would silently turn them into 10), no integer outside ±(2^53-1). allow_floats=True only for third-party
+    generator documents, which are stored as bytes, never canonicalised (numbers are then read as JSON allows)."""
+    v = json.loads(line, parse_constant=_refuse_constant, object_pairs_hook=_no_dup_keys,
+                   parse_float=(float if allow_floats else _refuse_float), parse_int=(int if allow_floats else _refuse_int))
+    if not allow_floats and _has_lone_surrogate(v):
+        raise ValueError("lone surrogate in a JSON string (the profile forbids it: it has no UTF-8 encoding)")
+    return v
+
+
+def _has_lone_surrogate(v) -> bool:
+    if isinstance(v, str):
+        return any(0xD800 <= ord(c) <= 0xDFFF for c in v)
+    if isinstance(v, dict):
+        return any(_has_lone_surrogate(k) or _has_lone_surrogate(x) for k, x in v.items())
+    if isinstance(v, list):
+        return any(_has_lone_surrogate(x) for x in v)
+    return False
 
 
 def load_trust_store(text: str) -> Dict[str, str]:
@@ -149,11 +185,18 @@ class Ledger:
         if not os.path.exists(self.path):
             return iter(())
         with open(self.path, "rb") as f:
-            for raw in f:
-                if raw.strip():
-                    if len(raw.rstrip(b"\r\n")) > MAX_LINE_BYTES:   # the bound is on the line's content, terminator excluded, in all four verifiers
-                        raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
-                    yield parse_line(raw.decode("utf-8"))   # NaN/Infinity are not JSON: fail
+            while True:
+                raw = f.readline(MAX_LINE_BYTES + 2)          # bounded read: a hostile line is never buffered whole
+                if not raw:
+                    break
+                if not raw.endswith(b"\n") and len(raw) == MAX_LINE_BYTES + 2:
+                    raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
+                content = line_content(raw)
+                if is_blank_line(content):
+                    continue
+                if len(content) > MAX_LINE_BYTES:             # the bound is on the content, terminator excluded, in all four verifiers
+                    raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
+                yield parse_line(content.decode("utf-8"))   # NaN/Infinity are not JSON: fail; invalid UTF-8: fail
 
     def verify(self) -> Dict[str, Any]:
         """Snapshot verification: every self_hash recomputes, every prev_hash links, idx contiguous, non-empty.

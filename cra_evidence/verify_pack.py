@@ -22,6 +22,10 @@ HEX64 = re.compile(r"[0-9a-f]{64}")
 from .sbom import MAX_SOURCE_BYTES   # noqa: E402 — a stored generator document above this is refused unread (a symlink to /dev/zero must not hang a verifier)
 
 
+def ledger_file_name_ok(v: Any) -> bool:
+    return isinstance(v, str) and v not in ("", ".", "..") and "/" not in v and "\\" not in v
+
+
 def _layer(name: str, status: str, detail: str = "") -> Dict[str, str]:
     return {"layer": name, "status": status, "detail": detail}
 
@@ -95,9 +99,10 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     if not isinstance(pack, dict):
         return {"ok": False, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", "pack is not a JSON object")], "pack_sha3": None}
     layers.append(_layer("pack-kind", "PASS" if pack.get("kind") == PACK_KIND else "FAIL", str(pack.get("kind"))))
-    scope = str(pack.get("honest_scope", ""))
-    layers.append(_layer("honest-scope", "PASS" if HONEST_SCOPE_MARK in scope else "FAIL",
-                         "declared limits present" if HONEST_SCOPE_MARK in scope else f"missing the declared limit {HONEST_SCOPE_MARK!r}"))
+    scope = pack.get("honest_scope")
+    scope_ok = isinstance(scope, str) and HONEST_SCOPE_MARK in scope      # a string, not a list that happens to contain the mark
+    layers.append(_layer("honest-scope", "PASS" if scope_ok else "FAIL",
+                         "declared limits present" if scope_ok else f"missing the declared limit {HONEST_SCOPE_MARK!r} (honest_scope must be a string containing it)"))
     try:
         computed = sha3_hex({k: v for k, v in pack.items() if k != "pack_sha3"})
     except TypeError as e:
@@ -110,11 +115,16 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     pv = pack.get("verification") if isinstance(pack.get("verification"), dict) else {}
     layers.append(_layer("pack-self-verification", "PASS" if (pv.get("chain_ok") is True and pv.get("record_digests_bound") is True) else "FAIL",
                          f"chain_ok={pv.get('chain_ok')} record_digests_bound={pv.get('record_digests_bound')}"))
-    # ledger: explicit path wins; otherwise only the NAME next to the pack (never a path from the pack)
-    lp = ledger_path or (os.path.join(os.path.dirname(os.path.abspath(path)), os.path.basename(str(pack.get("ledger_file"))))
-                         if pack.get("ledger_file") else None)
+    # ledger: explicit path wins; otherwise only the NAME next to the pack (never a path from the pack): ledger_file must be
+    # a plain file name — a non-string, an empty string or anything with a path separator is a malformed pack field
+    lp, lf = ledger_path, pack.get("ledger_file")
+    lf_bad = lf is not None and not ledger_file_name_ok(lf)
+    if lp is None and lf is not None and not lf_bad:
+        lp = os.path.join(os.path.dirname(os.path.abspath(path)), lf)
     anchored = False
-    if (ledger_path or log_pubkey_hex or require_sources) and not (lp and os.path.isfile(lp)):
+    if lf_bad:
+        layers.append(_layer("ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"))
+    elif (ledger_path or log_pubkey_hex or require_sources) and not (lp and os.path.isfile(lp)):
         # the caller asked for a chain/tip/source check by name: a missing ledger is a FAIL, never a silent skip
         layers.append(_layer("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"))
     elif lp and os.path.isfile(lp):
