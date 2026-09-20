@@ -228,9 +228,13 @@ class TestSourceStore(unittest.TestCase):
         entries = [{"data": {"kind": "cra_sbom", "source": {"sha256": "../../etc/passwd"}}}]
         lay = _source_documents(self.led, entries, False)
         self.assertEqual(lay["status"], "FAIL")
-        self.assertIn("malformed hash", lay["detail"])
+        self.assertIn("malformed source hash", lay["detail"])
         with self.assertRaises(ValueError):
             source_file(self.led, "../../etc/passwd")
+        # the same semantics in all four verifiers (differential oracle cases sbom_source_hash_is_*): null / "" = no hash
+        # recorded; any other non-64-hex value (int, object, upper-case hex, traversal) = FAIL
+        for v, status in ((None, "SKIP"), ("", "SKIP"), (123, "FAIL"), ({"x": 1}, "FAIL"), ("A" * 64, "FAIL")):
+            self.assertEqual(_source_documents(self.led, [{"data": {"kind": "cra_sbom", "source": {"sha256": v}}}], False)["status"], status, v)
 
 
 class TestExport(unittest.TestCase):
@@ -267,10 +271,20 @@ class TestExport(unittest.TestCase):
     def test_bom_refs_are_unique_and_dependencies_only_where_known(self):
         r = SBOMRecord("p", "1", [SBOMComponent("a", "1", purl="pkg:npm/x@1"), SBOMComponent("b", "1", purl="pkg:npm/x@1"), SBOMComponent("p", "1")])
         out = r.to_cyclonedx_min()
+        try:
+            import cryptography  # noqa: F401
+        except ImportError:
+            self.skipTest("cryptography not installed (the installed-floor part of this test needs it)")
         refs = [c["bom-ref"] for c in out["components"]] + [out["metadata"]["component"]["bom-ref"]]
         self.assertEqual(len(refs), len(set(refs)), refs)
-        self.assertEqual(out["dependencies"][0]["ref"], out["metadata"]["component"]["bom-ref"])       # top-level floor: all direct
-        self.assertEqual(sorted(out["dependencies"][0]["dependsOn"]), sorted(c["bom-ref"] for c in out["components"]))
+        self.assertNotIn("dependencies", out)                                                          # no edges known → none invented
+        inst = sbom_from_installed("p", "1", ["cryptography"]).to_cyclonedx_min()                       # top-level floor: all direct
+        self.assertEqual(inst["dependencies"][0], {"ref": inst["metadata"]["component"]["bom-ref"], "dependsOn": [c["bom-ref"] for c in inst["components"]]})
+        tr = sbom_from_installed("p", "1", ["cryptography"], transitive=True)
+        if len(tr.components) > 1:                                                                     # the Requires-Dist graph as walked, not flattened
+            deps = {d["ref"]: d["dependsOn"] for d in tr.to_cyclonedx_min("1.7")["dependencies"]}
+            self.assertEqual(deps["p@1"], ["pkg:pypi/cryptography@" + tr.components[[c.name for c in tr.components].index("cryptography")].version])
+            self.assertTrue(any(v for k, v in deps.items() if k != "p@1"), deps)
         rec = ingest(REAL[0]); ing = rec.to_cyclonedx_min()
         self.assertNotIn("dependencies", ing)                                                          # never re-invented for an ingested graph
         self.assertIn({"name": "cra-evidence:source_sha256", "value": rec.source["sha256"]}, ing["metadata"]["properties"])

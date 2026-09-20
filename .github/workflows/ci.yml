@@ -78,3 +78,10 @@ jobs:
           assert subprocess.run(["/tmp/cyclonedx", "validate", "--input-file", "/tmp/bad.json", "--input-format", "json", "--input-version", "v1_7", "--fail-on-errors"]).returncode != 0, "positive control: the CLI must reject a broken document"
           print(f"cyclonedx-cli: {n} exports valid, positive control rejected")
           PY
+      - name: Official SPDX tools (pyspdxtools) — the two SPDX generator fixtures must parse with no issue (its exit code is 0 even on an invalid document, so the output is the measure; positive control included)
+        run: |
+          pip install "spdx-tools==0.8.5"
+          for f in tests/fixtures/real_tools/*spdx*.json; do out=$(pyspdxtools -i "$f" 2>&1); if [ -n "$out" ]; then echo "$f: $out"; exit 1; fi; echo "$f: no issue"; done
+          echo '{"spdxVersion":"SPDX-2.3"}' > /tmp/bad.spdx.json
+          if [ -z "$(pyspdxtools -i /tmp/bad.spdx.json 2>&1)" ]; then echo "positive control: pyspdxtools printed nothing on an invalid document"; exit 1; fi
+          echo "pyspdxtools: fixtures clean, positive control reported"

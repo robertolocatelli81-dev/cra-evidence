@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,9 @@ from .canonical import sha3_hex
 from .ledger import Ledger
 from .locker import HONEST_SCOPE_MARK, PACK_KIND, RECORD_KINDS, source_file
 from .signing import verify_pack_signature, verify_tip
+
+
+HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
 def _layer(name: str, status: str, detail: str = "") -> Dict[str, str]:
@@ -40,21 +44,22 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
     <ledger>.sources/<sha256>.json must hash to that value when present. A mismatch is a FAIL; absence is a SKIP
     (hash-only evidence) unless required."""
     wanted: Dict[str, int] = {}
+    malformed = 0
     for e in entries:
         d = e.get("data") if isinstance(e.get("data"), dict) else {}
         src = d.get("source") if d.get("kind") == "cra_sbom" and isinstance(d.get("source"), dict) else None
-        h = str(src.get("sha256", "")) if src else ""
-        if h:
-            wanted[h] = wanted.get(h, 0) + 1
-    if not wanted:
-        return _layer("source-documents", "SKIP", "no SBOM source document recorded by hash")
-    present, bad, absent = 0, [], 0
-    for h in sorted(wanted):
-        try:
-            fp = source_file(ledger_path, h)
-        except ValueError:
-            bad.append(h[:16] + " (malformed hash)")
+        if src is None or src.get("sha256") in (None, ""):
+            continue                                          # absent / null / empty: no hash recorded
+        h = src["sha256"]
+        if not isinstance(h, str) or not HEX64.fullmatch(h):
+            malformed += 1                                    # present but not a SHA-256: a FAIL, never a path
             continue
+        wanted[h] = wanted.get(h, 0) + 1
+    if not wanted and not malformed:
+        return _layer("source-documents", "SKIP", "no SBOM source document recorded by hash")
+    present, bad, absent = 0, [f"{malformed} record(s) with a malformed source hash"] if malformed else [], 0
+    for h in sorted(wanted):
+        fp = source_file(ledger_path, h)
         if not os.path.isfile(fp):
             absent += 1
             continue
@@ -101,9 +106,9 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     lp = ledger_path or (os.path.join(os.path.dirname(os.path.abspath(path)), os.path.basename(str(pack.get("ledger_file"))))
                          if pack.get("ledger_file") else None)
     anchored = False
-    if (ledger_path or log_pubkey_hex) and not (lp and os.path.isfile(lp)):
-        # the caller asked for a chain/tip check by name: a missing ledger is a FAIL, never a silent skip
-        layers.append(_layer("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key given) but not found"))
+    if (ledger_path or log_pubkey_hex or require_sources) and not (lp and os.path.isfile(lp)):
+        # the caller asked for a chain/tip/source check by name: a missing ledger is a FAIL, never a silent skip
+        layers.append(_layer("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"))
     elif lp and os.path.isfile(lp):
         led = Ledger(lp)
         lv = led.verify()

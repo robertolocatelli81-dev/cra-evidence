@@ -13,11 +13,11 @@ nested, duplicates merged, dependency edges, component types); nested `component
 malformed hash is dropped as in the SPDX path; SPDX `primaryPackagePurpose` maps to the type and `cpe23Type` refs are
 read. Export: CycloneDX 1.6 or 1.7 (official 1.7 schema vendored), with serialNumber, `metadata.tools`, bom-refs
 (unique), component types, CPEs, SPDX licence *expressions* (`Apache-2.0 OR BSD-3-Clause`), and `dependencies` only
-for the installed floor (never re-invented for an ingested graph); the installed floor reads PEP 639
+from edges the producer knows — the installed floor's Requires-Dist graph as walked, top-level or transitive — never re-invented for an ingested graph; the installed floor reads PEP 639
 `License-Expression` (the legacy `License` field is empty in cryptography ≥ 42 — 0.2.0 recorded no licence there).
-Validated with the official CycloneDX CLI 0.33.1 in CI (positive control included) and with jsonschema in the tests.
-Six unmodified generator documents vendored as fixtures. Differential oracle: 31 cases, and the failing layers must
-agree too (ablation caught). Interop re-measured against cryptovalid 0.15.0. Legal basis re-read 20/09/2026 (ENISA
+Validated with the official CycloneDX CLI 0.33.1 and pyspdxtools 0.8.5 in CI (positive controls included) and with jsonschema in the tests.
+Six unmodified generator documents vendored as fixtures. Differential oracle: 39 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing), and the failing layers must
+agree too (ablation caught; before the fix Go/Rust skipped a non-string hash while Python/JS failed — found by self-review and by Haiku in round 1). Interop re-measured against cryptovalid 0.15.0. Legal basis re-read 20/09/2026 (ENISA
 FAQ: no API at initial release; glossary unchanged; Digital Omnibus 2025/0360(COD) still a proposal).
 
 ## 0.2.0 — 2026-09-15

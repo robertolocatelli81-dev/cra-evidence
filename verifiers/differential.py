@@ -53,6 +53,18 @@ def build_with_source(d, tamper=None):
     return {}
 
 
+def build_with_raw_source(d, value):
+    """a producer-written cra_sbom record whose source.sha256 is `value` (hostile or degenerate): the four verifiers must
+    agree — null/"" = no hash (SKIP), anything that is not a 64-hex string = FAIL, never a file path"""
+    from cra_evidence.locker import _bind
+    keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
+    lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+    lk.ledger.append(_bind({"kind": "cra_sbom", "product_id": "prodotto-ü", "product_version": "1", "sbom": {}, "component_count": 0,
+                            "resolved_components": 0, "sbom_floor_met": False, "source": {"sha256": value}}))
+    lk.evidence_pack(os.path.join(d, "p.json"))
+    return {}
+
+
 def rehash(pack):
     p = json.load(open(pack)); p.pop("pack_sha3"); p["pack_sha3"] = sha3_hex(p); json.dump(p, open(pack, "w")); return p
 
@@ -145,6 +157,16 @@ def cases(base):
     case("sbom_source_absent", lambda d: build_with_source(d, "absent"))
     case("sbom_source_absent_required", lambda d: build_with_source(d, "absent"), require_sources=True)
     case("sbom_source_intact_required", lambda d: build_with_source(d), require_sources=True)
+    case("sbom_source_hash_is_int", lambda d: build_with_raw_source(d, 123))
+    case("sbom_source_hash_is_null", lambda d: build_with_raw_source(d, None))
+    case("sbom_source_hash_is_empty", lambda d: build_with_raw_source(d, ""))
+    case("sbom_source_hash_is_traversal", lambda d: build_with_raw_source(d, "../../../etc/passwd"))
+    case("sbom_source_hash_is_upper_hex", lambda d: build_with_raw_source(d, "A" * 64))
+    case("sbom_source_hash_is_object", lambda d: build_with_raw_source(d, {"x": 1}))
+    case("sbom_source_hash_non_ascii", lambda d: build_with_raw_source(d, "a" * 15 + "\u20ac" + "b" * 40))   # a byte slice at 16 would split the €
+    def sources_required_ledger_missing(d):
+        build_with_source(d); os.remove(os.path.join(d, "l.jsonl"))
+    case("sources_required_but_ledger_missing", sources_required_ledger_missing, require_sources=True)
     return out
 
 

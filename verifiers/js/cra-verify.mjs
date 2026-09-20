@@ -166,8 +166,8 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
   const lp = ledgerPath || (pack.ledger_file ? join(dirname(packPath), basename(String(pack.ledger_file))) : null);
   let anchored = false;
   const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
-  if ((ledgerPath || logPubkeyHex) && !(lp && isFile(lp))) {
-    layers.push(L("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key given) but not found"));
+  if ((ledgerPath || logPubkeyHex || requireSources) && !(lp && isFile(lp))) {
+    layers.push(L("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"));
   } else if (lp && isFile(lp)) {
     const entries = [], failures = [];
     let prev = GENESIS, n = 0;
@@ -261,15 +261,18 @@ function verifySidecar(packPath, pack, trustStore) {
 }
 
 function sourceDocuments(lp, entries, require, isFile) {
-  const wanted = new Set();
+  const wanted = new Set(); let malformed = 0;
   for (const e of entries) {
     const d = isObj(e.data) ? e.data : {};
-    if (d.kind === "cra_sbom" && isObj(d.source) && d.source.sha256) wanted.add(String(d.source.sha256));
+    if (d.kind !== "cra_sbom" || !isObj(d.source)) continue;
+    const v = d.source.sha256;
+    if (v === undefined || v === null || v === "") continue;            // absent / null / empty: no hash recorded
+    if (typeof v !== "string" || !HEX64.test(v)) { malformed++; continue; }  // present but not a SHA-256: FAIL, never a path
+    wanted.add(v);
   }
-  if (!wanted.size) return L("source-documents", "SKIP", "no SBOM source document recorded by hash");
-  let present = 0, absent = 0; const bad = [];
+  if (!wanted.size && !malformed) return L("source-documents", "SKIP", "no SBOM source document recorded by hash");
+  let present = 0, absent = 0; const bad = malformed ? [`${malformed} record(s) with a malformed source hash`] : [];
   for (const h of [...wanted].sort()) {
-    if (!HEX64.test(h)) { bad.push(h.slice(0, 16) + " (malformed hash)"); continue; }
     const fp = join(lp + ".sources", h + ".json");
     if (!isFile(fp)) { absent++; continue; }
     const got = sha256(readFileSync(fp));

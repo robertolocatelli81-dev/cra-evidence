@@ -149,8 +149,8 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 	}
 	isFile := func(p string) bool { st, e := os.Stat(p); return e == nil && st.Mode().IsRegular() }
 	anchored := false
-	if (ledgerPath != "" || logPub != "") && !(lp != "" && isFile(lp)) {
-		layers = append(layers, layer{"ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key given) but not found"})
+	if (ledgerPath != "" || logPub != "" || requireSources) && !(lp != "" && isFile(lp)) {
+		layers = append(layers, layer{"ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"})
 	} else if lp != "" && isFile(lp) {
 		f, _ := os.Open(lp)
 		sc := bufio.NewScanner(f)
@@ -387,6 +387,7 @@ func ifs(c bool, a, b string) string {
 // sourceDocuments: the SBOM source documents recorded by hash must, when present next to the ledger, hash to it.
 func sourceDocuments(lp string, entries []*Object, require bool) layer {
 	wanted := map[string]bool{}
+	malformed := 0
 	for _, e := range entries {
 		d, ok := e.Vals["data"].(*Object)
 		if !ok {
@@ -399,11 +400,21 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 		if !ok {
 			continue
 		}
-		if h, _ := getS(src, "sha256"); h != "" {
-			wanted[h] = true
+		v, has := src.Vals["sha256"]
+		if !has || v == nil {
+			continue // absent / null: no hash recorded
 		}
+		h, isStr := v.(string)
+		if isStr && h == "" {
+			continue // empty: no hash recorded
+		}
+		if !isStr || !hex64.MatchString(h) {
+			malformed++ // present but not a SHA-256: a FAIL, never a path
+			continue
+		}
+		wanted[h] = true
 	}
-	if len(wanted) == 0 {
+	if len(wanted) == 0 && malformed == 0 {
 		return layer{"source-documents", "SKIP", "no SBOM source document recorded by hash"}
 	}
 	keys := make([]string, 0, len(wanted))
@@ -412,11 +423,10 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 	}
 	sort.Strings(keys)
 	present, absent, bad := 0, 0, []string{}
+	if malformed > 0 {
+		bad = append(bad, fmt.Sprintf("%d record(s) with a malformed source hash", malformed))
+	}
 	for _, h := range keys {
-		if !hex64.MatchString(h) {
-			bad = append(bad, h[:min(16, len(h))]+" (malformed hash)")
-			continue
-		}
 		fp := filepath.Join(lp+".sources", h+".json")
 		if st, e := os.Stat(fp); e != nil || !st.Mode().IsRegular() {
 			absent++

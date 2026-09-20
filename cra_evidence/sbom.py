@@ -62,6 +62,10 @@ class SBOMRecord:
     # (component count incl. nested, dependency edges, component types) and what the index did to it (merged
     # duplicates) — and, when `source_fingerprint()` was applied, the SHA-256 of its exact bytes
     source: Dict[str, Any] = field(default_factory=dict)
+    # dependency edges KNOWN to the producer, as [parent_key, child_key] over `name.lower()` ("" = the product): the
+    # installed floor fills them from importlib.metadata `Requires-Dist`; an ingested document leaves them empty (its
+    # graph lives in the stored source and is never re-invented)
+    edges: List[List[str]] = field(default_factory=list)
 
     def __post_init__(self):
         # deterministic order: the same environment must give the same SBOM bytes whatever the traversal order
@@ -73,8 +77,9 @@ class SBOMRecord:
     def to_cyclonedx_min(self, spec_version: str = "1.6") -> Dict[str, Any]:
         """CycloneDX 1.6 or 1.7 JSON (root has additionalProperties:false; our extras live in metadata.properties).
         bom-ref = purl when the generator gave one, else name@version, made unique; `dependencies` are emitted only
-        for the installed top-level floor (every component IS a direct dependency of the product there) — for an
-        ingested document the graph is the generator's and lives in the stored source, it is never re-invented."""
+        from `edges` the producer KNOWS (the installed floor: top-level = direct dependencies of the product,
+        transitive = the Requires-Dist graph as walked) — for an ingested document the graph is the generator's and
+        lives in the stored source, it is never re-invented."""
         if spec_version not in CYCLONEDX_EXPORT_VERSIONS:
             raise ValueError(f"spec_version must be one of {sorted(CYCLONEDX_EXPORT_VERSIONS)}")
         from . import __version__
@@ -108,8 +113,20 @@ class SBOMRecord:
                               for c, ref in zip(comps, refs)]}
         if self.source.get("sha256"):
             out["metadata"]["properties"].append({"name": "cra-evidence:source_sha256", "value": self.source["sha256"]})
-        if self.depth == "top-level-only":
-            out["dependencies"] = [{"ref": primary_ref, "dependsOn": refs}] + [{"ref": r, "dependsOn": []} for r in refs]
+        if self.edges:
+            ref_of = {_norm_key(c.name): r for c, r in zip(comps, refs)}
+            ref_of[""] = primary_ref
+            deps: Dict[str, List[str]] = {primary_ref: []}
+            for parent, child in self.edges:
+                pr, cr = ref_of.get(parent), ref_of.get(child)
+                if pr is None or cr is None:
+                    continue
+                deps.setdefault(pr, [])
+                if cr not in deps[pr]:
+                    deps[pr].append(cr)
+            for r in refs:
+                deps.setdefault(r, [])
+            out["dependencies"] = [{"ref": r, "dependsOn": d} for r, d in deps.items()]
         return out
 
 
@@ -217,11 +234,14 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
     installed is recorded with version 'NOT-INSTALLED' (the floor is honest, not padded)."""
     from importlib import metadata as md
     comps: Dict[str, SBOMComponent] = {}
-    todo = list(top_level)
+    edges: List[List[str]] = []
+    todo = [("", n) for n in top_level]         # (parent key, name); "" = the product
     seen = set()
     while todo:
-        name = todo.pop(0)
-        key = name.lower()
+        parent, name = todo.pop(0)
+        key = _norm_key(name)
+        if [parent, key] not in edges and parent != key:
+            edges.append([parent, key])
         if key in seen:
             continue
         seen.add(key)
@@ -234,11 +254,16 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
                 for r in dist.requires or []:
                     if _is_extra_requirement(r):
                         continue
-                    todo.append(_req_name(r))
+                    todo.append((key, _req_name(r)))
         except md.PackageNotFoundError:
             comps[key] = SBOMComponent(name=name, version="NOT-INSTALLED")
     return SBOMRecord(product_id=product_id, product_version=product_version, components=list(comps.values()),
-                      depth="transitive" if transitive else "top-level-only")
+                      depth="transitive" if transitive else "top-level-only", edges=edges)
+
+
+def _norm_key(name: str) -> str:
+    """PEP 503 normalisation: the key under which a distribution is looked up and an edge is recorded."""
+    return re.sub(r"[-_.]+", "-", name.lower())
 
 
 def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:

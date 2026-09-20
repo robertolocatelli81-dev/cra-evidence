@@ -100,19 +100,26 @@ struct Out { ok: bool, auth: String, anchored: bool, layers: Vec<Layer>, pack_sh
 
 fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool) -> Layer {
     let mut wanted: Vec<String> = Vec::new();
+    let mut malformed = 0usize;
+    let is_hex64 = |h: &str| h.len() == 64 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
     for e in entries {
         if let Some(Json::Object(d)) = e.get("data") {
             if gs(d, "kind") != Some("cra_sbom") { continue; }
             if let Some(Json::Object(src)) = d.get("source") {
-                if let Some(h) = gs(src, "sha256") { if !h.is_empty() && !wanted.iter().any(|w| w == h) { wanted.push(h.to_string()); } }
+                match src.get("sha256") {
+                    None | Some(Json::Null) => {}                                   // absent / null: no hash recorded
+                    Some(Json::Str(h)) if h.is_empty() => {}                        // empty: no hash recorded
+                    Some(Json::Str(h)) if is_hex64(h) => { if !wanted.iter().any(|w| w == h) { wanted.push(h.to_string()); } }
+                    Some(_) => { malformed += 1; }                                  // present but not a SHA-256: FAIL, never a path
+                }
             }
         }
     }
-    if wanted.is_empty() { return Layer("source-documents".into(), "SKIP".into(), "no SBOM source document recorded by hash".into()); }
+    if wanted.is_empty() && malformed == 0 { return Layer("source-documents".into(), "SKIP".into(), "no SBOM source document recorded by hash".into()); }
     wanted.sort();
     let (mut present, mut absent, mut bad): (usize, usize, Vec<String>) = (0, 0, Vec::new());
+    if malformed > 0 { bad.push(format!("{malformed} record(s) with a malformed source hash")); }
     for h in &wanted {
-        if h.len() != 64 || !h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) { bad.push(format!("{} (malformed hash)", &h[..h.len().min(16)])); continue; }
         let fp = format!("{lp}.sources/{h}.json");
         if !Path::new(&fp).is_file() { absent += 1; continue; }
         match std::fs::read(&fp) {
@@ -159,9 +166,9 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
     };
     let is_file = |p: &str| Path::new(p).is_file();
     let mut anchored = false;
-    let required = ledger_path.is_some() || log_pub.is_some();
+    let required = ledger_path.is_some() || log_pub.is_some() || require_sources;
     if required && !lp.as_deref().map(is_file).unwrap_or(false) {
-        layers.push(Layer("ledger-chain".into(), "FAIL".into(), "ledger explicitly required (ledger_path / log key given) but not found".into()));
+        layers.push(Layer("ledger-chain".into(), "FAIL".into(), "ledger explicitly required (ledger_path / log key / require_sources given) but not found".into()));
     } else if let Some(lp) = lp.filter(|p| is_file(p)) {
         let text = std::fs::read_to_string(&lp).unwrap_or_default();
         let mut entries: Vec<BTreeMap<String, Json>> = vec![];
