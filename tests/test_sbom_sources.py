@@ -245,9 +245,17 @@ class TestSourceStore(unittest.TestCase):
         big = os.path.join(self.d, "big.json")
         with open(big, "wb") as f:
             f.truncate(MAX_SOURCE_BYTES + 1)                                                  # sparse: nothing is read if the guard holds
-        with self.assertRaises(ValueError) as cm:
-            sbom_from_cyclonedx(big, "tiny-cra-sample", "1.0.0")
+        import cra_evidence.sbom as sm
+        opened = []
+        real_open = open
+        sm.open = lambda path, *a, **k: (opened.append(str(path)), real_open(path, *a, **k))[1]
+        try:
+            with self.assertRaises(ValueError) as cm:
+                sbom_from_cyclonedx(big, "tiny-cra-sample", "1.0.0")
+        finally:
+            del sm.open
         self.assertIn("refused unread", str(cm.exception))
+        self.assertNotIn(big, opened)
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         from dataclasses import replace
         import cra_evidence.locker as lm

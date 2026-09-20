@@ -155,7 +155,11 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 		if !isStr || !ledgerFileNameOK(lf) {
 			lfBad = true // a non-string, an empty string or anything with a path separator: malformed pack field, never a path
 		} else if lp == "" {
-			lp = filepath.Join(filepath.Dir(packPath), lf)
+			realPack := packPath
+			if r, e := filepath.EvalSymlinks(packPath); e == nil {
+				realPack = r // the pack's REAL directory (symlinks resolved), the same in all four
+			}
+			lp = filepath.Join(filepath.Dir(realPack), lf)
 		}
 	}
 	isFile := func(p string) bool { st, e := os.Stat(p); return e == nil && st.Mode().IsRegular() }
@@ -523,6 +527,12 @@ func main() {
 		return args[i+1]
 	}
 	for i := 0; i < len(args); i++ {
+		for _, f := range []string{"--ledger", "--trust-store", "--log-pubkey"} { // --flag=value is the same as --flag value
+			if strings.HasPrefix(args[i], f+"=") {
+				args = append(args[:i], append([]string{f, strings.TrimPrefix(args[i], f+"=")}, args[i+1:]...)...)
+				break
+			}
+		}
 		switch args[i] {
 		case "--ledger":
 			ledger = next(i)
@@ -548,6 +558,10 @@ func main() {
 		case "--require-sources":
 			requireSources = true
 		default:
+			if strings.HasPrefix(args[i], "-") || pack != "" { // an unknown flag, a --flag=value form or a second positional is never silently "the pack"
+				fmt.Fprintln(os.Stderr, "usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]")
+				os.Exit(2)
+			}
 			pack = args[i]
 		}
 	}

@@ -32,7 +32,8 @@ def _locker(a) -> CRAEvidenceLocker:
 
 
 def main(argv: List[str] = None) -> int:
-    p = argparse.ArgumentParser(prog="cra", description="CRA evidence locker (SBOM, Art. 14 clock, SRP notices, 10-year seal) — offline-verifiable")
+    p = argparse.ArgumentParser(prog="cra", description="CRA evidence locker (SBOM, Art. 14 clock, SRP notices, 10-year seal) — offline-verifiable",
+                                allow_abbrev=False)   # `--require-source` is not `--require-sources`: the three independent verifiers refuse it, so does the reference
     p.add_argument("--version", action="version", version=f"cra-evidence {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -78,6 +79,8 @@ def main(argv: List[str] = None) -> int:
     s.add_argument("--log-pubkey", help="trusted public key (hex) of the ledger's signed tip: detects a truncated tail")
     s.add_argument("--require-sources", action="store_true", help="every SBOM source document recorded by hash must be present next to the ledger and match (absence = FAIL)")
     s = sub.add_parser("feeds", help="read-only network checks: OSV positive control, KEV/EUVD exploitation signal for ids"); s.add_argument("ids", nargs="*")
+    for sp_ in sub.choices.values():
+        sp_.allow_abbrev = False          # subparsers do not inherit it: `--require-source` must not become `--require-sources`
     a = p.parse_args(argv)
 
     if a.cmd == "keygen":

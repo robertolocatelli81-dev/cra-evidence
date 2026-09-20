@@ -129,7 +129,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     lp, lf = ledger_path, pack.get("ledger_file")
     lf_bad = lf is not None and not ledger_file_name_ok(lf)
     if lp is None and lf is not None and not lf_bad:
-        lp = os.path.join(os.path.dirname(os.path.abspath(path)), lf)
+        lp = os.path.join(os.path.dirname(os.path.realpath(path)), lf)   # the pack's REAL directory (symlinks resolved), the same in all four
     anchored = False
     if lf_bad:
         layers.append(_layer("ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"))

@@ -421,6 +421,25 @@ def cases(base):
                                 "resolved_components": 0, "sbom_floor_met": False, "source": {"format": "cyclonedx-json", "generator": "syft"}}))
         lk.evidence_pack(os.path.join(d, "p.json")); return {"require_sources": True}
     case("sbom_external_format_without_hash_required", external_without_hash)
+    def unknown_flag(d):
+        build_with_source(d, "absent"); return {"raw_args": ["--require-source"]}       # a typo must never verify PASS on an absent document
+    case("cli_unknown_flag", unknown_flag, cli=True)
+    def equals_form(d):   # --flag=value is accepted by argparse: the three accept it too, with the same verdict (tip checked → anchored)
+        lk, key, pack, pk = build(d); return {"key": key[1], "raw_args": [f"--log-pubkey={key[1]}"]}   # the reference row takes `key`; the CLIs get both forms
+    case("cli_flag_equals_form_ok", equals_form)
+    def equals_form_wrong_key(d):
+        build(d); return {"key": "11" * 32, "raw_args": ["--log-pubkey=" + "11" * 32]}
+    case("cli_flag_equals_form_wrong_key", equals_form_wrong_key)
+    def abbreviated(d):
+        lk, key, pack, pk = build(d); return {"raw_args": ["--log", key[1]]}
+    case("cli_abbreviated_flag", abbreviated, cli=True)
+    def two_positionals(d):
+        build(d); return {"raw_args": [os.path.join(d, "p.json")]}
+    case("cli_two_positionals", two_positionals, cli=True)
+    def symlinked_dir_dotdot(d):   # verify d/other/link/../p.json: the OS reads d/p.json; the ledger next to the REAL pack must be found by all four
+        build(d); os.makedirs(os.path.join(d, "other")); os.makedirs(os.path.join(d, "real")); os.symlink(os.path.join(d, "real"), os.path.join(d, "other", "link"))
+        return {"pack": os.path.join(d, "other", "link", "..", "p.json")}   # OS: d/real/.. = d → d/p.json; lexically: d/other/p.json (absent)
+    case("pack_path_through_symlink_and_dotdot", symlinked_dir_dotdot)
     def long_name(d):   # a 250-byte pack name is legal; its sidecar name (263 bytes) is not: lstat ENAMETOOLONG must be the same verdict in the four
         lk, key, pack, pk = build(d); newp = os.path.join(d, "p" * 246 + ".json"); os.rename(pack, newp); shutil.move(os.path.join(d, "l.jsonl"), os.path.join(d, "l.jsonl"))
         j = json.load(open(newp)); json.dump(j, open(newp, "w")); return {"pack": newp}

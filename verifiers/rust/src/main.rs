@@ -169,7 +169,10 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
     let lf_bad = match pack.get("ledger_file") { None | Some(Json::Null) => false, Some(Json::Str(v)) => !ledger_file_name_ok(v), Some(_) => true };
     let lp: Option<String> = match ledger_path {
         Some(p) => Some(p.to_string()),
-        None => if lf_bad { None } else { gs(&pack, "ledger_file").map(|lf| Path::new(pack_path).parent().unwrap_or(Path::new(".")).join(lf).to_string_lossy().to_string()) },
+        None => if lf_bad { None } else { gs(&pack, "ledger_file").map(|lf| {
+            let real = std::fs::canonicalize(pack_path).unwrap_or_else(|_| Path::new(pack_path).to_path_buf());   // the pack's REAL directory, the same in all four
+            real.parent().unwrap_or(Path::new(".")).join(lf).to_string_lossy().to_string()
+        }) },
     };
     let is_file = |p: &str| Path::new(p).is_file();
     let mut anchored = false;
@@ -313,7 +316,13 @@ fn flag_value(args: &[String], i: usize, flag: &str) -> String {   // a flag wit
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = Vec::new();   // --flag=value is the same as --flag value
+    for a in std::env::args().skip(1) {
+        match ["--ledger", "--trust-store", "--log-pubkey"].iter().find(|f| a.starts_with(&format!("{f}="))) {
+            Some(f) => { args.push(f.to_string()); args.push(a[f.len() + 1..].to_string()); }
+            None => args.push(a),
+        }
+    }
     let (mut pack, mut ledger, mut trust_file, mut key): (Option<String>, Option<String>, Option<String>, Option<String>) = (None, None, None, None);
     let mut require_sources = false;
     let mut i = 0;
@@ -323,7 +332,7 @@ fn main() {
             "--trust-store" => { i += 1; trust_file = Some(flag_value(&args, i, "--trust-store")); }
             "--log-pubkey" => { i += 1; let k = flag_value(&args, i, "--log-pubkey"); if !is_hex64(&k) { eprintln!("usage: --log-pubkey must be 64 lower-case hex characters"); std::process::exit(2); } key = Some(k); }
             "--require-sources" => { require_sources = true; }
-            a => pack = Some(a.to_string()),
+            a => { if a.starts_with('-') || pack.is_some() { eprintln!("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2); } pack = Some(a.to_string()); }
         }
         i += 1;
     }

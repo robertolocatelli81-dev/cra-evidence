@@ -16,7 +16,7 @@ read. Export: CycloneDX 1.6 or 1.7 (official 1.7 schema vendored), with serialNu
 from edges the producer knows — the installed floor's Requires-Dist graph as walked, with PEP 508 markers evaluated for this interpreter (`packaging` when importable, else a small evaluator; an unevaluable marker keeps the edge and is counted): `dependsOn: []` is emitted only for a component whose metadata was read, everything else is declared an `unknown` composition (CycloneDX's own value for "inconclusive") — never re-invented for an ingested graph; the installed floor reads PEP 639
 `License-Expression` (cryptography ships it since 46.0.0 with the legacy `License` field empty, measured on PyPI metadata 20/09/2026 — with such a distribution 0.2.0 recorded no licence).
 Validated with the official CycloneDX CLI 0.33.1 and pyspdxtools 0.8.5 in CI (positive controls included) and with jsonschema in the tests.
-Six unmodified generator documents vendored as fixtures. Differential oracle: 123 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing; a stored document made unreadable), and the failing layers must
+Six unmodified generator documents vendored as fixtures. Differential oracle: 129 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing; a stored document made unreadable), and the failing layers must
 agree too (ablation caught; before the fix Go/Rust skipped a non-string hash while Python/JS failed — found by self-review and by Haiku in round 1). Interop re-measured against cryptovalid 0.15.0. Found by the round-1 review (Opus) and fixed: the Python reference parsed pack, sidecar, tip and trust store with plain `json.loads` (duplicate keys accepted, first-wins for a reader, last-wins for the verifier — JS/Go/Rust refuse them) → strict parser everywhere; Python `verify_tip` did not check `kind` / `log_pubkey_hex` (the three did); the Go verifier ignored the scanner error (a line above 64 MiB ended the scan silently and the prefix verified); a `source_path` could be bound to an index not read from it; an ingested SBOM recorded without `source_path` carried a hash nothing re-verified (Sonnet) — now refused; a generator document nested too deep crashed the ingest instead of raising (Sonnet) — malformed now; the JS verifier built a 65 M-node string on a 65 MiB pad and died (fast path added); all four verifiers and the producer now share cryptovalid's 64 MiB line bound. Round 2 (Opus, Sonnet): the JS verifier accepted integral floats (`10.0` parses to 10 and hashes alike) while the other
 three refused them → number tokens with `.`/`e` refused in JS and in the Python parser (generator documents excepted: they are
 bytes, never canonicalised); the trust store was read laxly by JS and Go (a duplicate `signer_id` gave `trusted-signed` there and
@@ -100,7 +100,19 @@ default; an SPDX 3.0 `identifier` list was still stringified into `cpe` → neve
 document was a `TypeError` at record time → malformed at ingest; the verifier reads the ledger once (chain, binding, anchor,
 sources and tip judge one snapshot); the example pack is now signed (an ephemeral key, its public key in `trust.json`) as
 its README already said; oracle hygiene: a stale Rust binary is refused like a stale Go one, the Python-CLI rows run from the
-repo root. Oracle: 123 cases in CI, 130 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
+repo root. Oracle after round 7: 123 cases in CI, 130 with `CRA_ORACLE_BIG=1`, 0 divergences.
+Round 8 (Opus, Fable 5.1; Sonnet and Haiku found nothing): the CI guard "every TestCase class ran" could not match the
+`unittest -v` line format of Python 3.11/3.12 (the first push would have gone red on two of three rows) → matches both
+formats, with a fake-class positive control; an unknown flag, an abbreviation (`--require-source`, `--log`) or a second
+positional was silently taken as the pack by the three verifiers (a typo verified PASS on an absent source document) and
+abbreviations were expanded by the reference → usage error in all four (`allow_abbrev=False` on every subparser), and
+`--flag=value` is one grammar in the four; the ledger next to a pack reached through a symlink and `..` was found by Rust
+alone → the pack's directory is resolved through the filesystem (`realpath`) in all four (Node's JS `realpathSync` resolved
+`..` before the symlink: its `.native` variant does not); a component the generator declared without a version exported
+`version: ""` → omitted; a `kind` that is not a string crashed `evidence_pack` → ignored in the counts; verifiers/README
+listed five gated big-line cases for seven; `SECURITY.md` pointed at a file that does not exist; the README claim "no wall
+clock in tests" was broader than the tests → "the deadline arithmetic never reads the wall clock". Oracle: 129 cases in CI,
+136 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
 FAQ: no API at initial release; glossary unchanged; Digital Omnibus 2025/0360(COD) still a proposal).
 
 ## 0.2.0 — 2026-09-15

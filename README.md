@@ -80,7 +80,7 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 - Interoperability is measured: a ledger written here verifies unchanged with cryptovalid v0.15.0's reference
   verifier, and the truncated tail is seen through the signed tip (`tests/test_feeds_and_interop.py`, run in CI
   against the published wheel; re-measured 20/09/2026).
-- The Art. 14 clock is tested on explicit instants (no wall clock in tests): early warning and notification from
+- The Art. 14 clock is computed and tested on explicit instants (the deadline arithmetic never reads the wall clock): early warning and notification from
   awareness; final report 14 days after the corrective measure is available, undetermined until it exists; severe
   incident (`--incident`) final report one calendar month after the *submission* of the incident notification
   (Art. 14(4)(c)), undetermined until that submission is recorded; overdue is computed from the recorded submission
@@ -153,7 +153,7 @@ by the four verifiers of this repository.
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 123 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 129 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 20/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

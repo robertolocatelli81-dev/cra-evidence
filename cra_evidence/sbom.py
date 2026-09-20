@@ -110,7 +110,7 @@ class SBOMRecord:
                                 {"name": "cra-evidence:depth_note", "value": "'top-level-only' is the literal Annex I floor; most vulnerabilities live in transitive dependencies — prefer a transitive SBOM from a full generator when available"},
                                 {"name": "cra-evidence:sbom_sha3", "value": self.canonical_hash()}]},
                "components": [{"type": c.type if c.type in CYCLONEDX_COMPONENT_TYPES else "library", "bom-ref": ref, "name": c.name,
-                               **({"version": c.version} if c.version != "NOASSERTION" else {}),   # an SPDX token is not a version (optional since 1.4)
+                               **({"version": c.version} if c.version and c.version != "NOASSERTION" else {}),   # no version declared / an SPDX token: omitted (optional since 1.4)
                                **({"supplier": {"name": c.supplier}} if c.supplier else {}),
                                **({"purl": c.purl} if c.purl else {}),
                                **({"cpe": c.cpe} if c.cpe else {}),

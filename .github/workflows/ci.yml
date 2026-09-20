@@ -22,10 +22,12 @@ jobs:
           # round 7 (Fable): a `__main__` block above a class hid two tests from the per-file loop — every test class in every file must have run
           import ast, glob, re
           ran = open("/tmp/ut.log").read()
+          seen = lambda cls: re.search(r"\." + re.escape(cls) + r"[.)]", ran) is not None   # 3.9: "(mod.Class)"; 3.11+: "(mod.Class.test)"
+          assert not seen("NoSuchTestClassXYZ"), "positive control: a fake class name must not match"
           for f in glob.glob("tests/test_*.py"):
               for node in ast.parse(open(f).read()).body:
                   if isinstance(node, ast.ClassDef) and any(isinstance(b, ast.Attribute) and b.attr == "TestCase" for b in node.bases):
-                      assert re.search(r"\(" + re.escape(node.name) + r"[.)]|\." + re.escape(node.name) + r"\)", ran), f"{f}:{node.name} did not run"
+                      assert seen(node.name), f"{f}:{node.name} did not run"
           print("every TestCase class ran")
           PY
       - name: Gate — a tampered pack MUST fail, an intact one MUST pass (exit codes)

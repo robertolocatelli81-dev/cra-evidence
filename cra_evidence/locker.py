@@ -237,7 +237,7 @@ class CRAEvidenceLocker:
         for e in self.ledger.entries():
             d = e.get("data") if isinstance(e, dict) else None
             k = d.get("kind") if isinstance(d, dict) else None
-            if k:
+            if isinstance(k, str) and k:
                 counts[k] = counts.get(k, 0) + 1
         pack = {"kind": PACK_KIND, "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "legal_basis": LEGAL_BASIS, "honest_scope": HONEST_SCOPE, "product_id": self.product_id,

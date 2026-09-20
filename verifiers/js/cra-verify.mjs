@@ -9,7 +9,7 @@
 // source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
 // hash (SHA-256) to that value when the file is present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 import { createHash, verify as edVerify, createPublicKey } from "node:crypto";
-import { readFileSync, existsSync, statSync, lstatSync } from "node:fs";
+import { readFileSync, existsSync, statSync, lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
@@ -175,7 +175,8 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
   layers.push(L("pack-self-verification", pv.chain_ok === true && pv.record_digests_bound === true ? "PASS" : "FAIL", `chain_ok=${pv.chain_ok} record_digests_bound=${pv.record_digests_bound}`));
   const lf = pack.ledger_file;
   const lfBad = lf !== undefined && lf !== null && !ledgerFileNameOk(lf);
-  const lp = ledgerPath || (lf !== undefined && lf !== null && !lfBad ? join(dirname(packPath), lf) : null);
+  let realPack; try { realPack = realpathSync.native(packPath); } catch { realPack = packPath; }   // the pack's REAL directory (OS realpath: symlinks resolved before "..", as Python/Go/Rust do), the same in all four
+  const lp = ledgerPath || (lf !== undefined && lf !== null && !lfBad ? join(dirname(realPack), lf) : null);
   let anchored = false;
   const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
   if (lfBad) {
@@ -313,6 +314,8 @@ function main(argv) {
   const args = argv.slice(2); let pack = null, ledger = null, trust = null, key = null, requireSources = false;
   const usage = () => { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); return 2; };
   for (let i = 0; i < args.length; i++) {
+    const eq = args[i].match(/^(--ledger|--trust-store|--log-pubkey)=(.*)$/);   // --flag=value is the same as --flag value (argparse accepts both)
+    if (eq) { args.splice(i, 1, eq[1], eq[2]); }
     const val = () => { if (i + 1 >= args.length || args[i + 1] === "") return null; return args[++i]; };   // a flag without a value, or with "", is a usage error — never a silent default
     if (args[i] === "--ledger") { ledger = val(); if (ledger === null) return usage(); }
     else if (args[i] === "--trust-store") {
@@ -321,7 +324,9 @@ function main(argv) {
       catch (e) { console.error("trust store unreadable: " + e.message); return 2; }
     }
     else if (args[i] === "--log-pubkey") { key = val(); if (key === null || !HEX64.test(key)) return usage(); }
-    else if (args[i] === "--require-sources") requireSources = true; else pack = args[i];
+    else if (args[i] === "--require-sources") requireSources = true;
+    else if (args[i].startsWith("-") || pack !== null) return usage();   // an unknown flag, a --flag=value form or a second positional is never silently "the pack"
+    else pack = args[i];
   }
   if (!pack) return usage();
   const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key, requireSources });
