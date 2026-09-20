@@ -5,7 +5,7 @@ parties is included in this repository.
 
 | what | where | origin / licence |
 |---|---|---|
-| CycloneDX JSON schemas 1.6 (`bom-1.6.schema.json`, `jsf-0.82.schema.json`) | `spec/schemas/` | OWASP CycloneDX, Apache License 2.0 — https://github.com/CycloneDX/specification |
+| CycloneDX JSON schemas 1.6 and 1.7 (`bom-1.6.schema.json`, `bom-1.7.schema.json`, `jsf-0.82.schema.json`) | `spec/schemas/` | OWASP CycloneDX, Apache License 2.0 — https://github.com/CycloneDX/specification |
 | SPDX licence-id list (`spdx.schema.json`) | `spec/schemas/`, `cra_evidence/data/` | CycloneDX distribution of the SPDX License List (Apache-2.0 packaging; the list itself is CC0/SPDX) |
 | ENISA CRA SRP Glossary table (39 fields), snapshot of 15/09/2026 | `spec/sources/enisa_srp_glossary_20260915.json` | ENISA, reproduction authorised provided the source is acknowledged — https://www.enisa.europa.eu/topics/product-security/single-reporting-platform-srp/cra-srp-glossary2 |
 | Regulation (EU) 2024/2847 quotations | `spec/LEGAL_BASIS.md`, docstrings | EUR-Lex, © European Union, reuse authorised (Commission Decision 2011/833/EU) |
@@ -16,3 +16,4 @@ parties is included in this repository.
 
 No AWS SDK is vendored: the KMS client is HTTP + SigV4 written here. No keys, credentials or personal data other than
 the author's contact are in the repository or its history (checked with gitleaks on every push).
+| Generator outputs used as fixtures (`tests/fixtures/real_tools/`): Syft 1.52.0 (Anchore, Apache-2.0), Trivy 0.74.0 (Aqua Security, Apache-2.0), cdxgen 12.8.4 (CycloneDX/AppThreat, Apache-2.0) run on 20/09/2026 on a one-dependency npm project | `tests/fixtures/real_tools/` | the documents are the tools' unmodified output (data, not code); base64-js 1.5.1 is MIT |

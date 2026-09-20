@@ -4,12 +4,19 @@ format covering at the very least the top-level dependencies").
 
 Two honest ways in: (a) `sbom_from_installed` — this Python environment via importlib.metadata (top-level or
 transitive), a floor, not a scanner; (b) `sbom_from_cyclonedx` — ingest a CycloneDX JSON produced by a best-in-class
-generator (Syft, Trivy, cdxgen…): the 2026 verdict of the competitor comparison is to interoperate with the leaders
-and add what they lack — tamper-evident, offline-verifiable evidence with Art. 14 deadlines. Export is a CycloneDX
-1.6-compatible SUBSET (bomFormat, specVersion, metadata, components with purl/hashes/licenses), declared as such.
+generator (Syft, Trivy, cdxgen…) or `sbom_from_spdx`: the 2026 verdict of the competitor comparison is to
+interoperate with the leaders and add what they lack — tamper-evident, offline-verifiable evidence with Art. 14
+deadlines. The record is a normalised INDEX of the generator's document (name/version/type/purl/cpe/sha256/licence,
+flattened, de-duplicated); the generator's document itself is the evidence: `source_fingerprint()` binds its exact
+bytes (SHA-256) into the record and the locker stores the bytes next to the ledger (measured 20/09/2026 with sbomqs
+2.1.2: re-emitting only the index scored lower than every generator's original — 5.3→4.2 Syft, 6.6→4.4 cdxgen,
+4.8→3.7 Trivy — so the original is kept, not replaced). Export is a CycloneDX 1.6 or 1.7 SUBSET (bomFormat,
+specVersion, serialNumber, metadata with tools/component, components with bom-ref/type/purl/cpe/hashes/licenses,
+dependencies only where they are known), declared as such and validated against the official schemas in the tests.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -29,6 +36,8 @@ class SBOMComponent:
     purl: str = ""
     sha256: str = ""
     license: str = ""
+    type: str = "library"      # CycloneDX component type as declared by the generator (library, application, file, …)
+    cpe: str = ""
 
 
 def dedup(components: List[SBOMComponent]) -> List[SBOMComponent]:
@@ -49,6 +58,10 @@ class SBOMRecord:
     depth: str = "top-level-only"       # "transitive" | "external:cyclonedx:<generator>"
     record_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     generated_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    # the generator's document, as measured at ingest: format, generator+version, spec version, what it declared
+    # (component count incl. nested, dependency edges, component types) and what the index did to it (merged
+    # duplicates) — and, when `source_fingerprint()` was applied, the SHA-256 of its exact bytes
+    source: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         # deterministic order: the same environment must give the same SBOM bytes whatever the traversal order
@@ -57,21 +70,66 @@ class SBOMRecord:
     def canonical_hash(self) -> str:
         return sha3_hex(asdict(self))
 
-    def to_cyclonedx_min(self) -> Dict[str, Any]:
-        # schema-valid CycloneDX 1.6 (root has additionalProperties:false): our extras live in metadata.properties
-        return {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
-                "metadata": {"timestamp": self.generated_utc,
-                             "component": {"type": "application", "name": self.product_id, "version": self.product_version},
-                             "properties": [
-                                 {"name": "cra-evidence:profile", "value": f"cra-evidence-min (depth: {self.depth})"},
-                                 {"name": "cra-evidence:depth_note", "value": "'top-level-only' is the literal Annex I floor; most vulnerabilities live in transitive dependencies — prefer a transitive SBOM from a full generator when available"},
-                                 {"name": "cra-evidence:sbom_sha3", "value": self.canonical_hash()}]},
-                "components": [{"type": "library", "name": c.name, "version": c.version,
-                                **({"supplier": {"name": c.supplier}} if c.supplier else {}),
-                                **({"purl": c.purl} if c.purl else {}),
-                                **({"hashes": [{"alg": "SHA-256", "content": c.sha256}]} if c.sha256 else {}),
-                                **({"licenses": [{"license": ({"id": c.license} if is_spdx_id(c.license) else {"name": c.license})}]} if c.license else {})}
-                               for c in dedup(self.components)]}
+    def to_cyclonedx_min(self, spec_version: str = "1.6") -> Dict[str, Any]:
+        """CycloneDX 1.6 or 1.7 JSON (root has additionalProperties:false; our extras live in metadata.properties).
+        bom-ref = purl when the generator gave one, else name@version, made unique; `dependencies` are emitted only
+        for the installed top-level floor (every component IS a direct dependency of the product there) — for an
+        ingested document the graph is the generator's and lives in the stored source, it is never re-invented."""
+        if spec_version not in CYCLONEDX_EXPORT_VERSIONS:
+            raise ValueError(f"spec_version must be one of {sorted(CYCLONEDX_EXPORT_VERSIONS)}")
+        from . import __version__
+        comps = dedup(self.components)
+        refs, used = [], set()
+        for c in comps:
+            ref = c.purl or f"{c.name}@{c.version}"
+            base, n = ref, 1
+            while ref in used:
+                n += 1
+                ref = f"{base}#{n}"
+            used.add(ref)
+            refs.append(ref)
+        primary_ref = f"{self.product_id}@{self.product_version}"
+        while primary_ref in used:
+            primary_ref += "#product"
+        out = {"bomFormat": "CycloneDX", "specVersion": spec_version, "serialNumber": f"urn:uuid:{self.record_id}", "version": 1,
+               "metadata": {"timestamp": self.generated_utc,
+                            "tools": {"components": [{"type": "application", "name": "cra-evidence", "version": __version__}]},
+                            "component": {"type": "application", "bom-ref": primary_ref, "name": self.product_id, "version": self.product_version},
+                            "properties": [
+                                {"name": "cra-evidence:profile", "value": f"cra-evidence-min (depth: {self.depth})"},
+                                {"name": "cra-evidence:depth_note", "value": "'top-level-only' is the literal Annex I floor; most vulnerabilities live in transitive dependencies — prefer a transitive SBOM from a full generator when available"},
+                                {"name": "cra-evidence:sbom_sha3", "value": self.canonical_hash()}]},
+               "components": [{"type": c.type if c.type in CYCLONEDX_COMPONENT_TYPES else "library", "bom-ref": ref, "name": c.name, "version": c.version,
+                               **({"supplier": {"name": c.supplier}} if c.supplier else {}),
+                               **({"purl": c.purl} if c.purl else {}),
+                               **({"cpe": c.cpe} if c.cpe else {}),
+                               **({"hashes": [{"alg": "SHA-256", "content": c.sha256}]} if c.sha256 else {}),
+                               **(_license_entry(c.license) if c.license else {})}
+                              for c, ref in zip(comps, refs)]}
+        if self.source.get("sha256"):
+            out["metadata"]["properties"].append({"name": "cra-evidence:source_sha256", "value": self.source["sha256"]})
+        if self.depth == "top-level-only":
+            out["dependencies"] = [{"ref": primary_ref, "dependsOn": refs}] + [{"ref": r, "dependsOn": []} for r in refs]
+        return out
+
+
+def _license_entry(lic: str) -> Dict[str, Any]:
+    if is_spdx_expression(lic):
+        return {"licenses": [{"expression": lic}]}
+    return {"licenses": [{"license": ({"id": lic} if is_spdx_id(lic) else {"name": lic})}]}
+
+
+CYCLONEDX_EXPORT_VERSIONS = {"1.6", "1.7"}
+CYCLONEDX_COMPONENT_TYPES = {"application", "framework", "library", "container", "platform", "operating-system", "device",
+                             "device-driver", "firmware", "file", "machine-learning-model", "data", "cryptographic-asset"}
+
+
+def source_fingerprint(path: str) -> Dict[str, Any]:
+    """The exact bytes of the generator's document: SHA-256, size, file name. What the locker stores and what every
+    verifier re-hashes; independent of any JSON re-serialisation (a float, a key order or an escape never changes it)."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    return {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(path)}
 
 
 _EXTRA_MARKER = re.compile(r"""extra\s*==\s*['"]""")
@@ -135,6 +193,25 @@ def _req_name(req: str) -> str:
     return s.strip()
 
 
+def installed_license(meta: Any) -> str:
+    """PEP 639 `License-Expression` first (what cryptography ≥ 42, cffi, pycparser ship in 2026 — the legacy `License`
+    field is empty there), then the legacy `License` field, then the first `License ::` trove classifier."""
+    for key in ("License-Expression", "License"):
+        v = (meta.get(key) or "").strip()
+        if v and v.upper() != "UNKNOWN":
+            return v[:80]
+    for c in meta.get_all("Classifier") or []:
+        if c.startswith("License ::"):
+            return c.split("::")[-1].strip()[:80]
+    return ""
+
+
+def is_spdx_expression(value: str) -> bool:
+    """A compound SPDX expression (`A OR B`, `A AND B`, `A WITH exc`) whose atoms are listed identifiers."""
+    parts = re.split(r"\s+(?:OR|AND|WITH)\s+", value)
+    return len(parts) > 1 and all(is_spdx_id(p.strip("() ")) or p.strip("() ").endswith("-exception") for p in parts)
+
+
 def sbom_from_installed(product_id: str, product_version: str, top_level: List[str], transitive: bool = False) -> SBOMRecord:
     """Components resolved from THIS interpreter's installed distributions. A dependency that is declared but not
     installed is recorded with version 'NOT-INSTALLED' (the floor is honest, not padded)."""
@@ -151,7 +228,7 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
         try:
             dist = md.distribution(name)
             ver = dist.version
-            lic = (dist.metadata.get("License") or "")[:80]
+            lic = installed_license(dist.metadata)
             comps[key] = SBOMComponent(name=dist.metadata["Name"], version=ver, purl=pypi_purl(key, ver), license=lic)
             if transitive:
                 for r in dist.requires or []:
@@ -164,43 +241,73 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
                       depth="transitive" if transitive else "top-level-only")
 
 
-def sbom_from_cyclonedx(path: str, product_id: str, product_version: str) -> SBOMRecord:
-    """Ingest a CycloneDX JSON from ANY generator; malformed components are skipped, a malformed document raises."""
-    with open(path, encoding="utf-8") as f:
-        d = json.load(f)
-    gen = ""
+def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:
+    """metadata.tools as 1.5+ {components:[...]} or the legacy list of {vendor,name,version}: (name, version)."""
     try:
         tools = (d.get("metadata", {}) or {}).get("tools", {})
-        comp = tools.get("components", tools) if isinstance(tools, dict) else tools
-        if isinstance(comp, list) and comp:
-            gen = str(comp[0].get("name", ""))
+        comp = tools.get("components", []) if isinstance(tools, dict) else tools
+        if isinstance(comp, list) and comp and isinstance(comp[0], dict):
+            return str(comp[0].get("name", "")), str(comp[0].get("version", ""))
     except Exception:  # noqa: BLE001
-        gen = ""
+        pass
+    return "", ""
+
+
+def sbom_from_cyclonedx(path: str, product_id: str, product_version: str) -> SBOMRecord:
+    """Ingest a CycloneDX JSON (1.2 … 1.7) from ANY generator: components are walked recursively (a generator may
+    nest `components[].components`), malformed components are skipped, a malformed document raises. The record's
+    `source` says what the document declared (spec version, generator, total/nested component count, dependency
+    edges, component types) and how many duplicates (same name+version+purl at two locations, as Syft emits for a
+    workflow file referenced twice) the index merged — the count the auditor reads is the generator's, not ours."""
+    with open(path, encoding="utf-8") as f:
+        d = json.load(f)
+    if not isinstance(d, dict) or d.get("bomFormat") != "CycloneDX":
+        raise ValueError("CycloneDX malformed: not a JSON object with bomFormat 'CycloneDX'")
+    gen, gen_ver = _cdx_generator(d)
     raw = d.get("components")
     if not isinstance(raw, list):
         raise ValueError("CycloneDX malformed: 'components' must be a list")
     comps: List[SBOMComponent] = []
-    for c in raw:
-        if not isinstance(c, dict) or not c.get("name"):
-            continue
-        sha = ""
-        for h in (c.get("hashes") if isinstance(c.get("hashes"), list) else []):
-            if isinstance(h, dict) and str(h.get("alg", "")).upper() in ("SHA-256", "SHA256"):
-                sha = str(h.get("content", ""))
-                break
-        lic = ""
-        for le in (c.get("licenses") if isinstance(c.get("licenses"), list) else []):
-            if isinstance(le, dict):
-                li = le.get("license") if isinstance(le.get("license"), dict) else {}
-                lic = li.get("id") or li.get("name") or le.get("expression") or ""
-                if lic:
+    declared, nested, types = 0, 0, {}
+
+    def walk(items: List[Any], level: int) -> None:
+        nonlocal declared, nested
+        for c in items:
+            if not isinstance(c, dict) or not c.get("name"):
+                continue
+            declared += 1
+            if level:
+                nested += 1
+            typ = str(c.get("type", "") or "library")
+            types[typ] = types.get(typ, 0) + 1
+            sha = ""
+            for h in (c.get("hashes") if isinstance(c.get("hashes"), list) else []):
+                if isinstance(h, dict) and str(h.get("alg", "")).upper() in ("SHA-256", "SHA256"):
+                    sha = _sha256_or_empty(h.get("content", ""))
                     break
-        sup = c.get("supplier")
-        comps.append(SBOMComponent(name=str(c["name"]), version=str(c.get("version", "")),
-                                   supplier=str(sup.get("name", "")) if isinstance(sup, dict) else "",
-                                   purl=str(c.get("purl", "")), sha256=sha, license=str(lic)[:80]))
+            lic = ""
+            for le in (c.get("licenses") if isinstance(c.get("licenses"), list) else []):
+                if isinstance(le, dict):
+                    li = le.get("license") if isinstance(le.get("license"), dict) else {}
+                    lic = li.get("id") or li.get("name") or le.get("expression") or ""
+                    if lic:
+                        break
+            sup = c.get("supplier")
+            comps.append(SBOMComponent(name=str(c["name"]), version=str(c.get("version", "") or ""),
+                                       supplier=str(sup.get("name", "")) if isinstance(sup, dict) else "",
+                                       purl=str(c.get("purl", "") or ""), sha256=sha, license=str(lic)[:80],
+                                       type=typ if typ in CYCLONEDX_COMPONENT_TYPES else "library", cpe=str(c.get("cpe", "") or "")))
+            if isinstance(c.get("components"), list):
+                walk(c["components"], level + 1)
+    walk(raw, 0)
+    deps = d.get("dependencies") if isinstance(d.get("dependencies"), list) else []
+    source = {"format": "cyclonedx-json", "spec_version": str(d.get("specVersion", "")), "generator": gen, "generator_version": gen_ver,
+              "serial_number": str(d.get("serialNumber", "") or ""), "components_declared": declared, "components_nested": nested,
+              "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": sum(len(x.get("dependsOn") or []) for x in deps if isinstance(x, dict)),
+              "dependencies_declared": len(deps), "component_types": dict(sorted(types.items()))}
+    source.update(source_fingerprint(path))
     return SBOMRecord(product_id=product_id, product_version=product_version, components=comps,
-                      depth=f"external:cyclonedx:{gen or 'unknown'}")
+                      depth=f"external:cyclonedx:{gen or 'unknown'}", source=source)
 
 
 # ── SPDX ingest (2.2 / 2.3 JSON and 3.0 JSON-LD) ──────────────────────────────────────────
@@ -251,6 +358,11 @@ def _ld_prop(e: Dict[str, Any], *names: str) -> Any:
     return None
 
 
+# SPDX 2.3 primaryPackagePurpose → CycloneDX component type (purposes without a counterpart stay "library")
+SPDX_PURPOSE_TO_TYPE = {"APPLICATION": "application", "FRAMEWORK": "framework", "LIBRARY": "library", "CONTAINER": "container",
+                        "OPERATING-SYSTEM": "operating-system", "DEVICE": "device", "FIRMWARE": "firmware", "FILE": "file"}
+
+
 def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     rels = [r for r in (d.get("relationships") or []) if isinstance(r, dict)]
     roots = {r.get("relatedSpdxElement") for r in rels if r.get("relationshipType") == "DESCRIBES" and r.get("spdxElementId") == "SPDXRef-DOCUMENT"}
@@ -262,14 +374,16 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
             continue
         if p.get("SPDXID") in roots:
             continue                                     # the product itself is metadata, not a dependency
-        purl = next((r.get("referenceLocator", "") for r in (p.get("externalRefs") or [])
-                     if isinstance(r, dict) and r.get("referenceType") == "purl"), "")
+        refs = [r for r in (p.get("externalRefs") or []) if isinstance(r, dict)]
+        purl = next((r.get("referenceLocator", "") for r in refs if r.get("referenceType") == "purl"), "")
+        cpe = next((r.get("referenceLocator", "") for r in refs if str(r.get("referenceType", "")).startswith("cpe2")), "")
         sha = next((c.get("checksumValue", "") for c in (p.get("checksums") or [])
                     if isinstance(c, dict) and str(c.get("algorithm", "")).upper() == "SHA256"), "")
         lic = _clean(p.get("licenseConcluded")) or _clean(p.get("licenseDeclared"))
         comps.append(SBOMComponent(name=_clean(p["name"]), version=_clean(p.get("versionInfo")) or "NOASSERTION",
                                    supplier=_agent_name(p.get("supplier")) or _agent_name(p.get("originator")),   # cleaned BEFORE the fallback
-                                   purl=_clean(purl), sha256=_sha256_or_empty(sha), license=lic))
+                                   purl=_clean(purl), sha256=_sha256_or_empty(sha), license=lic,
+                                   type=SPDX_PURPOSE_TO_TYPE.get(str(p.get("primaryPackagePurpose", "")).upper(), "library"), cpe=_clean(cpe)))
     tool = next((c for c in ((d.get("creationInfo") or {}).get("creators") or []) if str(c).startswith("Tool:")), "")
     depth = f"external:{_clean(d.get('spdxVersion')) or 'SPDX-2.x'}:{_agent_name(tool.replace('Tool:', '')) or 'unknown-tool'}"
     if not roots:
@@ -325,9 +439,13 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
         if not supplier:
             orig = _ld_prop(e, "originatedBy"); orig = orig[0] if isinstance(orig, list) and orig else orig
             supplier = _clean((by_id.get(orig) or {}).get("name")) if isinstance(orig, str) else ""
+        purpose = _ld_prop(e, "software_primaryPurpose", "primaryPurpose")
+        purpose = str(purpose[0] if isinstance(purpose, list) and purpose else purpose or "").rsplit("/", 1)[-1].upper().replace("OPERATINGSYSTEM", "OPERATING-SYSTEM")
+        ext = _ld_prop(e, "externalIdentifier") or []
+        cpe = next((str(x.get("identifier", "")) for x in ext if isinstance(x, dict) and str(_ld_prop(x, "externalIdentifierType") or "").rsplit("/", 1)[-1] in ("cpe22", "cpe23")), "")
         comps.append(SBOMComponent(name=_clean(e["name"]), version=_clean(_ld_prop(e, "software_packageVersion", "packageVersion")) or "NOASSERTION",
                                    supplier=supplier, purl=_clean(_ld_prop(e, "software_packageUrl", "packageUrl")), sha256=_sha256_or_empty(sha),
-                                   license=lic_of.get(_ld_id(e), "")))
+                                   license=lic_of.get(_ld_id(e), ""), type=SPDX_PURPOSE_TO_TYPE.get(purpose, "library"), cpe=_clean(cpe)))
     tools = [e.get("name") for e in g if _ld_type(e) == "Tool" and e.get("name")]
     depth = f"external:SPDX-3.0:{_clean(tools[0]) if tools else 'unknown-tool'}"
     if not roots:
@@ -350,8 +468,25 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str) -> SBOMReco
         raise ValueError("SPDX document is not a JSON object")
     if str(d.get("spdxVersion", "")).startswith("SPDX-2"):
         comps, depth = _spdx2_components(d)
+        pk = [x for x in (d.get("packages") or []) if isinstance(x, dict)]
+        rels = [r for r in (d.get("relationships") or []) if isinstance(r, dict)]
+        source = {"format": "spdx-json", "spec_version": _clean(d.get("spdxVersion")), "packages_declared": len(pk),
+                  "relationships_declared": len(rels),
+                  "dependency_edges": sum(1 for r in rels if str(r.get("relationshipType", "")).upper() in ("DEPENDS_ON", "DEPENDENCY_OF"))}
     elif "@graph" in d:
         comps, depth = _spdx3_components(d)
+        g = [e for e in (d.get("@graph") or []) if isinstance(e, dict)]
+        source = {"format": "spdx-jsonld", "spec_version": "SPDX-3.0",
+                  "packages_declared": sum(1 for e in g if _ld_type(e) in ("software_Package", "Package")),
+                  "relationships_declared": sum(1 for e in g if _ld_type(e) in ("Relationship", "LifecycleScopedRelationship")),
+                  "dependency_edges": sum(1 for e in g if _ld_type(e) in ("Relationship", "LifecycleScopedRelationship") and _ld_prop(e, "relationshipType") == "dependsOn")}
     else:
         raise ValueError("not an SPDX 2.x JSON (spdxVersion) nor an SPDX 3.0 JSON-LD (@graph) document")
-    return SBOMRecord(product_id=product_id, product_version=product_version, components=comps, depth=depth)
+    parts = depth.split(":")
+    source.update({"generator": parts[2] if len(parts) > 2 else "", "generator_version": "",
+                   "roots_excluded": source["packages_declared"] - len(comps), "duplicates_merged": len(comps) - len(dedup(comps))})
+    gv = re.match(r"^(.*?)[-\s]?(\d+\.\d+[\w.\-]*)$", source["generator"])
+    if gv:   # "syft-1.52.0" / "trivy-0.74.0" → name + version
+        source["generator"], source["generator_version"] = gv.group(1).rstrip("-"), gv.group(2)
+    source.update(source_fingerprint(path))
+    return SBOMRecord(product_id=product_id, product_version=product_version, components=comps, depth=depth, source=source)

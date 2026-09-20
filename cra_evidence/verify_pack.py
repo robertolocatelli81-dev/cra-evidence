@@ -5,6 +5,7 @@ A pack alone proves internal consistency; the ledger next to it proves the pack 
 signature proves which key produced it; a trust store proves that key is one you chose to trust."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from .canonical import sha3_hex
 from .ledger import Ledger
-from .locker import HONEST_SCOPE_MARK, PACK_KIND, RECORD_KINDS
+from .locker import HONEST_SCOPE_MARK, PACK_KIND, RECORD_KINDS, source_file
 from .signing import verify_pack_signature, verify_tip
 
 
@@ -21,18 +22,57 @@ def _layer(name: str, status: str, detail: str = "") -> Dict[str, str]:
 
 
 def verify_pack(path: str, ledger_path: Optional[str] = None, trust_store: Optional[Dict[str, str]] = None,
-                log_pubkey_hex: Optional[str] = None) -> Dict[str, Any]:
+                log_pubkey_hex: Optional[str] = None, require_sources: bool = False) -> Dict[str, Any]:
     """Offline verification, layer by layer; one authenticity verdict. Any exception inside is a FAIL layer, never a
     crash (fail-closed). log_pubkey_hex: the trusted key of the ledger's signed tip — with it, a truncated tail
-    (records dropped AFTER the anchor) is detected; without it the tip is NOT checked and the verdict says so."""
+    (records dropped AFTER the anchor) is detected; without it the tip is NOT checked and the verdict says so.
+    require_sources: every SBOM source document the ledger records by SHA-256 must be present in <ledger>.sources/
+    and hash to the recorded value (a missing one is then a FAIL, otherwise a SKIP that says how many are hash-only)."""
     try:
-        return _verify(path, ledger_path, trust_store, log_pubkey_hex)
+        return _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "authenticity": "FAIL", "anchored": False,
                 "layers": [_layer("verifier-exception", "FAIL", f"{type(e).__name__}: {str(e)[:160]}")], "pack_sha3": None}
 
 
-def _verify(path, ledger_path, trust_store, log_pubkey_hex) -> Dict[str, Any]:
+def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: bool) -> Dict[str, str]:
+    """Layer over the SBOM source documents: for every cra_sbom record with source.sha256, the file
+    <ledger>.sources/<sha256>.json must hash to that value when present. A mismatch is a FAIL; absence is a SKIP
+    (hash-only evidence) unless required."""
+    wanted: Dict[str, int] = {}
+    for e in entries:
+        d = e.get("data") if isinstance(e.get("data"), dict) else {}
+        src = d.get("source") if d.get("kind") == "cra_sbom" and isinstance(d.get("source"), dict) else None
+        h = str(src.get("sha256", "")) if src else ""
+        if h:
+            wanted[h] = wanted.get(h, 0) + 1
+    if not wanted:
+        return _layer("source-documents", "SKIP", "no SBOM source document recorded by hash")
+    present, bad, absent = 0, [], 0
+    for h in sorted(wanted):
+        try:
+            fp = source_file(ledger_path, h)
+        except ValueError:
+            bad.append(h[:16] + " (malformed hash)")
+            continue
+        if not os.path.isfile(fp):
+            absent += 1
+            continue
+        with open(fp, "rb") as f:
+            got = hashlib.sha256(f.read()).hexdigest()
+        if got == h:
+            present += 1
+        else:
+            bad.append(f"{h[:16]}… stored bytes hash to {got[:16]}…")
+    if bad:
+        return _layer("source-documents", "FAIL", f"{len(bad)} source document(s) do not match their recorded SHA-256: " + "; ".join(bad[:3]))
+    if absent:
+        return _layer("source-documents", "FAIL" if require else "SKIP",
+                      f"{present} of {len(wanted)} source document(s) present and verified; {absent} recorded by hash only" + (" (required)" if require else ""))
+    return _layer("source-documents", "PASS", f"{present} source document(s) present, bytes hash to the recorded SHA-256")
+
+
+def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=False) -> Dict[str, Any]:
     layers: List[Dict[str, str]] = []
     try:
         pack = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -92,6 +132,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex) -> Dict[str, Any]:
                         and (anchor_idx is None or anchor_idx >= n))
             layers.append(_layer("pack-ledger-state", "PASS" if ok_state else "FAIL",
                                  f"declared entries={n} last={str(pack.get('ledger_last_self_hash'))[:12]}…; anchor idx={anchor_idx}"))
+            layers.append(_source_documents(lp, entries, require_sources))
             # signed tip: the only thing that sees a truncated TAIL (records after the anchor silently dropped)
             tip_path = lp + ".tip.json"
             if not entries:

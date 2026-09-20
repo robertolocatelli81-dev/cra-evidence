@@ -1,4 +1,4 @@
-# Legal basis — as read from primary sources on 15/09/2026
+# Legal basis — as read from primary sources on 15/09/2026, re-checked on 20/09/2026
 
 Regulation (EU) 2024/2847 (Cyber Resilience Act). Sources consulted on 15/09/2026:
 - European Commission, "Cyber Resilience Act — Reporting obligations": https://digital-strategy.ec.europa.eu/en/policies/cra-reporting
@@ -8,6 +8,19 @@ Regulation (EU) 2024/2847 (Cyber Resilience Act). Sources consulted on 15/09/202
 - EUR-Lex, Regulation (EU) 2024/2847, OJ L 2024/2847: https://eur-lex.europa.eu/eli/reg/2024/2847/oj (Art. 13(13), 14, 16, 24, 71 re-read).
 - CycloneDX specification overview (1.7 current, ECMA-424): https://cyclonedx.org/specification/overview/; JSON schema 1.6 vendored in `spec/schemas/` (Apache-2.0, OWASP CycloneDX).
 - ENISA, "The CRA Single Reporting Platform is launched" (news, September 2026).
+
+Re-check of 20/09/2026 (what changed: nothing in the obligations):
+- ENISA SRP FAQ (https://www.enisa.europa.eu/topics/product-security/single-reporting-platform-srp/frequently-asked-questions):
+  "no Application Programming Interface (API) will be provided at the initial release of the SRP, so notifications must
+  be submitted through the platform interface. API functionality may be considered in a future phase of the SRP";
+  voluntary notifications (Art. 15) "in a future phase".
+- CRA SRP Glossary re-downloaded and diffed against the vendored snapshot of 15/09/2026: same header, same 44 rows, 0
+  differences (`spec/sources/enisa_srp_glossary_20260915.json` stays the reference).
+- Digital Omnibus (Commission proposal of 19/11/2025, procedure 2025/0360(COD), summary on the Parliament's Legislative
+  Observatory): a single entry point for cyber incident reporting ("report once, share many") to be built by ENISA on
+  the CRA reporting platform; a PROPOSAL, not adopted — the Art. 14 deadlines and the SRP as the channel are unchanged.
+- The Commission's cybersecurity package of 20/01/2026 (Cybersecurity Act revision, NIS2 amendments) does not amend
+  Regulation (EU) 2024/2847.
 
 | Obligation | What this tool does | Reference |
 |---|---|---|

@@ -16,6 +16,7 @@ from cra_evidence import feeds
 
 try:
     from cra_evidence.signing import keygen
+    import cryptography  # noqa: F401 — signing imports lazily; the module itself must be present
     HAVE_CRYPTO = True
 except Exception:  # noqa: BLE001
     HAVE_CRYPTO = False

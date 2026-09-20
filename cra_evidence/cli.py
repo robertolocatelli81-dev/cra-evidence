@@ -45,6 +45,7 @@ def main(argv: List[str] = None) -> int:
     s.add_argument("--from-cyclonedx", help="ingest a CycloneDX JSON (Syft, Trivy, cdxgen…)")
     s.add_argument("--from-spdx", help="ingest an SPDX 2.2/2.3 JSON or SPDX 3.0 JSON-LD document (Syft, Yocto, Parlay…)")
     s.add_argument("--installed", nargs="*", help="top-level PyPI names resolved from this environment"); s.add_argument("--transitive", action="store_true")
+    s.add_argument("--no-store-source", action="store_true", help="do not copy the ingested document to <ledger>.sources/ (its SHA-256 is still recorded)")
     s = sub.add_parser("vuln", help="record a vulnerability-handling event"); common(s)
     s.add_argument("--id", required=True); s.add_argument("--aware", required=True, help="awareness instant, ISO-8601 UTC")
     s.add_argument("--exploited", action="store_true"); s.add_argument("--source", default="manual", choices=["manual", "cisa_kev", "enisa_euvd", "vendor_advisory"])
@@ -73,6 +74,7 @@ def main(argv: List[str] = None) -> int:
     s = sub.add_parser("verify", help="verify a pack offline (exit 0 only if authenticity is not FAIL)"); s.add_argument("pack")
     s.add_argument("--ledger"); s.add_argument("--trust-store", help="JSON {signer_id: public_key_hex}")
     s.add_argument("--log-pubkey", help="trusted public key (hex) of the ledger's signed tip: detects a truncated tail")
+    s.add_argument("--require-sources", action="store_true", help="every SBOM source document recorded by hash must be present next to the ledger and match (absence = FAIL)")
     s = sub.add_parser("feeds", help="read-only network checks: OSV positive control, KEV/EUVD exploitation signal for ids"); s.add_argument("ids", nargs="*")
     a = p.parse_args(argv)
 
@@ -95,8 +97,10 @@ def main(argv: List[str] = None) -> int:
             rec = sbom_from_installed(a.product, a.version, a.installed, transitive=a.transitive)
         else:
             p.error("sbom: give --from-cyclonedx, --from-spdx or --installed")
-        e = lk.record_sbom(rec); n = len(resolved_components(rec))
-        _p({"recorded": e["idx"], "components": len(rec.components), "resolved": n, "depth": rec.depth, "floor_met": e["data"]["sbom_floor_met"]})
+        src = a.from_cyclonedx or a.from_spdx
+        e = lk.record_sbom(rec, source_path=src, store=not a.no_store_source); n = len(resolved_components(rec))
+        _p({"recorded": e["idx"], "components": len(rec.components), "resolved": n, "depth": rec.depth, "floor_met": e["data"]["sbom_floor_met"],
+            "source": e["data"].get("source")})
         return 0 if e["data"]["sbom_floor_met"] else 1
     if a.cmd == "vuln":
         lk = _locker(a)
@@ -153,7 +157,7 @@ def main(argv: List[str] = None) -> int:
         if a.trust_store:
             with open(a.trust_store, encoding="utf-8") as f:
                 ts = json.load(f)
-        r = verify_pack(a.pack, a.ledger, ts, a.log_pubkey); _p(r)
+        r = verify_pack(a.pack, a.ledger, ts, a.log_pubkey, require_sources=a.require_sources); _p(r)
         return 0 if r["ok"] else 1
     if a.cmd == "feeds":
         from .feeds import cisa_kev_ids, euvd_kev_ids, exploitation_signal, osv_positive_control

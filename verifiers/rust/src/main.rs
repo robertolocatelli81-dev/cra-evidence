@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! cra-verify — independent Rust verifier of a cra-evidence pack. Same layers and authenticity verdict as
 //! cra_evidence/verify_pack.py. json.rs / keccak.rs / sha256.rs are cryptovalid's pure-Rust modules (same profile).
-//! Usage: cra-verify <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex]; exit 0 only if ok.
+//! Usage: cra-verify <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex] [--require-sources]; exit 0 only if ok.
+//! source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
+//! hash (SHA-256) to that value when present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 mod json;
 mod keccak;
 mod sha256;
@@ -96,7 +98,41 @@ fn is_instant(s: &str) -> bool {
 
 struct Out { ok: bool, auth: String, anchored: bool, layers: Vec<Layer>, pack_sha3: Option<String> }
 
-fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<String, Json>>, log_pub: Option<&str>) -> Out {
+fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool) -> Layer {
+    let mut wanted: Vec<String> = Vec::new();
+    for e in entries {
+        if let Some(Json::Object(d)) = e.get("data") {
+            if gs(d, "kind") != Some("cra_sbom") { continue; }
+            if let Some(Json::Object(src)) = d.get("source") {
+                if let Some(h) = gs(src, "sha256") { if !h.is_empty() && !wanted.iter().any(|w| w == h) { wanted.push(h.to_string()); } }
+            }
+        }
+    }
+    if wanted.is_empty() { return Layer("source-documents".into(), "SKIP".into(), "no SBOM source document recorded by hash".into()); }
+    wanted.sort();
+    let (mut present, mut absent, mut bad): (usize, usize, Vec<String>) = (0, 0, Vec::new());
+    for h in &wanted {
+        if h.len() != 64 || !h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) { bad.push(format!("{} (malformed hash)", &h[..h.len().min(16)])); continue; }
+        let fp = format!("{lp}.sources/{h}.json");
+        if !Path::new(&fp).is_file() { absent += 1; continue; }
+        match std::fs::read(&fp) {
+            Ok(raw) => { let got = sha256::hex(&raw); if &got == h { present += 1; } else { bad.push(format!("{}… stored bytes hash to {}…", &h[..16], &got[..16])); } }
+            Err(_) => bad.push(format!("{}… unreadable", &h[..16])),
+        }
+    }
+    if !bad.is_empty() {
+        let n = bad.len();
+        bad.truncate(3);
+        return Layer("source-documents".into(), "FAIL".into(), format!("{n} source document(s) do not match their recorded SHA-256: {}", bad.join("; ")));
+    }
+    if absent > 0 {
+        return Layer("source-documents".into(), if require { "FAIL" } else { "SKIP" }.into(),
+                     format!("{present} of {} source document(s) present and verified; {absent} recorded by hash only{}", wanted.len(), if require { " (required)" } else { "" }));
+    }
+    Layer("source-documents".into(), "PASS".into(), format!("{present} source document(s) present, bytes hash to the recorded SHA-256"))
+}
+
+fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<String, Json>>, log_pub: Option<&str>, require_sources: bool) -> Out {
     let fail = |layer: &str, detail: String| Out { ok: false, auth: "FAIL".into(), anchored: false, layers: vec![Layer(layer.into(), "FAIL".into(), detail)], pack_sha3: None };
     let raw = match std::fs::read_to_string(pack_path) { Ok(t) => t, Err(e) => return fail("pack-json", e.to_string()) };
     let pack = match parse_obj(&raw) { Ok(o) => o, Err(e) => return fail("pack-json", e) };
@@ -166,6 +202,7 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
                 _ => false,
             };
             l(&mut layers, "pack-ledger-state", ok_state, format!("declared entries={ne:?}; anchor idx={anchor_idx:?}"));
+            layers.push(source_documents(&lp, &entries, require_sources));
             let tip_path = format!("{lp}.tip.json");
             let first = gs(&entries[0], "self_hash").unwrap_or("").to_string();
             let last = gs(&entries[entries.len() - 1], "self_hash").unwrap_or("").to_string();
@@ -238,19 +275,21 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut pack, mut ledger, mut trust_file, mut key): (Option<String>, Option<String>, Option<String>, Option<String>) = (None, None, None, None);
+    let mut require_sources = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--ledger" => { i += 1; ledger = args.get(i).cloned(); }
             "--trust-store" => { i += 1; trust_file = args.get(i).cloned(); }
             "--log-pubkey" => { i += 1; key = args.get(i).cloned(); }
+            "--require-sources" => { require_sources = true; }
             a => pack = Some(a.to_string()),
         }
         i += 1;
     }
-    let Some(pack) = pack else { eprintln!("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex]"); std::process::exit(2) };
+    let Some(pack) = pack else { eprintln!("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2) };
     let trust = trust_file.map(|f| parse_obj(&std::fs::read_to_string(f).unwrap_or_default()).unwrap_or_else(|_| { eprintln!("trust store unreadable"); std::process::exit(2) }));
-    let out = verify(&pack, ledger.as_deref(), trust.as_ref(), key.as_deref());
+    let out = verify(&pack, ledger.as_deref(), trust.as_ref(), key.as_deref(), require_sources);
     let layers: Vec<Json> = out.layers.iter().map(|l| { let mut m = BTreeMap::new(); m.insert("layer".into(), Json::Str(l.0.clone())); m.insert("status".into(), Json::Str(l.1.clone())); m.insert("detail".into(), Json::Str(l.2.clone())); Json::Object(m) }).collect();
     let mut m = BTreeMap::new();
     m.insert("ok".into(), Json::Bool(out.ok)); m.insert("authenticity".into(), Json::Str(out.auth.clone())); m.insert("anchored".into(), Json::Bool(out.anchored));

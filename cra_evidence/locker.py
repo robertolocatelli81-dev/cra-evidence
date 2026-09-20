@@ -9,6 +9,7 @@ self-asserted seal is NOT an objective time anchor (RFC 3161 / OpenTimestamps ar
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -39,6 +40,17 @@ HONEST_SCOPE = ("firm-side evidence locker: proves that these records existed, i
                 "offline-verifiable); it is " + HONEST_SCOPE_MARK + ", NOT CE marking, NOT the official CSIRT/ENISA "
                 "channel (the SRP is a human portal), NOT an objective time anchor unless an RFC 3161 / OTS token is attached")
 RECORD_KINDS = ("cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor")
+SOURCES_SUFFIX = ".sources"     # <ledger>.sources/<sha256>.json — the generators' documents, byte-exact, hash-bound in the records
+
+
+def sources_dir(ledger_path: str) -> str:
+    return str(ledger_path) + SOURCES_SUFFIX
+
+
+def source_file(ledger_path: str, sha256: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{64}", str(sha256)):
+        raise ValueError("source sha256 must be 64 hex characters")
+    return os.path.join(sources_dir(ledger_path), sha256 + ".json")
 
 
 def _bind(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,11 +80,39 @@ class CRAEvidenceLocker:
         with self._lock:
             return self.ledger.append(_bind(entry))
 
-    def record_sbom(self, sbom: SBOMRecord) -> Dict[str, Any]:
+    def record_sbom(self, sbom: SBOMRecord, source_path: Optional[str] = None, store: bool = True) -> Dict[str, Any]:
+        """source_path: the generator's document the record was ingested from. Its exact bytes are hashed (SHA-256)
+        into the record (the ingest already fingerprinted them; the file must still hash the same now) and copied to
+        `<ledger>.sources/<sha256>.json`, so the evidence is the document Syft/Trivy/cdxgen/Yocto produced — the
+        record is its index, not its replacement. If the file changed between ingest and record, or the store already
+        holds different bytes under that name, the record is refused. store=False keeps the hash but no copy."""
         cdx = sbom.to_cyclonedx_min()
         resolved = len(resolved_components(sbom))
+        source = dict(sbom.source)
+        raw = b""
+        if source_path is not None:
+            with open(source_path, "rb") as f:
+                raw = f.read()                      # read ONCE: the bytes hashed are the bytes stored
+            fp = {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(source_path)}
+            if source.get("sha256") and source["sha256"] != fp["sha256"]:
+                raise ValueError("source document changed since it was ingested: re-run the ingest on the current file")
+            source.update(fp)
+        if source_path is not None and store:
+            dst = source_file(self.ledger.path, fp["sha256"])
+            os.makedirs(sources_dir(self.ledger.path), exist_ok=True)
+            if os.path.exists(dst):
+                with open(dst, "rb") as f:
+                    if f.read() != raw:
+                        raise ValueError(f"source store already holds different bytes for {fp['sha256'][:16]}…: refusing to overwrite evidence")
+            else:
+                tmp = dst + ".tmp"
+                with open(tmp, "wb") as f:
+                    f.write(raw)
+                os.replace(tmp, dst)
+            source["stored_as"] = os.path.basename(dst)
         return self._append({"kind": "cra_sbom", "product_id": self.product_id, "product_version": self.product_version,
                              "sbom": cdx, "component_count": len(cdx["components"]), "resolved_components": resolved,
+                             "source": source,
                              # conservative by design: zero RESOLVED components (a declared-but-NOT-INSTALLED dependency
                              # is not one) never EVIDENCES the Annex I floor, even for a product that truly has no
                              # dependencies (state that in the SBOM's note instead)

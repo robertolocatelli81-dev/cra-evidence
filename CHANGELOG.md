@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 — 2026-09-20
+The generator's SBOM document is the evidence. Measured with the real generators (Syft 1.52.0, Trivy 0.74.0, cdxgen
+12.8.4 — all emitting CycloneDX 1.7 by default) and sbomqs 2.1.2 on a 419-component npm tree: 0.2.0 stored only its
+own re-encoding of an ingested SBOM, which scored below every original (5.3→4.2, 6.6→4.4, 4.8→3.7). Now `cra sbom
+--from-cyclonedx/--from-spdx` hashes the document's exact bytes (SHA-256) into the record, copies it to
+`<ledger>.sources/<sha256>.json` (`--no-store-source` keeps the hash only; the store never overwrites different bytes;
+a file changed between ingest and record is refused), and every verifier — Python, JS, Go, Rust — re-hashes it
+(`source-documents` layer: mismatch FAIL, absent SKIP, `--require-sources` makes absence a FAIL). The record's index
+now carries component type, CPE and what the document declared (generator + version, spec version, components incl.
+nested, duplicates merged, dependency edges, component types); nested `components[].components` are walked; a
+malformed hash is dropped as in the SPDX path; SPDX `primaryPackagePurpose` maps to the type and `cpe23Type` refs are
+read. Export: CycloneDX 1.6 or 1.7 (official 1.7 schema vendored), with serialNumber, `metadata.tools`, bom-refs
+(unique), component types, CPEs, SPDX licence *expressions* (`Apache-2.0 OR BSD-3-Clause`), and `dependencies` only
+for the installed floor (never re-invented for an ingested graph); the installed floor reads PEP 639
+`License-Expression` (the legacy `License` field is empty in cryptography ≥ 42 — 0.2.0 recorded no licence there).
+Validated with the official CycloneDX CLI 0.33.1 in CI (positive control included) and with jsonschema in the tests.
+Six unmodified generator documents vendored as fixtures. Differential oracle: 31 cases, and the failing layers must
+agree too (ablation caught). Interop re-measured against cryptovalid 0.15.0. Legal basis re-read 20/09/2026 (ENISA
+FAQ: no API at initial release; glossary unchanged; Digital Omnibus 2025/0360(COD) still a proposal).
+
 ## 0.2.0 — 2026-09-15
 SPDX ingest: `sbom_from_spdx()` / `cra sbom --from-spdx` read SPDX 2.2/2.3 JSON (`packages`, purl external refs,
 SHA-256 checksums, supplier/originator, concluded→declared licence) and SPDX 3.0 JSON-LD (`software_Package`,

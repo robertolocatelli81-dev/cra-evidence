@@ -12,6 +12,13 @@ from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path
 from cra_evidence.srp_notice import SRPNotice
 from cra_evidence.verify_pack import verify_pack
 from cra_evidence.vuln import VulnerabilityRecord
+from cra_evidence.sbom import sbom_from_cyclonedx
+from cra_evidence.locker import source_file
+
+CDX_DOC = {"bomFormat": "CycloneDX", "specVersion": "1.7", "version": 1,
+           "metadata": {"tools": {"components": [{"type": "application", "name": "syft", "version": "1.52.0"}]}},
+           "components": [{"type": "library", "name": "requests", "version": "2.32.5", "purl": "pkg:pypi/requests@2.32.5"},
+                          {"type": "file", "name": "/.github/workflows/ci.yml"}]}
 
 AW = "2026-09-01T00:00:00Z"
 
@@ -28,6 +35,22 @@ def build(d, tip=True, sign=False):
     if sign:
         sign_pack(pack, key, "acme-ci")
     return lk, key, pack, pk
+
+
+def build_with_source(d, tamper=None):
+    """ledger with an INGESTED SBOM whose generator document is stored next to it (source-documents layer);
+    tamper: None | "bytes" (one byte appended to the stored document) | "absent" (stored document removed)."""
+    keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
+    src = os.path.join(d, "syft.cdx.json"); json.dump(CDX_DOC, open(src, "w"))
+    lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+    rec = lk.record_sbom(sbom_from_cyclonedx(src, "prodotto-ü", "1"), source_path=src)
+    pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
+    stored = source_file(os.path.join(d, "l.jsonl"), rec["data"]["source"]["sha256"])
+    if tamper == "bytes":
+        open(stored, "ab").write(b" ")
+    elif tamper == "absent":
+        os.remove(stored)
+    return {}
 
 
 def rehash(pack):
@@ -117,6 +140,11 @@ def cases(base):
     def traversal(d):
         build(d); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["ledger_file"] = "../../l.jsonl"; json.dump(j, open(p, "w")); rehash(p)
     case("ledger_file_traversal", traversal)
+    case("sbom_source_intact", lambda d: build_with_source(d))
+    case("sbom_source_bytes_tampered", lambda d: build_with_source(d, "bytes"))
+    case("sbom_source_absent", lambda d: build_with_source(d, "absent"))
+    case("sbom_source_absent_required", lambda d: build_with_source(d, "absent"), require_sources=True)
+    case("sbom_source_intact_required", lambda d: build_with_source(d), require_sources=True)
     return out
 
 
@@ -125,6 +153,7 @@ def run_cli(cmd, pack, opts):
     if opts.get("ledger"): args += ["--ledger", opts["ledger"]]
     if opts.get("trust"): args += ["--trust-store", opts["trust"]]
     if opts.get("key"): args += ["--log-pubkey", opts["key"]]
+    if opts.get("require_sources"): args += ["--require-sources"]
     r = subprocess.run(args, capture_output=True, text=True, timeout=120)
     try:
         j = json.loads(r.stdout)
@@ -152,17 +181,19 @@ def main():
     diverg, n = [], 0
     for name, pack, opts in cases(base):
         trust = json.load(open(opts["trust"])) if opts.get("trust") else None
-        ref = verify_pack(pack, opts.get("ledger"), trust, opts.get("key"))
+        ref = verify_pack(pack, opts.get("ledger"), trust, opts.get("key"), require_sources=bool(opts.get("require_sources")))
         exp = (ref["ok"], ref["authenticity"], ref["anchored"])
+        exp_fails = sorted(l["layer"] for l in ref["layers"] if l["status"] == "FAIL")
         row = {"python": exp}
         for lang, cmd in vs.items():
             r = run_cli(cmd, pack, opts)
             got = (r.get("ok"), r.get("authenticity"), r.get("anchored"))
             row[lang] = got
-            if got != exp or (r.get("exit", 1) == 0) != ref["ok"]:
-                diverg.append((name, lang, exp, r))
+            # the verdict AND the set of failing layers must agree: a FAIL for the wrong reason is a divergence too
+            if got != exp or (r.get("exit", 1) == 0) != ref["ok"] or r.get("fails") != exp_fails:
+                diverg.append((name, lang, exp, exp_fails, r))
         n += 1
-        print(f"{name:32s} python={exp[1]:14s} " + " ".join(f"{l}={row[l][1]}" for l in vs))
+        print(f"{name:32s} python={exp[1]:14s} " + " ".join(f"{l}={row[l][1]}" for l in vs) + (f"  FAIL layers={exp_fails}" if exp_fails else ""))
     print(f"\ncases={n} verifiers={sorted(vs)} divergences={len(diverg)}")
     for d in diverg:
         print("DIVERGENCE", d)

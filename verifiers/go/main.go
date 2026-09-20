@@ -2,7 +2,9 @@
 // cra-verify — independent Go verifier of a cra-evidence pack (standard library only: crypto/sha256, crypto/sha3,
 // crypto/ed25519). Same layers and authenticity verdict as cra_evidence/verify_pack.py; canonical.go/prescan.go are
 // the strict parser + canonical encoder of cryptovalid's Go verifier (same profile, same author).
-// Usage: cra-verify <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex]; exit 0 only if ok.
+// Usage: cra-verify <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex] [--require-sources]; exit 0 only if ok.
+// source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
+// hash (SHA-256) to that value when present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 package main
 
 import (
@@ -15,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -104,7 +107,7 @@ func short(s any, n int) string {
 	return t
 }
 
-func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust bool, logPub string) (r result) {
+func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust bool, logPub string, requireSources bool) (r result) {
 	defer func() {
 		if e := recover(); e != nil {
 			r = result{Ok: false, Authenticity: "FAIL", Layers: []layer{{"verifier-exception", "FAIL", fmt.Sprint(e)}}}
@@ -225,6 +228,7 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 				okState = sh == last && (anchorIdx < 0 || anchorIdx >= ne)
 			}
 			layers = append(layers, layer{"pack-ledger-state", ifs(okState, "PASS", "FAIL"), fmt.Sprintf("declared entries=%v; anchor idx=%d", pack.Vals["ledger_entries"], anchorIdx)})
+			layers = append(layers, sourceDocuments(lp, entries, requireSources))
 			tipPath := lp + ".tip.json"
 			first, _ := getS(entries[0], "self_hash")
 			lastHash, _ := getS(entries[len(entries)-1], "self_hash")
@@ -380,12 +384,75 @@ func ifs(c bool, a, b string) string {
 	return b
 }
 
+// sourceDocuments: the SBOM source documents recorded by hash must, when present next to the ledger, hash to it.
+func sourceDocuments(lp string, entries []*Object, require bool) layer {
+	wanted := map[string]bool{}
+	for _, e := range entries {
+		d, ok := e.Vals["data"].(*Object)
+		if !ok {
+			continue
+		}
+		if k, _ := getS(d, "kind"); k != "cra_sbom" {
+			continue
+		}
+		src, ok := d.Vals["source"].(*Object)
+		if !ok {
+			continue
+		}
+		if h, _ := getS(src, "sha256"); h != "" {
+			wanted[h] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return layer{"source-documents", "SKIP", "no SBOM source document recorded by hash"}
+	}
+	keys := make([]string, 0, len(wanted))
+	for h := range wanted {
+		keys = append(keys, h)
+	}
+	sort.Strings(keys)
+	present, absent, bad := 0, 0, []string{}
+	for _, h := range keys {
+		if !hex64.MatchString(h) {
+			bad = append(bad, h[:min(16, len(h))]+" (malformed hash)")
+			continue
+		}
+		fp := filepath.Join(lp+".sources", h+".json")
+		if st, e := os.Stat(fp); e != nil || !st.Mode().IsRegular() {
+			absent++
+			continue
+		}
+		raw, err := os.ReadFile(fp)
+		if err != nil {
+			bad = append(bad, h[:16]+"… unreadable")
+			continue
+		}
+		got := hex.EncodeToString(func() []byte { s := sha256.Sum256(raw); return s[:] }())
+		if got == h {
+			present++
+		} else {
+			bad = append(bad, fmt.Sprintf("%s… stored bytes hash to %s…", h[:16], got[:16]))
+		}
+	}
+	if len(bad) > 0 {
+		if len(bad) > 3 {
+			bad = bad[:3]
+		}
+		return layer{"source-documents", "FAIL", fmt.Sprintf("%d source document(s) do not match their recorded SHA-256: %s", len(bad), strings.Join(bad, "; "))}
+	}
+	if absent > 0 {
+		return layer{"source-documents", ifs(require, "FAIL", "SKIP"), fmt.Sprintf("%d of %d source document(s) present and verified; %d recorded by hash only%s", present, len(wanted), absent, ifs(require, " (required)", ""))}
+	}
+	return layer{"source-documents", "PASS", fmt.Sprintf("%d source document(s) present, bytes hash to the recorded SHA-256", present)}
+}
+
 func main() {
 	var pack, ledger, trustFile, key string
+	requireSources := false
 	args := os.Args[1:]
 	next := func(i int) string { // a flag without its value is a usage error, never a panic
 		if i+1 >= len(args) {
-			fmt.Fprintln(os.Stderr, "usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex]")
+			fmt.Fprintln(os.Stderr, "usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]")
 			os.Exit(2)
 		}
 		return args[i+1]
@@ -401,12 +468,14 @@ func main() {
 		case "--log-pubkey":
 			key = next(i)
 			i++
+		case "--require-sources":
+			requireSources = true
 		default:
 			pack = args[i]
 		}
 	}
 	if pack == "" {
-		fmt.Fprintln(os.Stderr, "usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex]")
+		fmt.Fprintln(os.Stderr, "usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]")
 		os.Exit(2)
 	}
 	trust := map[string]string{}
@@ -419,7 +488,7 @@ func main() {
 		}
 		haveTrust = true
 	}
-	r := verifyPack(pack, ledger, trust, haveTrust, key)
+	r := verifyPack(pack, ledger, trust, haveTrust, key, requireSources)
 	out, _ := json.MarshalIndent(r, "", " ")
 	fmt.Println(string(out))
 	if !r.Ok {

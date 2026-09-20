@@ -15,13 +15,22 @@ profile — the parser/encoder modules are cryptovalid's, same author, AGPL). Sa
 verdict shape as the Python reference:
 
 ```
-node verifiers/js/cra-verify.mjs pack.json [--ledger l.jsonl] [--trust-store trust.json] [--log-pubkey <hex>]
+node verifiers/js/cra-verify.mjs pack.json [--ledger l.jsonl] [--trust-store trust.json] [--log-pubkey <hex>] [--require-sources]
 ./cra-verify pack.json …                      # Go / Rust binaries
 ```
 
-`verifiers/differential.py` builds 26 fixtures with the Python library — intact (unsigned, signed, trusted, with a
-signed tip, ledger elsewhere) and tampered (pack field, re-hashed pack, broken record digest, re-linked chain,
-sidecar signer/fingerprint rewritten, wrong trust store, truncated / unsealed tail under a trusted log key, wrong log
-key, ledger required but missing, NaN and duplicate-key lines, empty ledger, non-object pack, path traversal in
-`ledger_file`) — and requires every verifier to return the same `(ok, authenticity, anchored)`. CI runs it with all
-three present; a missing verifier is a failure, not a skip. Measured on 15/09/2026: 26 cases, 0 divergences.
+`verifiers/differential.py` builds 31 fixtures with the Python library — intact (unsigned, signed, trusted, with a
+signed tip, ledger elsewhere, an ingested SBOM with its generator document stored) and tampered (pack field, re-hashed
+pack, broken record digest, re-linked chain, sidecar signer/fingerprint rewritten, wrong trust store, truncated /
+unsealed tail under a trusted log key, wrong log key, ledger required but missing, NaN and duplicate-key lines, empty
+ledger, non-object pack, path traversal in `ledger_file`, one byte appended to a stored SBOM source document, a
+source document absent with and without `--require-sources`) — and requires every verifier to return the same
+`(ok, authenticity, anchored)` **and the same set of failing layers** (since 0.3.0: a FAIL for the wrong reason is a
+divergence). CI runs it with all three present; a missing verifier is a failure, not a skip. Measured on 20/09/2026:
+31 cases, 0 divergences; ablation (a JS verifier that accepts any stored bytes) → 1 divergence, caught.
+
+**`source-documents` layer (0.3.0).** For every `cra_sbom` record whose `source.sha256` is set, the file
+`<ledger>.sources/<sha256>.json` next to the ledger is re-hashed (SHA-256 of the raw bytes — no JSON re-parsing, so a
+generator document with floats is checked byte-exact): a mismatch is a FAIL; an absent file is a SKIP that says how
+many documents are hash-only, or a FAIL with `--require-sources`. A `sha256` that is not 64 hex characters is a FAIL,
+never a path.

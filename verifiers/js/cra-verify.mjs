@@ -5,7 +5,9 @@
 // canonical JSON = Python json.dumps(sort_keys, separators=(",",":"), ensure_ascii) (canon/pyEscape are the
 // functions of cryptovalid's cvverify.mjs); SHA-256 chain; SHA3-256 pack/record digests; Ed25519 sidecar over
 // {"alg","kind":"cra_pack_sig/1","public_key_hex","signed_pack_sha3","signed_utc","signer_id"}; cryptovalid_tip/1.
-// Usage: node cra-verify.mjs <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex] ; exit 0 only if ok.
+// Usage: node cra-verify.mjs <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex] [--require-sources] ; exit 0 only if ok.
+// source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
+// hash (SHA-256) to that value when the file is present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 import { createHash, verify as edVerify, createPublicKey } from "node:crypto";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -141,12 +143,12 @@ function signedPayload(side) {
 }
 const L = (layer, status, detail = "") => ({ layer, status, detail });
 
-export function verifyPack(packPath, { ledgerPath = null, trustStore = null, logPubkeyHex = null } = {}) {
-  try { return verify(packPath, ledgerPath, trustStore, logPubkeyHex); }
+export function verifyPack(packPath, { ledgerPath = null, trustStore = null, logPubkeyHex = null, requireSources = false } = {}) {
+  try { return verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources); }
   catch (e) { return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("verifier-exception", "FAIL", String(e.message || e).slice(0, 160))], pack_sha3: null }; }
 }
 
-function verify(packPath, ledgerPath, trustStore, logPubkeyHex) {
+function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources = false) {
   const layers = [];
   let pack;
   try { pack = strictParse(readFileSync(packPath, "utf-8")); layers.push(L("pack-json", "PASS")); }
@@ -199,6 +201,7 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex) {
       const ne = pack.ledger_entries;
       const okState = Number.isInteger(ne) && ne > 0 && ne <= entries.length && entries[ne - 1].self_hash === pack.ledger_last_self_hash && (anchorIdx === null || anchorIdx >= ne);
       layers.push(L("pack-ledger-state", okState ? "PASS" : "FAIL", `declared entries=${ne} last=${String(pack.ledger_last_self_hash).slice(0, 12)}…; anchor idx=${anchorIdx}`));
+      layers.push(sourceDocuments(lp, entries, requireSources, isFile));
       const tipPath = lp + ".tip.json";
       if (!entries.length) layers.push(L("signed-tip", "FAIL", "ledger has no entries"));
       else if (logPubkeyHex) {
@@ -257,14 +260,34 @@ function verifySidecar(packPath, pack, trustStore) {
   return out;
 }
 
+function sourceDocuments(lp, entries, require, isFile) {
+  const wanted = new Set();
+  for (const e of entries) {
+    const d = isObj(e.data) ? e.data : {};
+    if (d.kind === "cra_sbom" && isObj(d.source) && d.source.sha256) wanted.add(String(d.source.sha256));
+  }
+  if (!wanted.size) return L("source-documents", "SKIP", "no SBOM source document recorded by hash");
+  let present = 0, absent = 0; const bad = [];
+  for (const h of [...wanted].sort()) {
+    if (!HEX64.test(h)) { bad.push(h.slice(0, 16) + " (malformed hash)"); continue; }
+    const fp = join(lp + ".sources", h + ".json");
+    if (!isFile(fp)) { absent++; continue; }
+    const got = sha256(readFileSync(fp));
+    if (got === h) present++; else bad.push(`${h.slice(0, 16)}… stored bytes hash to ${got.slice(0, 16)}…`);
+  }
+  if (bad.length) return L("source-documents", "FAIL", `${bad.length} source document(s) do not match their recorded SHA-256: ` + bad.slice(0, 3).join("; "));
+  if (absent) return L("source-documents", require ? "FAIL" : "SKIP", `${present} of ${wanted.size} source document(s) present and verified; ${absent} recorded by hash only` + (require ? " (required)" : ""));
+  return L("source-documents", "PASS", `${present} source document(s) present, bytes hash to the recorded SHA-256`);
+}
+
 function main(argv) {
-  const args = argv.slice(2); let pack = null, ledger = null, trust = null, key = null;
+  const args = argv.slice(2); let pack = null, ledger = null, trust = null, key = null, requireSources = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--ledger") ledger = args[++i]; else if (args[i] === "--trust-store") trust = JSON.parse(readFileSync(args[++i], "utf-8"));
-    else if (args[i] === "--log-pubkey") key = args[++i]; else pack = args[i];
+    else if (args[i] === "--log-pubkey") key = args[++i]; else if (args[i] === "--require-sources") requireSources = true; else pack = args[i];
   }
-  if (!pack) { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex]"); return 2; }
-  const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key });
+  if (!pack) { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); return 2; }
+  const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key, requireSources });
   console.log(JSON.stringify(r, null, 1));
   return r.ok ? 0 : 1;
 }

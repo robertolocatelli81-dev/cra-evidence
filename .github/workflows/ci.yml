@@ -14,7 +14,7 @@ jobs:
       - name: Install (with signing extra) + the INDEPENDENT cryptovalid verifier for the interop test
         run: |
           pip install ".[sign]" jsonschema referencing
-          pip install https://github.com/robertolocatelli81-dev/cryptovalid-opencore/releases/download/v0.11.4/cryptovalid_opencore-0.11.4-py3-none-any.whl
+          pip install https://github.com/robertolocatelli81-dev/cryptovalid-opencore/releases/download/v0.15.0/cryptovalid_opencore-0.15.0-py3-none-any.whl
       - name: Unit tests (every suite; interop against cryptovalid runs because the wheel is installed)
         run: |
           for t in tests/test_*.py; do echo "== $t"; python "$t"; done
@@ -57,5 +57,24 @@ jobs:
           pip install ".[sign]"
           (cd verifiers/go && go vet ./... && go build -o /tmp/cra-verify-go .)
           (cd verifiers/rust && cargo build --release)
-      - name: Differential oracle — Python / JS / Go / Rust must agree on every fixture (absence = failure)
+      - name: Differential oracle — Python / JS / Go / Rust must agree on every fixture AND on the failing layers (absence = failure)
         run: CRA_VERIFY_GO=/tmp/cra-verify-go python verifiers/differential.py --require js,go,rust
+      - name: Official CycloneDX CLI — the 1.6 and 1.7 exports of every real-generator fixture and of the installed floor must validate
+        run: |
+          curl -sSL -o /tmp/cyclonedx https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.33.1/cyclonedx-linux-x64 && chmod +x /tmp/cyclonedx
+          python - <<'PY'
+          import glob, json, os, subprocess, sys
+          sys.path.insert(0, ".")
+          from cra_evidence.sbom import sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx
+          recs = [(os.path.basename(p), (sbom_from_spdx if "spdx" in p else sbom_from_cyclonedx)(p, "tiny-cra-sample", "1.0.0")) for p in sorted(glob.glob("tests/fixtures/real_tools/*.json"))]
+          recs.append(("installed", sbom_from_installed("cra-evidence", "0.3.0", ["cryptography"], transitive=True)))
+          n = 0
+          for name, r in recs:
+              for v in ("1.6", "1.7"):
+                  out = f"/tmp/export_{v}_{name}"; json.dump(r.to_cyclonedx_min(v), open(out, "w"))
+                  subprocess.run(["/tmp/cyclonedx", "validate", "--input-file", out, "--input-format", "json", "--input-version", "v" + v.replace(".", "_"), "--fail-on-errors"], check=True)
+                  n += 1
+          bad = json.load(open("/tmp/export_1.7_installed")); bad["components"][0]["type"] = "not-a-type"; json.dump(bad, open("/tmp/bad.json", "w"))
+          assert subprocess.run(["/tmp/cyclonedx", "validate", "--input-file", "/tmp/bad.json", "--input-format", "json", "--input-version", "v1_7", "--fail-on-errors"]).returncode != 0, "positive control: the CLI must reject a broken document"
+          print(f"cyclonedx-cli: {n} exports valid, positive control rejected")
+          PY

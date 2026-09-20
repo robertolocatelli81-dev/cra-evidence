@@ -14,6 +14,7 @@ from cra_evidence import feeds
 
 try:
     from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path
+    import cryptography  # noqa: F401 — signing imports lazily; the module itself must be present
     HAVE_CRYPTO = True
 except Exception:  # noqa: BLE001
     HAVE_CRYPTO = False
@@ -90,6 +91,7 @@ class TestCouncilR3(unittest.TestCase):
             lk.record_vulnerability(VulnerabilityRecord("OTHER", "CVE-9", False, AW))
 
     # B5/B6 — seal only anchored digests by default; pack appears only once anchored
+    @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_seal_requires_anchor_and_pack_is_atomic(self):
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         with self.assertRaises(ValueError):
