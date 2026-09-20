@@ -19,6 +19,7 @@ from .signing import verify_pack_signature, verify_tip
 
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
+EXTERNAL_FORMATS = ("cyclonedx-json", "spdx-json", "spdx-jsonld")
 from .sbom import MAX_SOURCE_BYTES   # noqa: E402 — a stored generator document above this is refused unread (a symlink to /dev/zero must not hang a verifier)
 
 
@@ -36,7 +37,11 @@ def verify_pack(path: str, ledger_path: Optional[str] = None, trust_store: Optio
     crash (fail-closed). log_pubkey_hex: the trusted key of the ledger's signed tip — with it, a truncated tail
     (records dropped AFTER the anchor) is detected; without it the tip is NOT checked and the verdict says so.
     require_sources: every SBOM source document the ledger records by SHA-256 must be present in <ledger>.sources/
-    and hash to the recorded value (a missing one is then a FAIL, otherwise a SKIP that says how many are hash-only)."""
+    and hash to the recorded value (a missing one is then a FAIL, otherwise a SKIP that says how many are hash-only).
+    log_pubkey_hex, when given, must be 64 lower-case hex characters (ValueError otherwise: a caller's typo must never
+    turn into "tip not checked")."""
+    if log_pubkey_hex is not None and not (isinstance(log_pubkey_hex, str) and HEX64.fullmatch(log_pubkey_hex)):
+        raise ValueError("log_pubkey_hex must be 64 lower-case hex characters")
     try:
         return _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources)
     except Exception as e:  # noqa: BLE001
@@ -53,8 +58,12 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
     for e in entries:
         d = e.get("data") if isinstance(e.get("data"), dict) else {}
         src = d.get("source") if d.get("kind") == "cra_sbom" and isinstance(d.get("source"), dict) else None
-        if src is None or src.get("sha256") in (None, ""):
-            continue                                          # absent / null / empty: no hash recorded
+        if src is None:
+            continue
+        if src.get("sha256") in (None, ""):
+            if src.get("format") in EXTERNAL_FORMATS:         # an ingested document is always recorded WITH its hash: a record without it is malformed
+                malformed += 1
+            continue                                          # otherwise absent / null / empty: no hash recorded (installed floor)
         h = src["sha256"]
         if not isinstance(h, str) or not HEX64.fullmatch(h):
             malformed += 1                                    # present but not a SHA-256: a FAIL, never a path
@@ -174,7 +183,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                 layers.append(_layer("signed-tip", "SKIP", "no tip: tail truncation undetectable offline (use a tip key / cryptovalid monitor)"))
     else:
         layers.append(_layer("ledger-chain", "SKIP", "ledger not next to the pack (honest: integrity of the chain not checked)"))
-    sig = verify_pack_signature(path, trust_store)
+    sig = verify_pack_signature(path, trust_store, pack=pack)
     layers.append(_layer("producer-signature", sig["status"], sig.get("detail", "")))
     if sig["status"] == "FAIL":
         auth = "FAIL"

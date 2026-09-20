@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from typing import Any, Dict, List
 
@@ -154,8 +155,11 @@ def main(argv: List[str] = None) -> int:
         _p({"seal": d, "verify": v})
         return 0 if v["ok"] else 1
     if a.cmd == "verify":
-        if a.ledger is not None and a.ledger == "":
-            p.error("verify: --ledger needs a path (empty string given)")
+        for flag, val in (("--ledger", a.ledger), ("--trust-store", a.trust_store), ("--log-pubkey", a.log_pubkey)):
+            if val is not None and val == "":
+                p.error(f"verify: {flag} needs a value (empty string given)")
+        if a.log_pubkey is not None and not re.fullmatch(r"[0-9a-f]{64}", a.log_pubkey):
+            p.error("verify: --log-pubkey must be 64 lower-case hex characters")
         ts = None
         if a.trust_store:
             from .ledger import load_trust_store

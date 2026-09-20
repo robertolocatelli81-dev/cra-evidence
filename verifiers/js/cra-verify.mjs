@@ -114,7 +114,7 @@ function tipPayload(entries, ledgerId, tipSha256, ts) {
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 const sha3 = (b) => createHash("sha3-256").update(b).digest("hex");
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const without = (o, k) => { const c = {}; for (const x of Object.keys(o)) if (x !== k) c[x] = o[x]; return c; };
+const without = (o, k) => Object.fromEntries(Object.entries(o).filter(([x]) => x !== k));   // keeps an own "__proto__" key (c[x] = … would invoke the setter and drop it)
 function badNumberToken(text) {   // outside strings: a token with '.', 'e', 'E' (10.0 would JSON.parse to 10 and hash alike) or an integer outside ±(2^53-1)
   let inStr = false, esc = false;
   for (let i = 0; i < text.length; i++) {
@@ -141,7 +141,9 @@ function strictParse(text) {   // JSON.parse alone hides what the profile forbid
   if (jsonNestingDepth(text) > 512) throw new Error("nesting deeper than 512");
   return JSON.parse(text);
 }
-function edOk(pubHex, msg, sigHex) {
+const HEX128 = /^[0-9a-f]{128}$/, EXTERNAL_FORMATS = new Set(["cyclonedx-json", "spdx-json", "spdx-jsonld"]);
+function edOk(pubHex, msg, sigHex) {   // lower-case hex of exact length, as the profile writes it (Buffer.from(…, "hex") would truncate at the first non-hex char)
+  if (typeof pubHex !== "string" || !HEX64.test(pubHex) || typeof sigHex !== "string" || !HEX128.test(sigHex)) return false;
   try { return edVerify(null, msg, createPublicKey({ key: Buffer.concat([SPKI, Buffer.from(pubHex, "hex")]), format: "der", type: "spki" }), Buffer.from(sigHex, "hex")); }
   catch { return false; }
 }
@@ -266,6 +268,8 @@ function verifySidecar(packPath, pack, trustStore) {
   let digest; try { digest = sha3(Buffer.from(canon(without(pack, "pack_sha3")), "utf-8")); } catch (e) { return { status: "FAIL", detail: "pack not canonicalisable" }; }
   if (pack.pack_sha3 !== digest) return { status: "FAIL", detail: "content does not match pack_sha3 (modified after signing)" };
   if (side.signed_pack_sha3 !== digest) return { status: "FAIL", detail: "pack changed after signature (digest differs from the signed one)" };
+  if (!["signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"].every((k) => typeof side[k] === "string" && side[k] !== "") || !INSTANT_RE.test(side.signed_utc) || ("alg" in side && typeof side.alg !== "string"))
+    return { status: "FAIL", detail: "sidecar field missing or not a string (a missing field is never signed as null)" };
   let sigOk = false;
   try { sigOk = typeof side.public_key_hex === "string" && typeof side.signature_hex === "string" && edOk(side.public_key_hex, signedPayload(side), side.signature_hex); } catch { sigOk = false; }   // a payload that cannot be canonicalised (missing/odd fields) is an invalid signature, never an exception
   if (!sigOk) return { status: "FAIL", detail: "signature invalid for the declared key" };
@@ -284,7 +288,7 @@ function sourceDocuments(lp, entries, require, isFile) {
     const d = isObj(e.data) ? e.data : {};
     if (d.kind !== "cra_sbom" || !isObj(d.source)) continue;
     const v = d.source.sha256;
-    if (v === undefined || v === null || v === "") continue;            // absent / null / empty: no hash recorded
+    if (v === undefined || v === null || v === "") { if (EXTERNAL_FORMATS.has(d.source.format)) malformed++; continue; }   // an ingested document is always recorded WITH its hash
     if (typeof v !== "string" || !HEX64.test(v)) { malformed++; continue; }  // present but not a SHA-256: FAIL, never a path
     wanted.add(v);
   }
@@ -307,15 +311,19 @@ function sourceDocuments(lp, entries, require, isFile) {
 
 function main(argv) {
   const args = argv.slice(2); let pack = null, ledger = null, trust = null, key = null, requireSources = false;
+  const usage = () => { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); return 2; };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--ledger") ledger = args[++i];
+    const val = () => { if (i + 1 >= args.length || args[i + 1] === "") return null; return args[++i]; };   // a flag without a value, or with "", is a usage error — never a silent default
+    if (args[i] === "--ledger") { ledger = val(); if (ledger === null) return usage(); }
     else if (args[i] === "--trust-store") {
-      try { trust = strictParse(readText(args[++i])); if (!isObj(trust) || !Object.values(trust).every((v) => typeof v === "string")) throw new Error("not an object of strings"); }
+      const f = val(); if (f === null) return usage();
+      try { trust = strictParse(readText(f)); if (!isObj(trust) || !Object.values(trust).every((v) => typeof v === "string")) throw new Error("not an object of strings"); }
       catch (e) { console.error("trust store unreadable: " + e.message); return 2; }
     }
-    else if (args[i] === "--log-pubkey") key = args[++i]; else if (args[i] === "--require-sources") requireSources = true; else pack = args[i];
+    else if (args[i] === "--log-pubkey") { key = val(); if (key === null || !HEX64.test(key)) return usage(); }
+    else if (args[i] === "--require-sources") requireSources = true; else pack = args[i];
   }
-  if (!pack || ledger === "" || key === "") { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); return 2; }
+  if (!pack) return usage();
   const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key, requireSources });
   console.log(JSON.stringify(r, null, 1));
   return r.ok ? 0 : 1;

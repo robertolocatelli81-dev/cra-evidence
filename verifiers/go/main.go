@@ -91,7 +91,12 @@ func parseObject(b []byte) (*Object, error) {
 	}
 	return o, nil
 }
+var hex128 = regexp.MustCompile(`^[0-9a-f]{128}$`)
+
 func edOK(pubHex string, msg []byte, sigHex string) bool {
+	if !hex64.MatchString(pubHex) || !hex128.MatchString(sigHex) { // lower-case hex of exact length, as the profile writes it
+		return false
+	}
 	pub, e1 := hex.DecodeString(pubHex)
 	sig, e2 := hex.DecodeString(sigHex)
 	if e1 != nil || e2 != nil || len(pub) != ed25519.PublicKeySize || len(sig) != ed25519.SignatureSize {
@@ -366,11 +371,21 @@ func verifySidecar(packPath string, pack *Object, declared string, trust map[str
 	if s, _ := getS(side, "signed_pack_sha3"); s != dg {
 		return "FAIL", "pack changed after signature (digest differs from the signed one)", false
 	}
+	for _, k := range []string{"signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"} {
+		if v, ok := getS(side, k); !ok || v == "" { // the signed fields must exist as strings: a missing field is never signed "as null"
+			return "FAIL", "sidecar field missing or not a string: " + k, false
+		}
+	}
+	if su, _ := getS(side, "signed_utc"); !instantRe.MatchString(su) {
+		return "FAIL", "sidecar signed_utc is not an instant", false
+	}
 	pub, _ := getS(side, "public_key_hex")
 	sigHex, _ := getS(side, "signature_hex")
 	alg, okAlg := side.Vals["alg"]
 	if !okAlg {
 		alg = "Ed25519"
+	} else if _, isStr := alg.(string); !isStr {
+		return "FAIL", "sidecar alg is not a string", false
 	}
 	payloadObj := &Object{Keys: []string{"kind", "signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "alg"},
 		Vals: map[string]any{"kind": "cra_pack_sig/1", "signed_pack_sha3": side.Vals["signed_pack_sha3"], "signer_id": side.Vals["signer_id"],
@@ -430,12 +445,12 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 			continue
 		}
 		v, has := src.Vals["sha256"]
-		if !has || v == nil {
-			continue // absent / null: no hash recorded
-		}
 		h, isStr := v.(string)
-		if isStr && h == "" {
-			continue // empty: no hash recorded
+		if !has || v == nil || (isStr && h == "") {
+			if f, _ := getS(src, "format"); f == "cyclonedx-json" || f == "spdx-json" || f == "spdx-jsonld" {
+				malformed++ // an ingested document is always recorded WITH its hash: a record without it is malformed
+			}
+			continue // otherwise absent / null / empty: no hash recorded (installed floor)
 		}
 		if !isStr || !hex64.MatchString(h) {
 			malformed++ // present but not a SHA-256: a FAIL, never a path
@@ -513,9 +528,17 @@ func main() {
 			i++
 		case "--trust-store":
 			trustFile = next(i)
+			if trustFile == "" {
+				fmt.Fprintln(os.Stderr, "usage: --trust-store needs a path (empty string given)")
+				os.Exit(2)
+			}
 			i++
 		case "--log-pubkey":
 			key = next(i)
+			if !hex64.MatchString(key) {
+				fmt.Fprintln(os.Stderr, "usage: --log-pubkey must be 64 lower-case hex characters")
+				os.Exit(2)
+			}
 			i++
 		case "--require-sources":
 			requireSources = true

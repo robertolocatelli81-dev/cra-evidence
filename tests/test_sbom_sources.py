@@ -313,6 +313,8 @@ class TestSourceStore(unittest.TestCase):
         docs = [{"spdxVersion": "SPDX-2.3", "documentDescribes": [["x"]], "packages": [{"name": "a", "SPDXID": "S-a", "versionInfo": "1"}],
                  "relationships": [{"spdxElementId": ["S-a"], "relatedSpdxElement": {"x": 1}, "relationshipType": "DESCRIBES"}]},
                 {"spdxVersion": "SPDX-2.3", "packages": 5, "relationships": "x", "documentDescribes": [{"a": 1}]},
+                {"spdxVersion": "SPDX-2.3", "packages": [{"name": "a", "SPDXID": ["S-a"], "versionInfo": ["1"]}, {"name": ["b"], "SPDXID": {"x": 1}}],
+                 "relationships": [{"spdxElementId": "SPDXRef-DOCUMENT", "relatedSpdxElement": "S-a", "relationshipType": "DESCRIBES"}]},
                 {"spdxVersion": "SPDX-2.3", "packages": [{"name": "a", "externalRefs": 3, "checksums": {"a": 1}, "versionInfo": "1"}]},
                 {"@graph": [{"type": "software_Package", "spdxId": ["p1"], "name": "a"}, {"type": "SpdxDocument", "rootElement": [["r"]]},
                             {"type": "Relationship", "relationshipType": "describes", "from": ["x"], "to": [{"a": 1}]},
@@ -323,6 +325,14 @@ class TestSourceStore(unittest.TestCase):
                 json.dump(doc, f)
             r = sbom_from_spdx(p, "tiny-cra-sample", "1.0.0")            # a record, or ValueError — never TypeError
             self.assertIsInstance(r.components, list)
+            for c in r.components:                                        # a hostile non-string field is never stringified into data
+                for v in (c.name, c.version, c.purl, c.license, c.supplier, c.cpe):
+                    self.assertNotIn("[", v); self.assertNotIn("{", v)
+        cdx = os.path.join(self.d, "tc_cdx.json")
+        with open(cdx, "w") as f:
+            json.dump({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [{"name": {"x": 1}, "version": "1"}, {"name": "ok", "version": [1], "purl": {"p": 1}, "type": 3}]}, f)
+        r = sbom_from_cyclonedx(cdx, "tiny-cra-sample", "1.0.0")
+        self.assertEqual([(c.name, c.version, c.purl, c.type) for c in r.components], [("ok", "", "", "library")])
 
     def test_store_never_overwrites_different_bytes(self):
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
@@ -412,13 +422,13 @@ class TestExport(unittest.TestCase):
     def test_bom_refs_are_unique_and_dependencies_only_where_known(self):
         r = SBOMRecord("p", "1", [SBOMComponent("a", "1", purl="pkg:npm/x@1"), SBOMComponent("b", "1", purl="pkg:npm/x@1"), SBOMComponent("p", "1")])
         out = r.to_cyclonedx_min()
+        refs = [c["bom-ref"] for c in out["components"]] + [out["metadata"]["component"]["bom-ref"]]
+        self.assertEqual(len(refs), len(set(refs)), refs)
+        self.assertNotIn("dependencies", out)                                                          # no edges known → none invented
         try:
             import cryptography  # noqa: F401
         except ImportError:
             self.skipTest("cryptography not installed (the installed-floor part of this test needs it)")
-        refs = [c["bom-ref"] for c in out["components"]] + [out["metadata"]["component"]["bom-ref"]]
-        self.assertEqual(len(refs), len(set(refs)), refs)
-        self.assertNotIn("dependencies", out)                                                          # no edges known → none invented
         inst = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"]).to_cyclonedx_min()   # top-level floor: all direct…
         self.assertEqual(inst["dependencies"], [{"ref": inst["metadata"]["component"]["bom-ref"], "dependsOn": [c["bom-ref"] for c in inst["components"]]}])
         # …and NOTHING else: `dependsOn: []` would assert "no dependencies" for a component whose Requires-Dist was never read

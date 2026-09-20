@@ -391,13 +391,18 @@ def _fingerprint_bytes(raw: bytes, path: str) -> Dict[str, Any]:
     return {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(path)}
 
 
+def _s(v: Any) -> str:
+    """A text field of a generator document: only a string is text; anything else is empty, never stringified."""
+    return v if isinstance(v, str) else ""
+
+
 def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:
     """metadata.tools as 1.5+ {components:[...]} or the legacy list of {vendor,name,version}: (name, version)."""
     try:
         tools = (d.get("metadata", {}) or {}).get("tools", {})
         comp = tools.get("components", []) if isinstance(tools, dict) else tools
         if isinstance(comp, list) and comp and isinstance(comp[0], dict):
-            return str(comp[0].get("name", "")), str(comp[0].get("version", ""))
+            return _s(comp[0].get("name")), _s(comp[0].get("version"))
     except Exception:  # noqa: BLE001
         pass
     return "", ""
@@ -423,12 +428,12 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
     def walk(items: List[Any], level: int) -> None:
         nonlocal declared, nested
         for c in items:
-            if not isinstance(c, dict) or not c.get("name"):
-                continue
+            if not isinstance(c, dict) or not isinstance(c.get("name"), str) or not c["name"]:
+                continue                                  # a component whose name is not a string is not a component
             declared += 1
             if level:
                 nested += 1
-            typ = str(c.get("type", "") or "library")
+            typ = c.get("type") if isinstance(c.get("type"), str) and c.get("type") else "library"
             types[typ] = types.get(typ, 0) + 1
             sha = ""
             for h in (c.get("hashes") if isinstance(c.get("hashes"), list) else []):
@@ -439,14 +444,14 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
             for le in (c.get("licenses") if isinstance(c.get("licenses"), list) else []):
                 if isinstance(le, dict):
                     li = le.get("license") if isinstance(le.get("license"), dict) else {}
-                    lic = li.get("id") or li.get("name") or le.get("expression") or ""
+                    lic = _s(li.get("id")) or _s(li.get("name")) or _s(le.get("expression"))
                     if lic:
                         break
             sup = c.get("supplier")
-            comps.append(SBOMComponent(name=str(c["name"]), version=str(c.get("version", "") or ""),
-                                       supplier=str(sup.get("name", "")) if isinstance(sup, dict) else "",
-                                       purl=str(c.get("purl", "") or ""), sha256=sha, license=str(lic)[:512],   # the FIRST licence entry; the document has them all
-                                       type=typ if typ in CYCLONEDX_COMPONENT_TYPES else "library", cpe=str(c.get("cpe", "") or "")))
+            comps.append(SBOMComponent(name=c["name"], version=_s(c.get("version")),
+                                       supplier=_s(sup.get("name")) if isinstance(sup, dict) else "",
+                                       purl=_s(c.get("purl")), sha256=sha, license=_s(lic)[:512],   # the FIRST licence entry; the document has them all
+                                       type=typ if typ in CYCLONEDX_COMPONENT_TYPES else "library", cpe=_s(c.get("cpe"))))
             if isinstance(c.get("components"), list):
                 walk(c["components"], level + 1)
     try:
@@ -454,8 +459,8 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
     except RecursionError:
         raise ValueError("CycloneDX malformed: components nested too deep") from None
     deps = d.get("dependencies") if isinstance(d.get("dependencies"), list) else []
-    source = {"format": "cyclonedx-json", "spec_version": str(d.get("specVersion", "")), "generator": gen, "generator_version": gen_ver,
-              "serial_number": str(d.get("serialNumber", "") or ""), "components_declared": declared, "components_nested": nested,
+    source = {"format": "cyclonedx-json", "spec_version": _s(d.get("specVersion")), "generator": gen, "generator_version": gen_ver,
+              "serial_number": _s(d.get("serialNumber")), "components_declared": declared, "components_nested": nested,
               "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": sum(len(x["dependsOn"]) for x in deps if isinstance(x, dict) and isinstance(x.get("dependsOn"), list)),
               "dependencies_declared": len(deps), "component_types": dict(sorted(types.items()))}
     source.update(_fingerprint_bytes(raw, path))
@@ -468,7 +473,8 @@ _NOASSERT = ("", "NOASSERTION", "NONE")
 
 
 def _clean(v: Any) -> str:
-    v = "" if v is None else str(v).strip()
+    """A text field: a non-string (list, dict, number, bool) is NOT stringified into the record — it is empty."""
+    v = v.strip() if isinstance(v, str) else ""
     return "" if v in _NOASSERT else v
 
 
@@ -531,7 +537,8 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     for p in _lst(d.get("packages")):
         if not isinstance(p, dict) or not _clean(p.get("name")):
             continue                                     # counted by the caller as packages_unnamed
-        if p.get("SPDXID") in roots:
+        sid = p.get("SPDXID")
+        if isinstance(sid, str) and sid in roots:
             continue                                     # the product itself is metadata, not a dependency
         refs = [r for r in _lst(p.get("externalRefs")) if isinstance(r, dict)]
         purl = next((r.get("referenceLocator", "") for r in refs if r.get("referenceType") == "purl"), "")

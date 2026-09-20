@@ -353,6 +353,78 @@ def cases(base):
         if total <= 512: rehash(p)
     case("pack_depth_512", lambda d: pack_depth(d, 512))
     case("pack_depth_513", lambda d: pack_depth(d, 513))
+    # ---- round 6: keys named __proto__, hex decoders, CLI flag values (python CLI runs too on these: `cli` rows)
+    def proto_in_record(d):
+        from cra_evidence.locker import _bind
+        lk, key, pack, pk = build(d); lk.ledger.append(_bind({"kind": "note", "__proto__": {"polluted": True}, "n": 1})); lk.evidence_pack(os.path.join(d, "p.json"))
+    case("record_key_named___proto__", proto_in_record)
+    def proto_in_pack(d):
+        build(d); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["__proto__"] = "x"; json.dump(j, open(p, "w")); rehash(p)
+    case("pack_key_named___proto__", proto_in_pack)
+    def pack_extra_key_untouched(d, key):   # extra top-level key, pack_sha3 NOT recomputed: must FAIL pack-sha3 in all four (JS dropped "__proto__" from its canonical form)
+        lk, k, pack, pk = build(d, sign=True); t = open(pack, encoding="utf-8").read(); open(pack, "w", encoding="utf-8").write(t[:1] + f'"{key}": {{"evil": 1}}, ' + t[1:])
+    case("pack_extra_key___proto___digest_untouched", lambda d: pack_extra_key_untouched(d, "__proto__"))
+    case("pack_extra_key_zz_digest_untouched", lambda d: pack_extra_key_untouched(d, "zz_extra"))   # control
+    def entry_extra_key_untouched(d, key):
+        build(d); p = os.path.join(d, "l.jsonl"); lines = open(p, encoding="utf-8").read().splitlines()
+        lines[0] = lines[0][:1] + f'"{key}": {{"evil": 1}}, ' + lines[0][1:]; open(p, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+    case("ledger_entry_extra_key___proto___hash_untouched", lambda d: entry_extra_key_untouched(d, "__proto__"))
+    case("ledger_entry_extra_key_zz_hash_untouched", lambda d: entry_extra_key_untouched(d, "zz_extra"))   # control
+    def side_sig(d, fn):
+        lk, key, pack, pk = build(d, sign=True); s = json.load(open(sidecar_path(pack))); s["signature_hex"] = fn(s["signature_hex"]); json.dump(s, open(sidecar_path(pack), "w"))
+    case("sidecar_sig_hex_space", lambda d: side_sig(d, lambda h: h[:2] + " " + h[2:]))
+    case("sidecar_sig_hex_plus", lambda d: side_sig(d, lambda h: h[:1] + "+" + h[2:] if h[1] != "+" else h))
+    case("sidecar_sig_hex_trailing_char", lambda d: side_sig(d, lambda h: h + "z"))
+    case("sidecar_sig_hex_upper", lambda d: side_sig(d, lambda h: h.upper()))
+    def tip_sig(d, fn):
+        lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl.tip.json"); t = json.load(open(p)); t["signature_hex"] = fn(t["signature_hex"]); json.dump(t, open(p, "w")); return {"key": key[1]}
+    case("tip_sig_hex_space", lambda d: tip_sig(d, lambda h: h[:2] + " " + h[2:]))
+    case("tip_sig_hex_upper", lambda d: tip_sig(d, lambda h: h.upper()))
+    def key_upper(d):
+        lk, key, pack, pk = build(d); return {"key": key[1].upper()}
+    case("cli_log_pubkey_upper", key_upper, cli=True)
+    def key_empty(d):
+        build(d); return {"key": ""}
+    case("cli_log_pubkey_empty", key_empty, cli=True)
+    def trust_empty(d):
+        build(d, sign=True); return {"trust": ""}
+    case("cli_trust_store_empty", trust_empty, cli=True)
+    def ledger_flag_no_value(d):
+        build(d); return {"raw_args": ["--ledger"]}
+    case("cli_ledger_flag_without_value", ledger_flag_no_value, cli=True)
+    def key_flag_no_value(d):
+        build(d); return {"raw_args": ["--log-pubkey"]}
+    case("cli_log_pubkey_flag_without_value", key_flag_no_value, cli=True)
+    def trust_flag_no_value(d):
+        build(d, sign=True); return {"raw_args": ["--trust-store"]}
+    case("cli_trust_store_flag_without_value", trust_flag_no_value, cli=True)
+    def side_signed_over(d, mutate):   # sidecar signed by the real key over a payload whose field is missing / null / not an instant
+        from cra_evidence.signing import signed_payload, pack_digest, canonical_bytes
+        keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key")); sk, pk = key
+        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
+        pj = json.load(open(pack)); side = {"signer_id": "acme-ci", "public_key_hex": pk, "alg": "Ed25519", "signed_pack_sha3": pack_digest(pj), "signed_utc": AW}
+        mutate(side)
+        payload = canonical_bytes({"kind": "cra_pack_sig/1", "signed_pack_sha3": side["signed_pack_sha3"], "signer_id": side["signer_id"],
+                                   "signed_utc": side.get("signed_utc"), "public_key_hex": side["public_key_hex"], "alg": side.get("alg", "Ed25519")})
+        side["signature_hex"] = sk.sign(payload).hex(); json.dump(side, open(sidecar_path(pack), "w"))
+    def _del(k):
+        def f(side): del side[k]
+        return f
+    case("sidecar_missing_signed_utc_signed_over_null", lambda d: side_signed_over(d, _del("signed_utc")))
+    case("sidecar_signed_utc_null_signed", lambda d: side_signed_over(d, lambda s: s.__setitem__("signed_utc", None)))
+    case("sidecar_signed_utc_not_instant_signed", lambda d: side_signed_over(d, lambda s: s.__setitem__("signed_utc", "yesterday")))
+    def external_without_hash(d):
+        from cra_evidence.locker import _bind
+        lk, key, pack, pk = build(d)
+        lk.ledger.append(_bind({"kind": "cra_sbom", "product_id": "prodotto-ü", "product_version": "1", "sbom": {}, "component_count": 0,
+                                "resolved_components": 0, "sbom_floor_met": False, "source": {"format": "cyclonedx-json", "generator": "syft"}}))
+        lk.evidence_pack(os.path.join(d, "p.json")); return {"require_sources": True}
+    case("sbom_external_format_without_hash_required", external_without_hash)
+    if os.geteuid() != 0:
+        def ledger_mode0(d):
+            build(d); os.chmod(os.path.join(d, "l.jsonl"), 0)
+        case("ledger_unreadable", ledger_mode0)
     if os.environ.get("CRA_ORACLE_BIG") == "1":
         def cr_padding_big(d):   # 66 MiB of \r before the newline: content above the bound in all four (Python must not buffer it whole)
             build(d); p = os.path.join(d, "l.jsonl"); b = open(p, "rb").read(); i = b.index(b"\n"); open(p, "wb").write(b[:i] + b"\r" * (66 << 20) + b[i:])
@@ -386,10 +458,11 @@ def cases(base):
 
 def run_cli(cmd, pack, opts):
     args = list(cmd) + [pack]
-    if opts.get("ledger"): args += ["--ledger", opts["ledger"]]
-    if opts.get("trust"): args += ["--trust-store", opts["trust"]]
-    if opts.get("key"): args += ["--log-pubkey", opts["key"]]
+    if opts.get("ledger") is not None: args += ["--ledger", opts["ledger"]]
+    if opts.get("trust") is not None: args += ["--trust-store", opts["trust"]]
+    if opts.get("key") is not None: args += ["--log-pubkey", opts["key"]]
     if opts.get("require_sources"): args += ["--require-sources"]
+    args += opts.get("raw_args", [])
     r = subprocess.run(args, capture_output=True, text=True, timeout=120)
     try:
         j = json.loads(r.stdout)
@@ -406,6 +479,9 @@ def main():
         vs["js"] = ["node", os.path.join(ROOT, "verifiers", "js", "cra-verify.mjs")]
     gob = os.environ.get("CRA_VERIFY_GO") or shutil.which("cra-verify-go")
     if gob:
+        src_mtime = max(os.path.getmtime(os.path.join(ROOT, "verifiers", "go", f)) for f in os.listdir(os.path.join(ROOT, "verifiers", "go")) if f.endswith(".go"))
+        if os.path.getmtime(gob) < src_mtime:   # a stale binary would measure yesterday's Go (round 6: it did) — refuse, never report it as today's
+            print(f"Go binary {gob} is older than verifiers/go/*.go: rebuild it before measuring"); return 2
         vs["go"] = [gob]
     rb = os.environ.get("CRA_VERIFY_RUST") or (os.path.join(ROOT, "verifiers", "rust", "target", "release", "cra-verify") if os.path.exists(os.path.join(ROOT, "verifiers", "rust", "target", "release", "cra-verify")) else None)
     if rb:
@@ -416,6 +492,17 @@ def main():
     base = tempfile.mkdtemp()
     diverg, n = [], 0
     for name, pack, opts in cases(base):
+        if opts.get("cli"):   # CLI boundary case: the Python CLI is a row like the others; every row must be a usage/unreadable error (exit 2, no verdict)
+            rows = dict(vs); rows["python-cli"] = [sys.executable, "-m", "cra_evidence.cli", "verify"]
+            exp = (None, "unreadable-input", None); row = {}
+            for lang, cmd in rows.items():
+                r = run_cli(cmd, pack, opts)
+                row[lang] = (None, "unreadable-input" if r.get("exit") == 2 and "error" in r else f"exit {r.get('exit')}", None)
+                if row[lang] != exp:
+                    diverg.append((name, lang, exp, [], r))
+            n += 1
+            print(f"{name:32s} " + " ".join(f"{l}={row[l][1]}" for l in rows))
+            continue
         trust, unreadable = None, False
         if opts.get("trust"):
             try:

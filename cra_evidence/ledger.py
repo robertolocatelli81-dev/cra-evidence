@@ -147,6 +147,8 @@ def _tail_state(f) -> Tuple[int, str, str, bool]:
         line = line_content(raw)
         if is_blank_line(line):
             continue
+        if len(line) > MAX_LINE_BYTES:
+            raise ValueError(f"ledger line {lineno} exceeds {MAX_LINE_BYTES} bytes: chain not continuable — verify, repair, record the incident")
         try:
             e = parse_line(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError, RecursionError) as e:
@@ -236,7 +238,7 @@ class Ledger:
                     failures.append(f"entry {n}: self_hash mismatch")
                 prev = e.get("self_hash", prev) if isinstance(e.get("self_hash"), str) else prev
                 n += 1
-        except (ValueError, TypeError, RecursionError) as ex:
+        except (ValueError, TypeError, RecursionError, OSError) as ex:
             failures.append(f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}")
         if n == 0:
             failures.append("empty_ledger: zero entries, nothing to verify")

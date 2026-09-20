@@ -20,6 +20,13 @@ import re
 from .ledger import parse_line
 
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
+HEX128_RE = re.compile(r"[0-9a-f]{128}")
+
+
+def _hex_ok(v: Any, n: int) -> bool:
+    """Signature/key hex as the profile writes it: lower-case, exactly n hex characters — `bytes.fromhex` would also
+    take spaces, JS `Buffer.from` would truncate at the first non-hex, Rust `from_str_radix` would take '+': one rule."""
+    return isinstance(v, str) and (HEX64_RE if n == 64 else HEX128_RE).fullmatch(v) is not None
 INSTANT_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})")
 from .canonical import canonical_bytes, sha3_hex
 
@@ -86,7 +93,8 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
     n = tip.get("entries")
     if isinstance(n, bool) or not isinstance(n, int) or n < 0 or not all(isinstance(tip.get(k), str) for k in ("ledger_id", "tip_sha256", "ts", "signature_hex")):
         return {"ok": False, "error": "tip_invalid: bad field types"}
-    if not (HEX64_RE.fullmatch(tip["ledger_id"]) and HEX64_RE.fullmatch(tip["tip_sha256"]) and INSTANT_RE.fullmatch(tip["ts"])):
+    if not (HEX64_RE.fullmatch(tip["ledger_id"]) and HEX64_RE.fullmatch(tip["tip_sha256"]) and INSTANT_RE.fullmatch(tip["ts"])
+            and _hex_ok(tip["signature_hex"], 128) and _hex_ok(trusted_pubkey_hex, 64)):
         return {"ok": False, "error": "tip_invalid: bad fields"}
     lk = tip.get("log_pubkey_hex")
     if lk not in (None, "") and lk != trusted_pubkey_hex:   # "" = absent (cryptovalid profile, as Go/JS); a non-string never equals the key
@@ -118,6 +126,11 @@ def pack_digest(pack: Dict[str, Any]) -> str:
 SIG_KIND = "cra_pack_sig/1"
 
 
+def sidecar_fields_ok(side: Dict[str, Any]) -> bool:
+    return (all(isinstance(side.get(k), str) and side.get(k) for k in ("signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"))
+            and INSTANT_RE.fullmatch(side["signed_utc"]) is not None and ("alg" not in side or isinstance(side["alg"], str)))
+
+
 def signed_payload(side: Dict[str, Any]) -> bytes:
     """Domain-separated, canonical bytes that the sidecar signature covers."""
     return canonical_bytes({"kind": SIG_KIND, "signed_pack_sha3": side["signed_pack_sha3"], "signer_id": side["signer_id"],
@@ -141,7 +154,7 @@ def sign_pack(pack_path: str, key: Tuple[Any, str], signer_id: str) -> Dict[str,
     return {"signed": True, "sidecar": str(sidecar_path(pack_path)), "fingerprint": side["fingerprint"]}
 
 
-def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] = None, pack: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """PASS / FAIL / SKIP. Content-binding first (digest recomputed), then signature-binding, then the optional
     trust store {signer_id: public_key_hex} — a valid signature from an unknown signer is 'signed', not 'trusted'."""
     sp = sidecar_path(pack_path)
@@ -149,7 +162,8 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         return {"status": "SKIP", "detail": "pack not signed"}
     try:
         side = parse_line(sp.read_text(encoding="utf-8"))          # strict: duplicate keys / NaN refused like the verifiers
-        pack = parse_line(Path(pack_path).read_text(encoding="utf-8"))
+        if pack is None:
+            pack = parse_line(Path(pack_path).read_text(encoding="utf-8"))   # the verifier passes the pack it already read (read once)
     except (OSError, ValueError, RecursionError) as e:
         return {"status": "FAIL", "detail": f"unreadable: {str(e)[:120]}"}
     if not isinstance(side, dict) or not isinstance(pack, dict):
@@ -166,6 +180,10 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         _, Ed25519PublicKey, _ = _ed()
     except ImportError:   # fail-closed, but the reason stated is the true one: the signature was not checked, not found invalid
         return {"status": "FAIL", "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
+    if not sidecar_fields_ok(side):   # the signed fields must exist as strings (a missing field is never signed "as null")
+        return {"status": "FAIL", "detail": "sidecar field missing or not a string (signed_pack_sha3, signer_id, signed_utc instant, public_key_hex, signature_hex; alg if present)"}
+    if not (_hex_ok(side.get("public_key_hex"), 64) and _hex_ok(side.get("signature_hex"), 128)):
+        return {"status": "FAIL", "detail": "signature invalid for the declared key (key/signature must be lower-case hex of exact length)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001

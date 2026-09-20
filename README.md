@@ -94,9 +94,9 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 - The seal signs its own time, time-source and token together with the whole previous chain; the verifier's policy
   defaults to the NIST IR 8547 draft dates for both the signature and the hash, and says when a renewal is due.
 - Pre-publication review by five models (two providers) in three rounds, plus the author: 44 findings turned into
-  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; 0.3.0: review rounds (Opus, Sonnet, Haiku;
-  Gemini Pro out of credits that day) until a round found nothing material, every finding listed in the CHANGELOG, each re-measured and
-  turned into an oracle case or a test; CI runs the suites in three dependency configurations (all optional dependencies,
+  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; 0.3.0: review rounds on 20/09/2026 (Opus, Sonnet, Haiku, then Fable 5.1;
+  Gemini Pro out of credits) — every finding of every round is listed in the CHANGELOG, each re-measured and turned into an
+  oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
   cryptography only, none); the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.
 - The SRP schema is the 39-field ENISA glossary (44 table rows in the vendored snapshot: 3 section headers, 2 unnumbered
@@ -140,15 +140,17 @@ one; this tool does not verify it — your verifier's temporal oracle does.
 
 ## Independent verifiers (JavaScript, Go, Rust — and a JDK-only Java verifier for the ledger)
 
-The ledger inside every pack follows the cryptovalid profile, so it can also be re-verified by cryptovalid's
+The ledger next to every pack follows the cryptovalid profile, so it can also be re-verified by cryptovalid's
 single-file Java verifier (`verifiers/java/CvVerify.java` in cryptovalid-opencore ≥ 0.13.0, JDK standard library
-only: hash chain, Ed25519 and — from JDK 24 — ML-DSA-65 signatures, signed chain tip). For a firm whose toolchain is
-the JVM this means the CRA evidence is checkable with nothing but a JDK; the pack layers above the ledger (sidecar
-signature, trust store, seal) are checked by the four verifiers of this repository.
+only: hash chain, Ed25519 and — from JDK 24 — ML-DSA-65 signatures, signed chain tip). Measured on 20/09/2026 on
+`tests/fixtures/signed_pack/l.jsonl` by two reviewers (PASS with the tip; a truncated tail and a tampered record
+refused) — not run in this repository's CI. For a firm whose toolchain is the JVM this means the CRA evidence is
+checkable with nothing but a JDK; the pack layers above the ledger (sidecar signature, trust store, seal) are checked
+by the four verifiers of this repository.
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 99 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 122 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 20/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

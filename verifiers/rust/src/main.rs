@@ -18,6 +18,7 @@ const SCOPE_MARK: &str = "NOT a conformity assessment";
 const TIP_KIND: &str = "cryptovalid_tip/1";
 const MAX_LINE_BYTES: usize = 64 << 20;
 const MAX_SOURCE_BYTES: u64 = 256 << 20;
+fn is_hex_n(h: &str, n: usize) -> bool { h.len() == n && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) }
 fn ledger_file_name_ok(v: &str) -> bool { !v.is_empty() && v != "." && v != ".." && !v.contains('/') && !v.contains('\\') }   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
@@ -72,6 +73,7 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()
 }
 fn ed_ok(pub_hex: &str, msg: &[u8], sig_hex: &str) -> bool {
+    if !is_hex64(pub_hex) || !is_hex_n(sig_hex, 128) { return false; }   // lower-case hex of exact length, as the profile writes it
     let (Some(p), Some(s)) = (unhex(pub_hex), unhex(sig_hex)) else { return false };
     let (Ok(pb), Ok(sb)) = (<[u8; 32]>::try_from(p.as_slice()), <[u8; 64]>::try_from(s.as_slice())) else { return false };
     let Ok(vk) = VerifyingKey::from_bytes(&pb) else { return false };
@@ -110,9 +112,10 @@ fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool)
         if let Some(Json::Object(d)) = e.get("data") {
             if gs(d, "kind") != Some("cra_sbom") { continue; }
             if let Some(Json::Object(src)) = d.get("source") {
+                let external = matches!(gs(src, "format"), Some("cyclonedx-json") | Some("spdx-json") | Some("spdx-jsonld"));
                 match src.get("sha256") {
-                    None | Some(Json::Null) => {}                                   // absent / null: no hash recorded
-                    Some(Json::Str(h)) if h.is_empty() => {}                        // empty: no hash recorded
+                    None | Some(Json::Null) => { if external { malformed += 1; } }   // an ingested document is always recorded WITH its hash
+                    Some(Json::Str(h)) if h.is_empty() => { if external { malformed += 1; } }
                     Some(Json::Str(h)) if is_hex64(h) => { if !wanted.iter().any(|w| w == h) { wanted.push(h.to_string()); } }
                     Some(_) => { malformed += 1; }                                  // present but not a SHA-256: FAIL, never a path
                 }
@@ -276,6 +279,11 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
     let dg = sha3_of(pack, "pack_sha3");
     if declared != dg { return ("FAIL".into(), "content does not match pack_sha3 (modified after signing)".into(), false); }
     if gs(&side, "signed_pack_sha3") != Some(dg.as_str()) { return ("FAIL".into(), "pack changed after signature (digest differs from the signed one)".into(), false); }
+    for k in ["signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"] {   // a missing field is never signed "as null"
+        if !matches!(side.get(k), Some(Json::Str(v)) if !v.is_empty()) { return ("FAIL".into(), format!("sidecar field missing or not a string: {k}"), false); }
+    }
+    if !is_instant(gs(&side, "signed_utc").unwrap_or("")) { return ("FAIL".into(), "sidecar signed_utc is not an instant".into(), false); }
+    if let Some(a) = side.get("alg") { if !matches!(a, Json::Str(_)) { return ("FAIL".into(), "sidecar alg is not a string".into(), false); } }
     let pub_hex = gs(&side, "public_key_hex").unwrap_or("");
     let mut payload = BTreeMap::new();
     payload.insert("kind".to_string(), Json::Str("cra_pack_sig/1".into()));
@@ -297,6 +305,10 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
     ("PASS".into(), "signed (signer not compared with a trust store)".into(), false)
 }
 
+fn flag_value(args: &[String], i: usize, flag: &str) -> String {   // a flag without a value, or with "", is a usage error — never a silent default
+    match args.get(i) { Some(v) if !v.is_empty() => v.clone(), _ => { eprintln!("usage: {flag} needs a value"); std::process::exit(2) } }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut pack, mut ledger, mut trust_file, mut key): (Option<String>, Option<String>, Option<String>, Option<String>) = (None, None, None, None);
@@ -304,9 +316,9 @@ fn main() {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--ledger" => { i += 1; ledger = args.get(i).cloned(); if ledger.as_deref() == Some("") { eprintln!("usage: --ledger needs a path (empty string given)"); std::process::exit(2); } }
-            "--trust-store" => { i += 1; trust_file = args.get(i).cloned(); }
-            "--log-pubkey" => { i += 1; key = args.get(i).cloned(); }
+            "--ledger" => { i += 1; ledger = Some(flag_value(&args, i, "--ledger")); }
+            "--trust-store" => { i += 1; trust_file = Some(flag_value(&args, i, "--trust-store")); }
+            "--log-pubkey" => { i += 1; let k = flag_value(&args, i, "--log-pubkey"); if !is_hex64(&k) { eprintln!("usage: --log-pubkey must be 64 lower-case hex characters"); std::process::exit(2); } key = Some(k); }
             "--require-sources" => { require_sources = true; }
             a => pack = Some(a.to_string()),
         }

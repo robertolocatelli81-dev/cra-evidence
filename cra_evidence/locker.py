@@ -124,11 +124,13 @@ class CRAEvidenceLocker:
             dst = source_file(self.ledger.path, fp["sha256"])
             os.makedirs(sources_dir(self.ledger.path), exist_ok=True)
             if os.path.exists(dst):
+                if os.path.getsize(dst) != len(raw):   # bounded compare: never read an oversized stored file whole
+                    raise ValueError(f"source store already holds different bytes for {fp['sha256'][:16]}…: refusing to overwrite evidence")
                 with open(dst, "rb") as f:
                     if f.read() != raw:
                         raise ValueError(f"source store already holds different bytes for {fp['sha256'][:16]}…: refusing to overwrite evidence")
             else:
-                tmp = dst + ".tmp"
+                tmp = f"{dst}.{os.getpid()}.{threading.get_ident()}.tmp"   # unique: two concurrent stores of the same document both succeed
                 with open(tmp, "wb") as f:
                     f.write(raw)
                 os.replace(tmp, dst)
