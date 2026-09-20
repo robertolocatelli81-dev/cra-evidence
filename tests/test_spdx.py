@@ -49,7 +49,8 @@ class TestSPDX(unittest.TestCase):
         with self.assertRaises(ValueError):
             sbom_from_spdx(p, "p", "1")
         lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
-        e = lk.record_sbom(sbom_from_spdx(os.path.join(FX, "spdx-2.3-dependency.spdx.json"), "p", "1"))
+        src = os.path.join(FX, "spdx-2.3-dependency.spdx.json")
+        e = lk.record_sbom(sbom_from_spdx(src, "p", "1"), source_path=src)
         self.assertTrue(e["data"]["sbom_floor_met"])
         self.assertEqual(e["data"]["sbom"]["specVersion"], "1.6")   # exported as schema-valid CycloneDX
 
@@ -91,7 +92,8 @@ class TestSPDXCouncil(unittest.TestCase):
     def test_floor_not_met_by_noassertion_versions(self):
         lk = CRAEvidenceLocker(os.path.join(tempfile.mkdtemp(), "l.jsonl"), "p", "1")
         doc = {"spdxVersion": "SPDX-2.3", "packages": [{"name": "lib", "SPDXID": "SPDXRef-L"}], "documentDescribes": []}
-        e = lk.record_sbom(sbom_from_spdx(self._w(doc), "p", "1"))
+        src = self._w(doc)
+        e = lk.record_sbom(sbom_from_spdx(src, "p", "1"), source_path=src)
         self.assertFalse(e["data"]["sbom_floor_met"])
 
 

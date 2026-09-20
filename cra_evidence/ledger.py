@@ -44,6 +44,9 @@ def _refuse_constant(name: str):
     raise ValueError(f"non-JSON constant {name} in ledger line")
 
 
+MAX_LINE_BYTES = 64 << 20   # same bound as cryptovalid's Go verifier (MaxLineBytes): the four cra verifiers agree on it
+
+
 def _no_dup_keys(pairs):
     d = {}
     for k, v in pairs:
@@ -106,11 +109,14 @@ class Ledger:
             idx, prev, first, unterminated = _tail_state(f)
             entry = {"idx": idx, "ts": ts or _now_ts(), "prev_hash": prev, "data": data}
             entry["self_hash"] = entry_hash(entry)
+            line = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8") + b"\n"
+            if len(line) > MAX_LINE_BYTES:
+                raise ValueError(f"record would exceed {MAX_LINE_BYTES} bytes on one line: the verifiers refuse it, so it is not written")
             f.seek(0, os.SEEK_END)
             if unterminated:
                 _log.warning("ledger %s ended without newline (crash or truncation): line closed before the new record", self.path)
                 f.write(b"\n")
-            f.write(json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8") + b"\n")
+            f.write(line)
             f.flush()
             os.fsync(f.fileno())
             if self._tip_key is not None:
@@ -122,10 +128,12 @@ class Ledger:
     def entries(self) -> Iterator[Dict[str, Any]]:
         if not os.path.exists(self.path):
             return iter(())
-        with open(self.path, encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    yield parse_line(line)   # NaN/Infinity are not JSON: fail
+        with open(self.path, "rb") as f:
+            for raw in f:
+                if raw.strip():
+                    if len(raw) > MAX_LINE_BYTES:
+                        raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
+                    yield parse_line(raw.decode("utf-8"))   # NaN/Infinity are not JSON: fail
 
     def verify(self) -> Dict[str, Any]:
         """Snapshot verification: every self_hash recomputes, every prev_hash links, idx contiguous, non-empty.

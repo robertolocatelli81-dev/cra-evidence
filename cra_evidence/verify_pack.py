@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .canonical import sha3_hex
-from .ledger import Ledger
+from .ledger import Ledger, parse_line
 from .locker import HONEST_SCOPE_MARK, PACK_KIND, RECORD_KINDS, source_file
 from .signing import verify_pack_signature, verify_tip
 
@@ -63,8 +63,12 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
         if not os.path.isfile(fp):
             absent += 1
             continue
-        with open(fp, "rb") as f:
-            got = hashlib.sha256(f.read()).hexdigest()
+        try:
+            with open(fp, "rb") as f:
+                got = hashlib.sha256(f.read()).hexdigest()
+        except OSError as e:
+            bad.append(f"{h[:16]}… unreadable ({type(e).__name__})")
+            continue
         if got == h:
             present += 1
         else:
@@ -80,9 +84,9 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
 def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=False) -> Dict[str, Any]:
     layers: List[Dict[str, str]] = []
     try:
-        pack = json.loads(Path(path).read_text(encoding="utf-8"))
+        pack = parse_line(Path(path).read_text(encoding="utf-8"))   # strict: duplicate keys / NaN refused, like the three verifiers
         layers.append(_layer("pack-json", "PASS"))
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:
         return {"ok": False, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", str(e))], "pack_sha3": None}
     if not isinstance(pack, dict):
         return {"ok": False, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", "pack is not a JSON object")], "pack_sha3": None}
@@ -147,7 +151,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                     layers.append(_layer("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"))
                 else:
                     try:
-                        tip = json.loads(Path(tip_path).read_text(encoding="utf-8"))
+                        tip = parse_line(Path(tip_path).read_text(encoding="utf-8"))
                         tv = verify_tip(tip, log_pubkey_hex, len(entries), entries[0]["self_hash"], entries[-1]["self_hash"])
                         layers.append(_layer("signed-tip", "PASS" if tv.get("ok") else "FAIL", str(tv.get("error") or "tip verified: no tail truncation")))
                     except Exception as e:  # noqa: BLE001

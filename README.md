@@ -71,11 +71,11 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
   1.7 by default now — and scored with sbomqs 2.1.2: the 0.2.0 re-encoding scored *below* every original
   (Syft 5.3 → 4.2, cdxgen 6.6 → 4.4, Trivy 4.8 → 3.7 out of 10), which is why the original is kept; the 0.3.0 index
   export scores 5.3 / 5.5 / 4.9 on the same inputs (bom-ref, serialNumber, tools, component type, CPE, licence
-  expressions, and a dependency graph only from edges the producer knows: the installed floor's Requires-Dist graph, never re-invented for an ingested document).
+  expressions, and a dependency graph only from edges the producer knows: the installed floor's Requires-Dist graph with PEP 508 markers evaluated for this interpreter — `dependsOn: []` is CycloneDX's positive statement "no dependencies", so it is emitted only for a component whose metadata was actually read, and the composition is declared `incomplete` otherwise; never re-invented for an ingested document).
   Six unmodified generator documents are vendored as fixtures (`tests/fixtures/real_tools/`): the tests read the
   same dependency with the same purl, version and licence from every one of them and validate the exports with
-  jsonschema; CI validates the exports with the official CycloneDX CLI 0.33.1 and the SPDX fixtures with the
-  official `pyspdxtools` 0.8.5, each with a positive control.
+  jsonschema; CI validates the four CycloneDX fixtures and every export with the official CycloneDX CLI 0.33.1, and the two SPDX
+  fixtures with the official `pyspdxtools` 0.8.5, each with a positive control.
 - Interoperability is measured: a ledger written here verifies unchanged with cryptovalid v0.15.0's reference
   verifier, and the truncated tail is seen through the signed tip (`tests/test_feeds_and_interop.py`, run in CI
   against the published wheel; re-measured 20/09/2026).
@@ -100,7 +100,7 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
   in `spec/sources/` (`spec/SRP_FIELDS.md`); "complete" is never declared by silence — the payload lists what is
   missing; a notice cannot carry an awareness instant different from the recorded vulnerability event without a
   declared reason.
-- The CycloneDX export (1.6 by default, 1.7 on request) validates against the official 1.6 and 1.7 JSON schemas
+- The CycloneDX index export written into the record (1.6 by default, `cra sbom --spec-version 1.7` or `to_cyclonedx_min("1.7")`) validates against the official 1.6 and 1.7 JSON schemas
   (vendored in `spec/schemas/`, checked by the tests) and against the official CycloneDX CLI 0.33.1 with
   `--fail-on-errors` (checked in CI, with a positive control that the CLI rejects a broken document). SPDX 2.2/2.3
   JSON and 3.0 JSON-LD are ingested (`--from-spdx`, since 0.2.0); there is no SPDX export.
@@ -144,7 +144,7 @@ signature, trust store, seal) are checked by the four verifiers of this reposito
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 39 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 45 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 20/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

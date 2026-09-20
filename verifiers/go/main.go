@@ -184,6 +184,9 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 			entries = append(entries, e)
 			n++
 		}
+		if err := sc.Err(); err != nil { // a line above 64 MiB (cryptovalid MaxLineBytes) or an I/O error ends the scan: the prefix is NOT the ledger
+			failures = append(failures, fmt.Sprintf("entry %d: line exceeds 64 MiB or unreadable: %v", n, err))
+		}
 		f.Close()
 		if n == 0 {
 			failures = append(failures, "empty_ledger: zero entries, nothing to verify")

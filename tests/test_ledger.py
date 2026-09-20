@@ -61,5 +61,19 @@ class TestLedger(unittest.TestCase):
         self.assertTrue(Ledger(self.p).verify()["chain_ok"])
 
 
+
+
+class TestLineCap(unittest.TestCase):
+    def test_a_record_above_64_mib_is_refused_before_writing(self):
+        from cra_evidence.ledger import MAX_LINE_BYTES
+        import tempfile
+        d = tempfile.mkdtemp(); p = os.path.join(d, "l.jsonl")
+        led = Ledger(p)
+        led.append({"k": "small"})
+        with self.assertRaises(ValueError):
+            led.append({"pad": "a" * MAX_LINE_BYTES})
+        self.assertEqual(led.verify()["entries"], 1)          # nothing half-written
+        shutil.rmtree(d, ignore_errors=True)
+
 if __name__ == "__main__":
     unittest.main()

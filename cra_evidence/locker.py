@@ -80,21 +80,28 @@ class CRAEvidenceLocker:
         with self._lock:
             return self.ledger.append(_bind(entry))
 
-    def record_sbom(self, sbom: SBOMRecord, source_path: Optional[str] = None, store: bool = True) -> Dict[str, Any]:
+    def record_sbom(self, sbom: SBOMRecord, source_path: Optional[str] = None, store: bool = True, spec_version: str = "1.6") -> Dict[str, Any]:
         """source_path: the generator's document the record was ingested from. Its exact bytes are hashed (SHA-256)
         into the record (the ingest already fingerprinted them; the file must still hash the same now) and copied to
         `<ledger>.sources/<sha256>.json`, so the evidence is the document Syft/Trivy/cdxgen/Yocto produced — the
         record is its index, not its replacement. If the file changed between ingest and record, or the store already
-        holds different bytes under that name, the record is refused. store=False keeps the hash but no copy."""
-        cdx = sbom.to_cyclonedx_min()
+        holds different bytes under that name, the record is refused. store=False keeps the hash but no copy. An
+        ingested SBOM without source_path is refused (its record would carry a hash nothing re-verified)."""
+        cdx = sbom.to_cyclonedx_min(spec_version)
         resolved = len(resolved_components(sbom))
         source = dict(sbom.source)
         raw = b""
+        if source.get("sha256") and source_path is None:
+            raise ValueError("this SBOM was ingested from a document: pass source_path so the bytes are re-hashed and stored "
+                             "(store=False keeps the hash only) — a record that only LOOKS bound is refused")
         if source_path is not None:
+            if not source.get("sha256"):
+                raise ValueError("source_path given but this SBOM was not ingested from a document (no fingerprint): "
+                                 "a document can only be bound to the index that was read from it")
             with open(source_path, "rb") as f:
                 raw = f.read()                      # read ONCE: the bytes hashed are the bytes stored
             fp = {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(source_path)}
-            if source.get("sha256") and source["sha256"] != fp["sha256"]:
+            if source["sha256"] != fp["sha256"]:
                 raise ValueError("source document changed since it was ingested: re-run the ingest on the current file")
             source.update(fp)
         if source_path is not None and store:

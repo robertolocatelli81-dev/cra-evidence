@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from .ledger import parse_line
 from .canonical import canonical_bytes, sha3_hex
 
 TIP_KIND = "cryptovalid_tip/1"
@@ -71,6 +72,10 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
     _, Ed25519PublicKey, _ = _ed()
     if not trusted_pubkey_hex:
         return {"ok": False, "error": "tip_untrusted: no trusted log key given"}
+    if not isinstance(tip, dict) or tip.get("kind") != TIP_KIND:
+        return {"ok": False, "error": "tip_invalid: not a cryptovalid_tip/1 document"}
+    if tip.get("log_pubkey_hex") not in (None, trusted_pubkey_hex):
+        return {"ok": False, "error": "tip_invalid: tip log key differs from the trusted log key"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(trusted_pubkey_hex)).verify(
             bytes.fromhex(tip["signature_hex"]), tip_payload(int(tip["entries"]), tip["ledger_id"], tip["tip_sha256"], tip["ts"]))
@@ -126,10 +131,10 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
     if not sp.exists():
         return {"status": "SKIP", "detail": "pack not signed"}
     try:
-        side = json.loads(sp.read_text(encoding="utf-8"))
-        pack = json.loads(Path(pack_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        return {"status": "FAIL", "detail": f"unreadable: {e}"}
+        side = parse_line(sp.read_text(encoding="utf-8"))          # strict: duplicate keys / NaN refused like the verifiers
+        pack = parse_line(Path(pack_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as e:
+        return {"status": "FAIL", "detail": f"unreadable: {str(e)[:120]}"}
     if not isinstance(side, dict) or not isinstance(pack, dict):
         return {"status": "FAIL", "detail": "sidecar or pack is not a JSON object"}
     try:

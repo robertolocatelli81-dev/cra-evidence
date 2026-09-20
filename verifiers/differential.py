@@ -167,6 +167,39 @@ def cases(base):
     def sources_required_ledger_missing(d):
         build_with_source(d); os.remove(os.path.join(d, "l.jsonl"))
     case("sources_required_but_ledger_missing", sources_required_ledger_missing, require_sources=True)
+    def dup_in(path, key, evil):
+        t = open(path).read(); i = t.index('"' + key + '"'); open(path, "w").write(t[:i] + '"' + key + '":' + json.dumps(evil) + "," + t[i:])
+    def pack_dup(d):
+        build(d); dup_in(os.path.join(d, "p.json"), "product_id", "EVIL")                 # first value EVIL, true value after
+    case("pack_duplicate_key", pack_dup)
+    def side_dup(d):
+        lk, key, pack, pk = build(d, sign=True); dup_in(str(sidecar_path(pack)), "signer_id", "TUV")
+        json.dump({"acme-ci": key[1]}, open(os.path.join(d, "trust.json"), "w")); return {"trust": os.path.join(d, "trust.json")}
+    case("sidecar_duplicate_key", side_dup)
+    def tip_dup(d):
+        lk, key, pack, pk = build(d); dup_in(os.path.join(d, "l.jsonl.tip.json"), "entries", 1); return {"key": key[1]}
+    case("tip_duplicate_key", tip_dup)
+    def tip_kind(d):
+        lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl.tip.json"); t = json.load(open(p)); t["kind"] = "other/1"; json.dump(t, open(p, "w")); return {"key": key[1]}
+    case("tip_kind_rewritten", tip_kind)
+    def tip_logkey(d):
+        lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl.tip.json"); t = json.load(open(p)); t["log_pubkey_hex"] = "22" * 32; json.dump(t, open(p, "w")); return {"key": key[1]}
+    case("tip_log_key_rewritten", tip_logkey)
+    if os.environ.get("CRA_ORACLE_BIG") == "1":   # 65 MiB line after the anchor: a scanner that stops silently would accept the prefix
+        def big_line(d):
+            build(d); open(os.path.join(d, "l.jsonl"), "a").write('{"idx": 3, "ts": "x", "prev_hash": "y", "data": {"pad": "' + "a" * (65 << 20) + '"}, "self_hash": "z"}\n')
+        case("ledger_line_65MiB_after_anchor", big_line)
+        def big_valid(d):   # a WELL-FORMED, correctly chained line above the cap (the producer refuses to write one: built by hand)
+            from cra_evidence.ledger import entry_hash
+            lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl"); last = json.loads(open(p).read().splitlines()[-1])
+            e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": {"pad": "a" * (65 << 20)}}; e["self_hash"] = entry_hash(e)
+            open(p, "a").write(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
+        case("ledger_line_65MiB_valid_record", big_valid)
+    if os.geteuid() != 0:   # root reads anything: the case would not be a case
+        def unreadable(d):
+            build_with_source(d); sd = os.path.join(d, "l.jsonl.sources")
+            for f in os.listdir(sd): os.chmod(os.path.join(sd, f), 0)
+        case("sbom_source_unreadable", unreadable)
     return out
 
 

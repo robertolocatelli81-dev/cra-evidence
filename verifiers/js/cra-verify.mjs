@@ -16,7 +16,9 @@ const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessme
 const RECORD_KINDS = new Set(["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"]);
 const TIP_KIND = "cryptovalid_tip/1", SPKI = Buffer.from("302a300506032b6570032100", "hex"), HEX64 = /^[0-9a-f]{64}$/;
 
+const MAX_LINE_BYTES = 64 << 20;   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 function pyEscape(s) {
+  if (!/[^\x20-\x7e]|["\\]/.test(s)) return '"' + s + '"';   // fast path: nothing to escape (a 65 MB pad must not build a 65 M-node rope)
   let out = '"';
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i), ch = s[i];
@@ -173,6 +175,7 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
     let prev = GENESIS, n = 0;
     for (const line of readFileSync(lp, "utf-8").split("\n")) {
       if (!line.trim()) continue;
+      if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }
       let e;
       try { e = strictParse(line); } catch (err) { failures.push(`unparsable line: ${err.message}`); break; }
       if (!isObj(e)) { failures.push(`entry ${n}: not an object`); break; }
@@ -275,7 +278,8 @@ function sourceDocuments(lp, entries, require, isFile) {
   for (const h of [...wanted].sort()) {
     const fp = join(lp + ".sources", h + ".json");
     if (!isFile(fp)) { absent++; continue; }
-    const got = sha256(readFileSync(fp));
+    let got;
+    try { got = sha256(readFileSync(fp)); } catch (e) { bad.push(`${h.slice(0, 16)}… unreadable (${e.code || e.name})`); continue; }
     if (got === h) present++; else bad.push(`${h.slice(0, 16)}… stored bytes hash to ${got.slice(0, 16)}…`);
   }
   if (bad.length) return L("source-documents", "FAIL", `${bad.length} source document(s) do not match their recorded SHA-256: ` + bad.slice(0, 3).join("; "));

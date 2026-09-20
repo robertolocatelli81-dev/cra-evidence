@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -114,19 +115,24 @@ class SBOMRecord:
         if self.source.get("sha256"):
             out["metadata"]["properties"].append({"name": "cra-evidence:source_sha256", "value": self.source["sha256"]})
         if self.edges:
+            # `dependsOn: []` is the POSITIVE statement "has no dependencies" (CycloneDX dependency definition): it is
+            # emitted only for a component whose Requires-Dist was actually read; every other component is left out
+            # of the graph (= unknown) and the composition is declared incomplete
             ref_of = {_norm_key(c.name): r for c, r in zip(comps, refs)}
             ref_of[""] = primary_ref
             deps: Dict[str, List[str]] = {primary_ref: []}
+            for key in self.source.get("requires_dist_read", []):
+                if key in ref_of:
+                    deps.setdefault(ref_of[key], [])
             for parent, child in self.edges:
                 pr, cr = ref_of.get(parent), ref_of.get(child)
-                if pr is None or cr is None:
+                if pr is None or cr is None or pr not in deps:
                     continue
-                deps.setdefault(pr, [])
                 if cr not in deps[pr]:
                     deps[pr].append(cr)
-            for r in refs:
-                deps.setdefault(r, [])
             out["dependencies"] = [{"ref": r, "dependsOn": d} for r, d in deps.items()]
+            if len(deps) < len(refs) + 1:
+                out["compositions"] = [{"aggregate": "incomplete", "dependencies": [r for r in refs if r not in deps]}]
         return out
 
 
@@ -201,6 +207,86 @@ def components_for_osv(record: "SBOMRecord") -> List[Dict[str, str]]:
     return out
 
 
+_MARKER_ENV = None
+
+
+def _marker_env() -> Dict[str, str]:
+    """PEP 508 environment markers of THIS interpreter (the variables generators evaluate: python_version,
+    python_full_version, platform_python_implementation, implementation_name, sys_platform, platform_system,
+    platform_machine, os_name)."""
+    global _MARKER_ENV
+    if _MARKER_ENV is None:
+        import platform
+        v = sys.version_info
+        _MARKER_ENV = {"python_version": f"{v.major}.{v.minor}", "python_full_version": platform.python_version(),
+                       "platform_python_implementation": platform.python_implementation(), "implementation_name": sys.implementation.name,
+                       "sys_platform": sys.platform, "platform_system": platform.system(), "platform_machine": platform.machine(),
+                       "os_name": os.name, "platform_release": platform.release(), "platform_version": platform.version()}
+    return _MARKER_ENV
+
+
+def _ver_key(v: str) -> Tuple[int, ...]:
+    return tuple(int(x) if x.isdigit() else 0 for x in re.split(r"[.+-]", v))
+
+
+def _marker_atom(atom: str) -> Optional[bool]:
+    """`var op "value"` (either side may be the literal); None when the variable is not one we know."""
+    m = re.fullmatch(r"""\s*([A-Za-z_][A-Za-z0-9_.]*|["'][^"']*["'])\s*(===|==|!=|<=|>=|<|>|~=|not in|in)\s*([A-Za-z_][A-Za-z0-9_.]*|["'][^"']*["'])\s*""", atom)
+    if not m:
+        return None
+    env = _marker_env()
+
+    def val(x: str) -> Optional[str]:
+        if x[0] in "\"'":
+            return x[1:-1]
+        return env.get(x) if x in env else None
+    left, op, right = val(m.group(1)), m.group(2), val(m.group(3))
+    if left is None or right is None:
+        return None
+    if op in ("in", "not in"):
+        return (left in right) == (op == "in")
+    if op == "===":
+        return left == right
+    versionish = m.group(1) in ("python_version", "python_full_version") or m.group(3) in ("python_version", "python_full_version")
+    a, b = (_ver_key(left), _ver_key(right)) if versionish else (left, right)
+    if op == "~=":
+        return a >= b and a[:len(b) - 1] == b[:len(b) - 1] if versionish else left == right
+    return {"==": a == b, "!=": a != b, "<": a < b, "<=": a <= b, ">": a > b, ">=": a >= b}[op]
+
+
+def marker_applies(marker: str) -> Optional[bool]:
+    """Evaluate a PEP 508 marker for THIS interpreter: `packaging` when importable, otherwise a small evaluator of
+    `and`/`or`/parentheses over the known variables. None = could not evaluate (unknown variable or syntax)."""
+    marker = marker.strip()
+    if not marker:
+        return True
+    try:
+        from packaging.markers import Marker, UndefinedEnvironmentName, InvalidMarker  # type: ignore
+        try:
+            return bool(Marker(marker).evaluate())
+        except (UndefinedEnvironmentName, InvalidMarker):
+            return None
+    except ImportError:
+        pass
+    expr = marker
+    # innermost parentheses first
+    while "(" in expr:
+        m = re.search(r"\(([^()]*)\)", expr)
+        if not m:
+            return None
+        inner = marker_applies(m.group(1))
+        if inner is None:
+            return None
+        expr = expr[:m.start()] + ("1==1" if inner else "1==2") + expr[m.end():]
+    for part in re.split(r"\s+or\s+", expr):
+        vals = [_marker_atom(a) if a.strip() not in ("1==1", "1==2") else a.strip() == "1==1" for a in re.split(r"\s+and\s+", part)]
+        if any(v is None for v in vals):
+            return None
+        if all(vals):
+            return True
+    return False
+
+
 def _req_name(req: str) -> str:
     s = req.split(";")[0].strip()
     for sep in ("[", " ", "(", "<", ">", "=", "!", "~"):
@@ -211,8 +297,9 @@ def _req_name(req: str) -> str:
 
 
 def installed_license(meta: Any) -> str:
-    """PEP 639 `License-Expression` first (what cryptography ≥ 42, cffi, pycparser ship in 2026 — the legacy `License`
-    field is empty there), then the legacy `License` field, then the first `License ::` trove classifier."""
+    """PEP 639 `License-Expression` first (cryptography ships it since 46.0.0 with the legacy `License` field empty —
+    measured on PyPI metadata 20/09/2026; cffi 2.0 and pycparser 3.0 likewise), then the legacy `License` field,
+    then the first `License ::` trove classifier."""
     for key in ("License-Expression", "License"):
         v = (meta.get(key) or "").strip()
         if v and v.upper() != "UNKNOWN":
@@ -235,6 +322,8 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
     from importlib import metadata as md
     comps: Dict[str, SBOMComponent] = {}
     edges: List[List[str]] = []
+    walked: List[str] = []                      # keys whose Requires-Dist was READ (only these may assert "no dependencies")
+    unevaluated = 0
     todo = [("", n) for n in top_level]         # (parent key, name); "" = the product
     seen = set()
     while todo:
@@ -251,19 +340,40 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
             lic = installed_license(dist.metadata)
             comps[key] = SBOMComponent(name=dist.metadata["Name"], version=ver, purl=pypi_purl(key, ver), license=lic)
             if transitive:
+                walked.append(key)
                 for r in dist.requires or []:
                     if _is_extra_requirement(r):
                         continue
+                    marker = r.split(";", 1)[1] if ";" in r else ""
+                    applies = marker_applies(marker)
+                    if applies is False:
+                        continue                # a dependency of ANOTHER environment (python_version, platform…) is not one here
+                    if applies is None:
+                        unevaluated += 1        # kept, conservatively, and counted
                     todo.append((key, _req_name(r)))
         except md.PackageNotFoundError:
             comps[key] = SBOMComponent(name=name, version="NOT-INSTALLED")
+    source = {"format": "installed", "generator": "cra-evidence:importlib.metadata", "generator_version": sys.version.split()[0],
+              "requires_dist_read": walked, "markers_unevaluated_kept": unevaluated, "dependency_edges": len(edges)}
     return SBOMRecord(product_id=product_id, product_version=product_version, components=list(comps.values()),
-                      depth="transitive" if transitive else "top-level-only", edges=edges)
+                      depth="transitive" if transitive else "top-level-only", edges=edges, source=source)
 
 
 def _norm_key(name: str) -> str:
     """PEP 503 normalisation: the key under which a distribution is looked up and an edge is recorded."""
     return re.sub(r"[-_.]+", "-", name.lower())
+
+
+def _load_document(path: str) -> Any:
+    """A generator document is third-party input: a nesting that exhausts the parser (or a duplicate key, which two
+    readers would resolve differently) is a malformed document (ValueError), never a crash."""
+    from .ledger import parse_line
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    try:
+        return parse_line(text)
+    except RecursionError:
+        raise ValueError("document malformed: JSON nested too deep") from None
 
 
 def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:
@@ -284,8 +394,7 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str) -> SBO
     `source` says what the document declared (spec version, generator, total/nested component count, dependency
     edges, component types) and how many duplicates (same name+version+purl at two locations, as Syft emits for a
     workflow file referenced twice) the index merged — the count the auditor reads is the generator's, not ours."""
-    with open(path, encoding="utf-8") as f:
-        d = json.load(f)
+    d = _load_document(path)
     if not isinstance(d, dict) or d.get("bomFormat") != "CycloneDX":
         raise ValueError("CycloneDX malformed: not a JSON object with bomFormat 'CycloneDX'")
     gen, gen_ver = _cdx_generator(d)
@@ -324,11 +433,14 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str) -> SBO
                                        type=typ if typ in CYCLONEDX_COMPONENT_TYPES else "library", cpe=str(c.get("cpe", "") or "")))
             if isinstance(c.get("components"), list):
                 walk(c["components"], level + 1)
-    walk(raw, 0)
+    try:
+        walk(raw, 0)
+    except RecursionError:
+        raise ValueError("CycloneDX malformed: components nested too deep") from None
     deps = d.get("dependencies") if isinstance(d.get("dependencies"), list) else []
     source = {"format": "cyclonedx-json", "spec_version": str(d.get("specVersion", "")), "generator": gen, "generator_version": gen_ver,
               "serial_number": str(d.get("serialNumber", "") or ""), "components_declared": declared, "components_nested": nested,
-              "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": sum(len(x.get("dependsOn") or []) for x in deps if isinstance(x, dict)),
+              "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": sum(len(x["dependsOn"]) for x in deps if isinstance(x, dict) and isinstance(x.get("dependsOn"), list)),
               "dependencies_declared": len(deps), "component_types": dict(sorted(types.items()))}
     source.update(source_fingerprint(path))
     return SBOMRecord(product_id=product_id, product_version=product_version, components=comps,
@@ -396,7 +508,7 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     comps = []
     for p in d.get("packages", []) or []:
         if not isinstance(p, dict) or not _clean(p.get("name")):
-            continue
+            continue                                     # counted by the caller as packages_unnamed
         if p.get("SPDXID") in roots:
             continue                                     # the product itself is metadata, not a dependency
         refs = [r for r in (p.get("externalRefs") or []) if isinstance(r, dict)]
@@ -487,8 +599,7 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str) -> SBOMReco
     is declared the depth says `:no-root-declared` (the product may then be counted). Field names checked on the
     official spdx/spdx-examples documents (15/09/2026); other generators' output is parsed by these rules, not
     proven against every tool. A document of neither shape raises."""
-    with open(path, encoding="utf-8") as f:
-        d = json.load(f)
+    d = _load_document(path)
     if not isinstance(d, dict):
         raise ValueError("SPDX document is not a JSON object")
     if str(d.get("spdxVersion", "")).startswith("SPDX-2"):
@@ -496,20 +607,22 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str) -> SBOMReco
         pk = [x for x in (d.get("packages") or []) if isinstance(x, dict)]
         rels = [r for r in (d.get("relationships") or []) if isinstance(r, dict)]
         source = {"format": "spdx-json", "spec_version": _clean(d.get("spdxVersion")), "packages_declared": len(pk),
-                  "relationships_declared": len(rels),
+                  "packages_unnamed": sum(1 for x in pk if not _clean(x.get("name"))), "relationships_declared": len(rels),
                   "dependency_edges": sum(1 for r in rels if str(r.get("relationshipType", "")).upper() in ("DEPENDS_ON", "DEPENDENCY_OF"))}
     elif "@graph" in d:
         comps, depth = _spdx3_components(d)
         g = [e for e in (d.get("@graph") or []) if isinstance(e, dict)]
         source = {"format": "spdx-jsonld", "spec_version": "SPDX-3.0",
                   "packages_declared": sum(1 for e in g if _ld_type(e) in ("software_Package", "Package")),
+                  "packages_unnamed": sum(1 for e in g if _ld_type(e) in ("software_Package", "Package") and not _clean(e.get("name"))),
                   "relationships_declared": sum(1 for e in g if _ld_type(e) in ("Relationship", "LifecycleScopedRelationship")),
                   "dependency_edges": sum(1 for e in g if _ld_type(e) in ("Relationship", "LifecycleScopedRelationship") and _ld_prop(e, "relationshipType") == "dependsOn")}
     else:
         raise ValueError("not an SPDX 2.x JSON (spdxVersion) nor an SPDX 3.0 JSON-LD (@graph) document")
     parts = depth.split(":")
     source.update({"generator": parts[2] if len(parts) > 2 else "", "generator_version": "",
-                   "roots_excluded": source["packages_declared"] - len(comps), "duplicates_merged": len(comps) - len(dedup(comps))})
+                   "roots_excluded": source["packages_declared"] - source["packages_unnamed"] - len(comps),
+                   "duplicates_merged": len(comps) - len(dedup(comps))})
     gv = re.match(r"^(.*?)[-\s]?(\d+\.\d+[\w.\-]*)$", source["generator"])
     if gv:   # "syft-1.52.0" / "trivy-0.74.0" → name + version
         source["generator"], source["generator_version"] = gv.group(1).rstrip("-"), gv.group(2)

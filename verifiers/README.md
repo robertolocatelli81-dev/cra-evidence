@@ -10,8 +10,8 @@ check a pack without running the producer's code:
 | Rust | `rust/` (`cargo build --release`) | `ed25519-dalek` for Ed25519; JSON parser, canonical encoder, SHA-256 and SHA3-256 are pure Rust | yes |
 
 Canonical JSON = Python `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=True)`; the strict parser
-refuses duplicate keys, NaN/Infinity, floats, lone surrogates and nesting deeper than 512 (the cryptovalid acceptance
-profile — the parser/encoder modules are cryptovalid's, same author, AGPL). Same command line and the same JSON
+refuses duplicate keys, NaN/Infinity, floats, lone surrogates, nesting deeper than 512 and a ledger line above 64 MiB
+(the cryptovalid acceptance profile — `MaxLineBytes` in its Go verifier; the producer refuses to write such a line — the parser/encoder modules are cryptovalid's, same author, AGPL). Same command line and the same JSON
 verdict shape as the Python reference:
 
 ```
@@ -19,15 +19,15 @@ node verifiers/js/cra-verify.mjs pack.json [--ledger l.jsonl] [--trust-store tru
 ./cra-verify pack.json …                      # Go / Rust binaries
 ```
 
-`verifiers/differential.py` builds 39 fixtures with the Python library — intact (unsigned, signed, trusted, with a
+`verifiers/differential.py` builds 45 fixtures with the Python library — intact (unsigned, signed, trusted, with a
 signed tip, ledger elsewhere, an ingested SBOM with its generator document stored) and tampered (pack field, re-hashed
 pack, broken record digest, re-linked chain, sidecar signer/fingerprint rewritten, wrong trust store, truncated /
 unsealed tail under a trusted log key, wrong log key, ledger required but missing, NaN and duplicate-key lines, empty
 ledger, non-object pack, path traversal in `ledger_file`, one byte appended to a stored SBOM source document, a
-source document absent with and without `--require-sources`, hostile `source.sha256` values — int, object, null, empty, upper-case hex, path traversal, non-ASCII — and `--require-sources` with the ledger missing) — and requires every verifier to return the same
+source document absent with and without `--require-sources`, hostile `source.sha256` values — int, object, null, empty, upper-case hex, path traversal, non-ASCII — `--require-sources` with the ledger missing, a stored document made unreadable, duplicate keys in the pack / sidecar / tip, a tip whose `kind` or `log_pubkey_hex` was rewritten) — and requires every verifier to return the same
 `(ok, authenticity, anchored)` **and the same set of failing layers** (since 0.3.0: a FAIL for the wrong reason is a
 divergence). CI runs it with all three present; a missing verifier is a failure, not a skip. Measured on 20/09/2026:
-39 cases, 0 divergences; ablations: a JS verifier that accepts any stored bytes → 1 divergence, the pre-fix Go verifier that skipped a non-string hash → 2 divergences, both caught.
+45 cases, 0 divergences (47 with `CRA_ORACLE_BIG=1`, which adds two 65 MiB-line ledgers); ablations: a JS verifier that accepts any stored bytes → 1 divergence, the pre-fix Go verifier that skipped a non-string hash → 2 divergences, both caught.
 
 **`source-documents` layer (0.3.0).** For every `cra_sbom` record whose `source.sha256` is set, the file
 `<ledger>.sources/<sha256>.json` next to the ledger is re-hashed (SHA-256 of the raw bytes — no JSON re-parsing, so a

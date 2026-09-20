@@ -50,13 +50,24 @@ class TestRealGenerators(unittest.TestCase):
             self.assertEqual((dep[0].name, dep[0].version, dep[0].license, dep[0].type), ("base64-js", "1.5.1", "MIT", "library"), p)
 
     def test_counts_reconcile_with_what_the_generator_declared(self):
+        """independent count in the fixture JSON (not the module's own fields) vs what the record declares"""
+        def count_cdx(items):
+            return sum(1 + count_cdx(c.get("components") or []) for c in items if isinstance(c, dict) and c.get("name"))
         for p in REAL:
             r = ingest(p)
             s = r.source
+            with open(p, encoding="utf-8") as f:
+                doc = json.load(f)
             if s["format"] == "cyclonedx-json":
+                self.assertEqual(s["components_declared"], count_cdx(doc["components"]), p)
+                self.assertEqual(s["dependency_edges"], sum(len(x.get("dependsOn") or []) for x in doc.get("dependencies") or []), p)
                 self.assertEqual(len(r.components), s["components_declared"] - s["duplicates_merged"], p)
             else:
-                self.assertEqual(len(r.components), s["packages_declared"] - s["roots_excluded"] - s["duplicates_merged"], p)
+                self.assertEqual(s["packages_declared"], len(doc["packages"]), p)
+                self.assertEqual(s["relationships_declared"], len(doc["relationships"]), p)
+                roots = {x["relatedSpdxElement"] for x in doc["relationships"] if x["relationshipType"] == "DESCRIBES"}
+                self.assertEqual(s["roots_excluded"], len(roots), p)
+                self.assertEqual(len(r.components), s["packages_declared"] - s["packages_unnamed"] - s["roots_excluded"] - s["duplicates_merged"], p)
             with open(p, "rb") as f:
                 self.assertEqual(s["sha256"], hashlib.sha256(f.read()).hexdigest())
             self.assertEqual(s["size_bytes"], os.path.getsize(p))
@@ -81,7 +92,9 @@ class TestRealGenerators(unittest.TestCase):
     def test_cyclonedx_1_7_is_ingested_like_1_6(self):
         a = ingest(os.path.join(HERE, "fixtures", "real_tools", "cdxgen-12.8.4_cyclonedx-1.6.json"))
         b = ingest(os.path.join(HERE, "fixtures", "real_tools", "cdxgen-12.8.4_cyclonedx-1.7.json"))
-        self.assertEqual([c.purl for c in a.components], [c.purl for c in b.components])
+        self.assertEqual(a.components, b.components)
+        self.assertEqual({k: v for k, v in a.source.items() if k not in ("spec_version", "sha256", "size_bytes", "file", "serial_number")},
+                         {k: v for k, v in b.source.items() if k not in ("spec_version", "sha256", "size_bytes", "file", "serial_number")})
 
 
 class TestIngestRules(unittest.TestCase):
@@ -195,6 +208,45 @@ class TestSourceStore(unittest.TestCase):
             self.lk.record_sbom(sb, source_path=self.src)
         self.assertIn("changed since it was ingested", str(cm.exception))
 
+    def test_a_document_cannot_be_bound_to_an_index_not_read_from_it(self):
+        """found by Opus in round 1: an installed-floor (or hand-built) record accepted ANY source_path and verified PASS"""
+        for sb in (sbom_from_installed("tiny-cra-sample", "1.0.0", ["cryptography"]), SBOMRecord("tiny-cra-sample", "1.0.0", [SBOMComponent("left-pad", "9.9.9")])):
+            with self.assertRaises(ValueError) as cm:
+                self.lk.record_sbom(sb, source_path=self.src)
+            self.assertIn("not ingested from a document", str(cm.exception))
+        self.assertFalse(os.path.exists(sources_dir(self.led)))
+
+    def test_an_ingested_sbom_without_source_path_is_refused(self):
+        """found by Sonnet in round 1: the record carried the ingest-time hash with nothing re-verified or stored"""
+        with self.assertRaises(ValueError) as cm:
+            self.lk.record_sbom(sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0"))
+        self.assertIn("pass source_path", str(cm.exception))
+        self.lk.record_sbom(sbom_from_installed("tiny-cra-sample", "1.0.0", ["cryptography"]))     # not ingested: fine without
+
+    def test_spdx_origin_round_trip(self):
+        src = os.path.join(HERE, "fixtures", "real_tools", "trivy-0.74.0_spdx-2.3.json")
+        rec = self.lk.record_sbom(sbom_from_spdx(src, "tiny-cra-sample", "1.0.0"), source_path=src)
+        pack = os.path.join(self.d, "p2.json"); self.lk.evidence_pack(pack)
+        r = verify_pack(pack, require_sources=True)
+        self.assertTrue(r["ok"], r["layers"])
+        self.assertEqual(rec["data"]["source"]["format"], "spdx-json")
+        with open(source_file(self.led, rec["data"]["source"]["sha256"]), "rb") as f:
+            self.assertEqual(hashlib.sha256(f.read()).hexdigest(), rec["data"]["source"]["sha256"])
+
+    def test_deeply_nested_and_duplicate_key_documents_are_malformed_not_crashes(self):
+        deep = os.path.join(self.d, "deep.json")
+        with open(deep, "w") as f:
+            f.write('{"bomFormat":"CycloneDX","specVersion":"1.6","components":' + '[{"name":"a","components":' * 3000 + "[]" + "}]" * 3000 + "}")
+        with self.assertRaises(ValueError):
+            sbom_from_cyclonedx(deep, "p", "1")
+        dup = os.path.join(self.d, "dup.json")
+        with open(dup, "w") as f:
+            f.write('{"bomFormat":"CycloneDX","specVersion":"1.6","components":[],"components":[{"name":"x","version":"1"}]}')
+        with self.assertRaises(ValueError):
+            sbom_from_cyclonedx(dup, "p", "1")
+        with self.assertRaises(ValueError):
+            sbom_from_spdx(deep, "p", "1")
+
     def test_store_never_overwrites_different_bytes(self):
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         os.makedirs(sources_dir(self.led))
@@ -218,8 +270,11 @@ class TestSourceStore(unittest.TestCase):
         with open(p, "w") as f:
             f.write('{"bomFormat":"CycloneDX","specVersion":"1.7","metadata":{"tools":{"components":[{"type":"application","name":"cdxgen","version":"12.8.4"}]}},'
                     '"components":[{"type":"library","name":"a","version":"1","purl":"pkg:npm/a@1","evidence":{"identity":[{"field":"purl","confidence":0.8}]}}]}')
-        rec = self.lk.record_sbom(sbom_from_cyclonedx(p, "tiny-cra-sample", "1.0.0"), source_path=p)
-        canonical_bytes(rec["data"])                      # would raise on a float
+        sb = sbom_from_cyclonedx(p, "tiny-cra-sample", "1.0.0")
+        from dataclasses import asdict
+        canonical_bytes(asdict(sb))                       # the INDEX carries no float (this raises on one; `_bind` would stringify it later)
+        rec = self.lk.record_sbom(sb, source_path=p)
+        self.assertNotIn("0.8", json.dumps(rec["data"]))  # neither as a number nor as a string
         with open(source_file(self.led, rec["data"]["source"]["sha256"]), "rb") as a, open(p, "rb") as b:
             self.assertEqual(a.read(), b.read())
 
@@ -278,13 +333,19 @@ class TestExport(unittest.TestCase):
         refs = [c["bom-ref"] for c in out["components"]] + [out["metadata"]["component"]["bom-ref"]]
         self.assertEqual(len(refs), len(set(refs)), refs)
         self.assertNotIn("dependencies", out)                                                          # no edges known → none invented
-        inst = sbom_from_installed("p", "1", ["cryptography"]).to_cyclonedx_min()                       # top-level floor: all direct
-        self.assertEqual(inst["dependencies"][0], {"ref": inst["metadata"]["component"]["bom-ref"], "dependsOn": [c["bom-ref"] for c in inst["components"]]})
-        tr = sbom_from_installed("p", "1", ["cryptography"], transitive=True)
-        if len(tr.components) > 1:                                                                     # the Requires-Dist graph as walked, not flattened
-            deps = {d["ref"]: d["dependsOn"] for d in tr.to_cyclonedx_min("1.7")["dependencies"]}
-            self.assertEqual(deps["p@1"], ["pkg:pypi/cryptography@" + tr.components[[c.name for c in tr.components].index("cryptography")].version])
-            self.assertTrue(any(v for k, v in deps.items() if k != "p@1"), deps)
+        inst = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"]).to_cyclonedx_min()   # top-level floor: all direct…
+        self.assertEqual(inst["dependencies"], [{"ref": inst["metadata"]["component"]["bom-ref"], "dependsOn": [c["bom-ref"] for c in inst["components"]]}])
+        # …and NOTHING else: `dependsOn: []` would assert "no dependencies" for a component whose Requires-Dist was never read
+        self.assertEqual(inst["compositions"], [{"aggregate": "incomplete", "dependencies": [c["bom-ref"] for c in inst["components"]]}])
+        tr = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"], transitive=True)
+        deps = {d["ref"]: d["dependsOn"] for d in tr.to_cyclonedx_min("1.7")["dependencies"]}
+        self.assertNotIn("no-such-dist-xyz@NOT-INSTALLED", deps)                                        # not read → not in the graph
+        self.assertEqual(sorted(tr.to_cyclonedx_min("1.7")["compositions"][0]["dependencies"]), ["no-such-dist-xyz@NOT-INSTALLED"])
+        cry = next(c for c in tr.components if c.name == "cryptography")
+        self.assertEqual(deps["p@1"], ["pkg:pypi/cryptography@" + cry.version, "no-such-dist-xyz@NOT-INSTALLED"])
+        self.assertEqual(sorted(tr.source["requires_dist_read"])[:1], ["cffi"] if any(c.name == "cffi" for c in tr.components) else sorted(tr.source["requires_dist_read"])[:1])
+        for key in tr.source["requires_dist_read"]:                                                    # every walked component IS in the graph
+            self.assertTrue(any(r.startswith(f"pkg:pypi/{key}@") for r in deps), key)
         rec = ingest(REAL[0]); ing = rec.to_cyclonedx_min()
         self.assertNotIn("dependencies", ing)                                                          # never re-invented for an ingested graph
         self.assertIn({"name": "cra-evidence:source_sha256", "value": rec.source["sha256"]}, ing["metadata"]["properties"])
@@ -307,6 +368,20 @@ class TestExport(unittest.TestCase):
         self.assertEqual(installed_license(Meta({"License": "MIT"})), "MIT")
         self.assertEqual(installed_license(Meta({"License": "UNKNOWN", "Classifier": ["License :: OSI Approved :: MIT License"]})), "MIT License")
         self.assertEqual(installed_license(Meta({})), "")
+
+    def test_pep508_markers_decide_the_edges_of_this_interpreter(self):
+        from cra_evidence.sbom import marker_applies
+        self.assertTrue(marker_applies(""))
+        self.assertTrue(marker_applies("platform_python_implementation != 'PyPy'") in (True, False))
+        self.assertEqual(marker_applies("python_version < '2.0'"), False)                         # cryptography's typing-extensions marker shape
+        self.assertEqual(marker_applies("python_version >= '3.0' and os_name == 'posix'"), os.name == "posix")
+        self.assertEqual(marker_applies("(python_version < '2.0' or python_version >= '3.0') and python_version >= '3.0'"), True)
+        self.assertIsNone(marker_applies("no_such_variable == 'x'"))                              # unknown → kept and counted, never dropped
+        tr = sbom_from_installed("p", "1", ["cryptography"], transitive=True)
+        self.assertIsInstance(tr.source["markers_unevaluated_kept"], int)
+        # cryptography 50 declares typing-extensions only for python_full_version < '3.11': absent on newer interpreters
+        if sys.version_info >= (3, 11) and any(c.name == "cryptography" and c.version.startswith("5") for c in tr.components):
+            self.assertNotIn("typing-extensions", [c.name.replace("_", "-") for c in tr.components])
 
     def test_fingerprint_is_the_raw_bytes(self):
         d = tempfile.mkdtemp()

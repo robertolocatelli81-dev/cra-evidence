@@ -16,6 +16,7 @@ use std::path::Path;
 const PACK_KIND: &str = "cra_evidence_pack/1";
 const SCOPE_MARK: &str = "NOT a conformity assessment";
 const TIP_KIND: &str = "cryptovalid_tip/1";
+const MAX_LINE_BYTES: usize = 64 << 20;   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
 
@@ -176,6 +177,7 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
         let (mut prev, mut n) = (GENESIS.to_string(), 0i64);
         for line in text.split('\n') {
             if line.trim().is_empty() { continue; }
+            if line.len() > MAX_LINE_BYTES { failures.push(format!("entry {n}: line exceeds {MAX_LINE_BYTES} bytes")); break; }
             let e = match parse_obj(line) { Ok(o) => o, Err(err) => { failures.push(format!("entry {n}: unparsable: {err}")); break; } };
             if gi(&e, "idx") != Some(n) { failures.push(format!("entry {n}: idx not sequential")); }
             if gs(&e, "prev_hash") != Some(prev.as_str()) { failures.push(format!("entry {n}: prev_hash does not link")); }

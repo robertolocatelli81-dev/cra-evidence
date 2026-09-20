@@ -59,7 +59,7 @@ jobs:
           (cd verifiers/rust && cargo build --release)
       - name: Differential oracle — Python / JS / Go / Rust must agree on every fixture AND on the failing layers (absence = failure)
         run: CRA_VERIFY_GO=/tmp/cra-verify-go python verifiers/differential.py --require js,go,rust
-      - name: Official CycloneDX CLI — the 1.6 and 1.7 exports of every real-generator fixture and of the installed floor must validate
+      - name: Official CycloneDX CLI — the four CycloneDX generator fixtures, and the 1.6 and 1.7 exports of every fixture and of the installed floor, must validate
         run: |
           curl -sSL -o /tmp/cyclonedx https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.33.1/cyclonedx-linux-x64 && chmod +x /tmp/cyclonedx
           python - <<'PY'
@@ -69,6 +69,10 @@ jobs:
           recs = [(os.path.basename(p), (sbom_from_spdx if "spdx" in p else sbom_from_cyclonedx)(p, "tiny-cra-sample", "1.0.0")) for p in sorted(glob.glob("tests/fixtures/real_tools/*.json"))]
           recs.append(("installed", sbom_from_installed("cra-evidence", "0.3.0", ["cryptography"], transitive=True)))
           n = 0
+          for p in sorted(glob.glob("tests/fixtures/real_tools/*cyclonedx*.json")):   # the generators' documents themselves
+              v = json.load(open(p))["specVersion"]
+              subprocess.run(["/tmp/cyclonedx", "validate", "--input-file", p, "--input-format", "json", "--input-version", "v" + v.replace(".", "_"), "--fail-on-errors"], check=True)
+              n += 1
           for name, r in recs:
               for v in ("1.6", "1.7"):
                   out = f"/tmp/export_{v}_{name}"; json.dump(r.to_cyclonedx_min(v), open(out, "w"))
