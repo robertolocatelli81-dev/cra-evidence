@@ -317,7 +317,7 @@ def installed_license(meta: Any) -> str:
 def is_spdx_expression(value: str) -> bool:
     """A compound SPDX expression (`A OR B`, `A AND B`, `A WITH exc`) whose atoms are listed identifiers."""
     parts = re.split(r"\s+(?:OR|AND|WITH)\s+", value)
-    return len(parts) > 1 and all(is_spdx_id(p.strip("() ")) or p.strip("() ").endswith("-exception") for p in parts)
+    return len(parts) > 1 and all(is_spdx_id(p.strip("() ")) or re.search(r"-exception(-[0-9.]+)?$", p.strip("() ")) for p in parts)
 
 
 def sbom_from_installed(product_id: str, product_version: str, top_level: List[str], transitive: bool = False) -> SBOMRecord:
@@ -496,7 +496,8 @@ def _ld_type(e: Dict[str, Any]) -> str:
 
 
 def _ld_id(e: Dict[str, Any]) -> str:
-    return str(e.get("spdxId") or e.get("@id") or "")
+    v = e.get("spdxId") or e.get("@id") or ""
+    return v if isinstance(v, str) else ""
 
 
 def _ld_prop(e: Dict[str, Any], *names: str) -> Any:
@@ -516,21 +517,26 @@ SPDX_PURPOSE_TO_TYPE = {"APPLICATION": "application", "FRAMEWORK": "framework", 
                         "OPERATING-SYSTEM": "operating-system", "DEVICE": "device", "FIRMWARE": "firmware", "FILE": "file"}
 
 
+def _lst(v: Any) -> List[Any]:
+    """A field that must be a JSON array: anything else (5, "x", {}) is read as empty — third-party input, never a crash."""
+    return v if isinstance(v, list) else []
+
+
 def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
-    rels = [r for r in (d.get("relationships") or []) if isinstance(r, dict)]
-    roots = {r.get("relatedSpdxElement") for r in rels if r.get("relationshipType") == "DESCRIBES" and r.get("spdxElementId") == "SPDXRef-DOCUMENT"}
-    roots |= {r.get("spdxElementId") for r in rels if r.get("relationshipType") == "DESCRIBED_BY" and r.get("relatedSpdxElement") == "SPDXRef-DOCUMENT"}
-    roots |= set(d.get("documentDescribes") or [])
+    rels = [r for r in _lst(d.get("relationships")) if isinstance(r, dict)]
+    roots = {r.get("relatedSpdxElement") for r in rels if r.get("relationshipType") == "DESCRIBES" and r.get("spdxElementId") == "SPDXRef-DOCUMENT" and isinstance(r.get("relatedSpdxElement"), str)}
+    roots |= {r.get("spdxElementId") for r in rels if r.get("relationshipType") == "DESCRIBED_BY" and r.get("relatedSpdxElement") == "SPDXRef-DOCUMENT" and isinstance(r.get("spdxElementId"), str)}
+    roots |= {x for x in _lst(d.get("documentDescribes")) if isinstance(x, str)}
     comps = []
-    for p in d.get("packages", []) or []:
+    for p in _lst(d.get("packages")):
         if not isinstance(p, dict) or not _clean(p.get("name")):
             continue                                     # counted by the caller as packages_unnamed
         if p.get("SPDXID") in roots:
             continue                                     # the product itself is metadata, not a dependency
-        refs = [r for r in (p.get("externalRefs") or []) if isinstance(r, dict)]
+        refs = [r for r in _lst(p.get("externalRefs")) if isinstance(r, dict)]
         purl = next((r.get("referenceLocator", "") for r in refs if r.get("referenceType") == "purl"), "")
         cpe = next((r.get("referenceLocator", "") for r in refs if str(r.get("referenceType", "")).startswith("cpe2")), "")
-        sha = next((c.get("checksumValue", "") for c in (p.get("checksums") or [])
+        sha = next((c.get("checksumValue", "") for c in _lst(p.get("checksums"))
                     if isinstance(c, dict) and str(c.get("algorithm", "")).upper() == "SHA256"), "")
         lic = _clean(p.get("licenseConcluded")) or _clean(p.get("licenseDeclared"))
         comps.append(SBOMComponent(name=_clean(p["name"]), version=_clean(p.get("versionInfo")) or "NOASSERTION",
@@ -547,12 +553,14 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
 
 
 def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
-    g = [e for e in (d.get("@graph") or []) if isinstance(e, dict)]
+    g = [e for e in _lst(d.get("@graph")) if isinstance(e, dict)]
     known = {"software_Package", "Package", "Relationship", "LifecycleScopedRelationship", "SpdxDocument", "software_Sbom", "Sbom",
              "software_File", "File", "CreationInfo", "Tool", "Organization", "Person", "Agent", "simplelicensing_LicenseExpression", "LicenseExpression"}
     if not any(_ld_type(e) in known for e in g):
         raise ValueError("@graph holds no SPDX 3.0 element (no Package/Sbom/SpdxDocument/Relationship): not an SPDX 3.0 document")
     by_id = {_ld_id(e): e for e in g if _ld_id(e)}
+    def _strs(x: Any) -> List[str]:                   # an id reference must be a string; a list of them is allowed; anything else is ignored
+        return [y for y in (x if isinstance(x, list) else [x]) if isinstance(y, str)]
     roots = set()
     lic_of: Dict[str, str] = {}
 
@@ -568,15 +576,14 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     for e in g:
         t = _ld_type(e)
         if t in ("SpdxDocument", "software_Sbom", "Sbom"):
-            re_ = _ld_prop(e, "rootElement")                          # the canonical root marker in SPDX 3.0
-            roots |= {x for x in (re_ if isinstance(re_, list) else [re_]) if x}
+            roots |= set(_strs(_ld_prop(e, "rootElement")))          # the canonical root marker in SPDX 3.0
         if t in ("Relationship", "LifecycleScopedRelationship"):
             rt = _ld_prop(e, "relationshipType")
-            to = _ld_prop(e, "to")
-            tos = to if isinstance(to, list) else [to]
+            tos = _strs(_ld_prop(e, "to"))
             frm = _ld_prop(e, "from")
+            frm = frm if isinstance(frm, str) else ""
             if rt == "describes":
-                roots |= {x for x in tos if x}
+                roots |= set(tos)
             if rt in ("hasConcludedLicense", "hasDeclaredLicense") and frm:
                 for x in tos:
                     expr = _lic_expr(x)
@@ -586,7 +593,7 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     for e in g:
         if _ld_type(e) not in ("software_Package", "Package") or not _clean(e.get("name")) or _ld_id(e) in roots:
             continue
-        sha = next((h.get("hashValue", "") for h in (_ld_prop(e, "verifiedUsing") or [])
+        sha = next((h.get("hashValue", "") for h in _lst(_ld_prop(e, "verifiedUsing"))
                     if isinstance(h, dict) and _ld_type(h) == "Hash" and str(h.get("algorithm", "")).lower().rsplit("/", 1)[-1] == "sha256"), "")
         sup = _ld_prop(e, "suppliedBy")
         sup = sup[0] if isinstance(sup, list) and sup else sup
@@ -596,7 +603,7 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
             supplier = _clean((by_id.get(orig) or {}).get("name")) if isinstance(orig, str) else ""
         purpose = _ld_prop(e, "software_primaryPurpose", "primaryPurpose")
         purpose = str(purpose[0] if isinstance(purpose, list) and purpose else purpose or "").rsplit("/", 1)[-1].upper().replace("OPERATINGSYSTEM", "OPERATING-SYSTEM")
-        ext = _ld_prop(e, "externalIdentifier") or []
+        ext = _lst(_ld_prop(e, "externalIdentifier"))
         cpe = next((str(x.get("identifier", "")) for x in ext if isinstance(x, dict) and str(_ld_prop(x, "externalIdentifierType") or "").rsplit("/", 1)[-1] in ("cpe22", "cpe23")), "")
         comps.append(SBOMComponent(name=_clean(e["name"]), version=_clean(_ld_prop(e, "software_packageVersion", "packageVersion")) or "NOASSERTION",
                                    supplier=supplier, purl=_clean(_ld_prop(e, "software_packageUrl", "packageUrl")), sha256=_sha256_or_empty(sha),
@@ -622,14 +629,14 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str, raw: Option
         raise ValueError("SPDX document is not a JSON object")
     if str(d.get("spdxVersion", "")).startswith("SPDX-2"):
         comps, depth = _spdx2_components(d)
-        pk = [x for x in (d.get("packages") or []) if isinstance(x, dict)]
-        rels = [r for r in (d.get("relationships") or []) if isinstance(r, dict)]
+        pk = [x for x in _lst(d.get("packages")) if isinstance(x, dict)]
+        rels = [r for r in _lst(d.get("relationships")) if isinstance(r, dict)]
         source = {"format": "spdx-json", "spec_version": _clean(d.get("spdxVersion")), "packages_declared": len(pk),
                   "packages_unnamed": sum(1 for x in pk if not _clean(x.get("name"))), "relationships_declared": len(rels),
                   "dependency_edges": sum(1 for r in rels if str(r.get("relationshipType", "")).upper() in ("DEPENDS_ON", "DEPENDENCY_OF"))}
     elif "@graph" in d:
         comps, depth = _spdx3_components(d)
-        g = [e for e in (d.get("@graph") or []) if isinstance(e, dict)]
+        g = [e for e in _lst(d.get("@graph")) if isinstance(e, dict)]
         source = {"format": "spdx-jsonld", "spec_version": "SPDX-3.0",
                   "packages_declared": sum(1 for e in g if _ld_type(e) in ("software_Package", "Package")),
                   "packages_unnamed": sum(1 for e in g if _ld_type(e) in ("software_Package", "Package") and not _clean(e.get("name"))),

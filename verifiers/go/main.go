@@ -166,9 +166,7 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 		prev, n := genesis, 0
 		for sc.Scan() {
 			line := sc.Bytes()
-			if len(line) > 0 && line[len(line)-1] == '\r' {
-				line = line[:len(line)-1] // exactly one terminator; a run of \r is content and counts against the bound
-			}
+			// bufio.ScanLines already drops exactly one trailing \r (dropCR): no second strip here — a run of \r is content
 			if len(strings.Trim(string(line), " \t")) == 0 { // blank = ASCII space/tab only (Unicode spaces are an unparsable line)
 				continue
 			}
@@ -481,10 +479,11 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 		}
 	}
 	if len(bad) > 0 {
+		total := len(bad)
 		if len(bad) > 3 {
 			bad = bad[:3]
 		}
-		return layer{"source-documents", "FAIL", fmt.Sprintf("%d source document(s) do not match their recorded SHA-256: %s", len(bad), strings.Join(bad, "; "))}
+		return layer{"source-documents", "FAIL", fmt.Sprintf("%d source document(s) do not match their recorded SHA-256: %s", total, strings.Join(bad, "; "))}
 	}
 	if absent > 0 {
 		return layer{"source-documents", ifs(require, "FAIL", "SKIP"), fmt.Sprintf("%d of %d source document(s) present and verified; %d recorded by hash only%s", present, len(wanted), absent, ifs(require, " (required)", ""))}
@@ -507,6 +506,10 @@ func main() {
 		switch args[i] {
 		case "--ledger":
 			ledger = next(i)
+			if ledger == "" {
+				fmt.Fprintln(os.Stderr, "usage: --ledger needs a path (empty string given)")
+				os.Exit(2)
+			}
 			i++
 		case "--trust-store":
 			trustFile = next(i)

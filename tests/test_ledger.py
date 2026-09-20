@@ -63,6 +63,31 @@ class TestLedger(unittest.TestCase):
 
 
 
+class TestDepthBound(unittest.TestCase):
+    def test_reference_parses_512_and_refuses_513(self):
+        from cra_evidence.ledger import parse_line
+        parse_line('{"a":' + "[" * 511 + "]" * 511 + "}")            # depth 512: inside the profile, must PARSE (round 5: it stopped at 332)
+        with self.assertRaises(ValueError):
+            parse_line('{"a":' + "[" * 512 + "]" * 512 + "}")        # depth 513: refused by a linear pre-scan, never RecursionError
+
+    def test_producer_writes_only_what_every_reader_reads(self):
+        import tempfile
+        from cra_evidence.locker import CRAEvidenceLocker
+        from cra_evidence.vuln import VulnerabilityRecord
+        d = tempfile.mkdtemp(); lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
+        def nest(n):
+            v = {"x": 1}
+            for _ in range(n):
+                v = [v]
+            return v
+        lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, "2026-09-01T00:00:00Z", details={"deep": nest(508)}))   # line depth 512
+        self.assertTrue(lk.verify()["chain_ok"])
+        with self.assertRaises((ValueError, TypeError)):
+            lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2", False, "2026-09-01T00:00:00Z", details={"deep": nest(509)}))
+        self.assertEqual(lk.verify()["entries"], 1)
+        shutil.rmtree(d, ignore_errors=True)
+
+
 class TestLineCap(unittest.TestCase):
     def test_a_record_above_64_mib_is_refused_before_writing(self):
         from cra_evidence.ledger import MAX_LINE_BYTES

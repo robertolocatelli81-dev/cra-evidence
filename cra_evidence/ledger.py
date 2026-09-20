@@ -20,7 +20,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from .canonical import canonical_bytes, sha256_hex
+from .canonical import MAX_DEPTH, canonical_bytes, deep_recursion, nesting_depth, sha256_hex
 
 GENESIS = "0" * 64
 _log = logging.getLogger("cra_evidence.ledger")
@@ -87,20 +87,32 @@ def parse_line(line: str, allow_floats: bool = False):
     """The profile's strict JSON: no NaN/Infinity, no duplicate keys, no floats (not even integral ones such as 10.0 —
     JSON.parse would silently turn them into 10), no integer outside ±(2^53-1). allow_floats=True only for third-party
     generator documents, which are stored as bytes, never canonicalised (numbers are then read as JSON allows)."""
-    v = json.loads(line, parse_constant=_refuse_constant, object_pairs_hook=_no_dup_keys,
-                   parse_float=(float if allow_floats else _refuse_float), parse_int=(int if allow_floats else _refuse_int))
+    if nesting_depth(line) > MAX_DEPTH:       # linear pre-scan, before the recursive parser: exactly the verifiers' bound
+        raise ValueError(f"json_too_deep: nesting exceeds the acceptance-profile bound {MAX_DEPTH}")
+    try:
+        with deep_recursion():                 # depth ≤ 512 must PARSE in the reference too (hooks cost frames per level)
+            v = json.loads(line, parse_constant=_refuse_constant, object_pairs_hook=_no_dup_keys,
+                           parse_float=(float if allow_floats else _refuse_float), parse_int=(int if allow_floats else _refuse_int))
+    except RecursionError:
+        raise ValueError("json_too_deep: the parser could not hold this nesting") from None
     if not allow_floats and _has_lone_surrogate(v):
         raise ValueError("lone surrogate in a JSON string (the profile forbids it: it has no UTF-8 encoding)")
     return v
 
 
 def _has_lone_surrogate(v) -> bool:
-    if isinstance(v, str):
-        return any(0xD800 <= ord(c) <= 0xDFFF for c in v)
-    if isinstance(v, dict):
-        return any(_has_lone_surrogate(k) or _has_lone_surrogate(x) for k, x in v.items())
-    if isinstance(v, list):
-        return any(_has_lone_surrogate(x) for x in v)
+    """Iterative walk (a 512-deep document must not cost interpreter frames here)."""
+    stack = [v]
+    while stack:
+        x = stack.pop()
+        if isinstance(x, str):
+            if any(0xD800 <= ord(c) <= 0xDFFF for c in x):
+                return True
+        elif isinstance(x, dict):
+            stack.extend(x.keys())
+            stack.extend(x.values())
+        elif isinstance(x, list):
+            stack.extend(x)
     return False
 
 
@@ -123,15 +135,21 @@ def entry_hash(entry: Dict[str, Any]) -> str:
 def _tail_state(f) -> Tuple[int, str, str, bool]:
     """(next idx, last self_hash, first self_hash, file ends without newline). Fail-closed on a bad line."""
     f.seek(0)
-    n, last, first, unterminated = 0, GENESIS, GENESIS, False
-    for lineno, raw in enumerate(f, 1):
+    n, last, first, unterminated, lineno = 0, GENESIS, GENESIS, False, 0
+    while True:                                           # the writer reads with the VERIFIERS' rules: bounded, one terminator, ASCII blank
+        raw = f.readline(MAX_LINE_BYTES + 2)
+        if not raw:
+            break
+        lineno += 1
+        if not raw.endswith(b"\n") and len(raw) == MAX_LINE_BYTES + 2:
+            raise ValueError(f"ledger line {lineno} exceeds {MAX_LINE_BYTES} bytes: chain not continuable — verify, repair, record the incident")
         unterminated = not raw.endswith(b"\n")
-        line = raw.strip()
-        if not line:
+        line = line_content(raw)
+        if is_blank_line(line):
             continue
         try:
-            e = parse_line(line)
-        except (ValueError, UnicodeDecodeError) as e:
+            e = parse_line(line.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, RecursionError) as e:
             raise ValueError(f"ledger line {lineno} unparsable ({type(e).__name__}): chain not continuable — verify, repair, record the incident")
         if not isinstance(e, dict) or not isinstance(e.get("self_hash"), str) or len(e["self_hash"]) != 64:
             raise ValueError(f"ledger line {lineno} is not a chained entry")
@@ -165,9 +183,11 @@ class Ledger:
             idx, prev, first, unterminated = _tail_state(f)
             entry = {"idx": idx, "ts": ts or _now_ts(), "prev_hash": prev, "data": data}
             entry["self_hash"] = entry_hash(entry)
-            line = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8") + b"\n"
+            line = canonical_bytes(entry) + b"\n"
             if len(line) - 1 > MAX_LINE_BYTES:   # content without the terminator
                 raise ValueError(f"record would exceed {MAX_LINE_BYTES} bytes on one line: the verifiers refuse it, so it is not written")
+            if nesting_depth(line.decode("utf-8")) > MAX_DEPTH:   # the LINE's depth (entry adds a level over data): what every reader bounds
+                raise ValueError(f"record would nest deeper than {MAX_DEPTH} on its ledger line: the verifiers refuse it, so it is not written")
             f.seek(0, os.SEEK_END)
             if unterminated:
                 _log.warning("ledger %s ended without newline (crash or truncation): line closed before the new record", self.path)

@@ -128,4 +128,6 @@ class VulnerabilityRecord:
     def canonical_hash(self) -> str:
         # includes record_id on purpose: this is the fingerprint of THIS record instance (what the ledger binds),
         # not a de-duplication key for "the same vulnerability"; compare vuln_id/product_id for that
-        return sha3_hex(asdict(self))
+        from .canonical import deep_recursion
+        with deep_recursion():
+            return sha3_hex(asdict(self))

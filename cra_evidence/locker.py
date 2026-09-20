@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .canonical import floatfree, sha3_hex
+from .canonical import deep_recursion, floatfree, sha3_hex
 from .ledger import Ledger
 from .longterm import AlgorithmPolicy, LongTermEvidence, Signer
 from .sbom import MAX_SOURCE_BYTES, SBOMRecord, reingest, resolved_components
@@ -78,7 +78,11 @@ class CRAEvidenceLocker:
 
     def _append(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            return self.ledger.append(_bind(entry))
+            try:
+                with deep_recursion():
+                    return self.ledger.append(_bind(entry))
+            except RecursionError:
+                raise ValueError("record nests too deep to be serialised: not written") from None
 
     def record_sbom(self, sbom: SBOMRecord, source_path: Optional[str] = None, store: bool = True, spec_version: str = "1.6") -> Dict[str, Any]:
         """source_path: the generator's document the record was ingested from. Its exact bytes are hashed (SHA-256)
@@ -110,7 +114,7 @@ class CRAEvidenceLocker:
             # the index must be a FUNCTION of the bytes stored, not merely co-located with them: re-derive and compare
             fresh = reingest(raw, source_path, str(source.get("format", "")), sbom.product_id, sbom.product_version)
             volatile = {"file"}
-            same = (fresh.components == sbom.components and fresh.edges == sbom.edges and fresh.depth == sbom.depth
+            same = (fresh.components == sbom.components and fresh.edges == sbom.edges and fresh.depth == sbom.depth and fresh.product_type == sbom.product_type
                     and {k: v for k, v in fresh.source.items() if k not in volatile} == {k: v for k, v in source.items() if k not in volatile | {"stored_as"}})
             if not same:   # every field the export is built from: components, edges (dependencies), depth (profile label), declared metadata
                 raise ValueError("SBOM index does not match the document at source_path (components, edges, depth or declared metadata differ): "
@@ -149,7 +153,11 @@ class CRAEvidenceLocker:
                 raise ValueError(f"attachment: format must be one of {sorted(ATTACHMENT_FORMATS)} and document a JSON object")
             doc = floatfree(doc)
             att.append({"format": fmt, "document": doc, "document_sha3": sha3_hex(doc)})
-        body = asdict(rec)
+        try:
+            with deep_recursion():                # a verbatim third-party attachment may nest deeply: bounded by the ledger line rule, never a crash
+                body = asdict(rec)
+        except RecursionError:
+            raise ValueError("record nests too deep to be serialised: not written") from None
         body["event_kind"] = body.pop("kind")     # the record's own kind (vulnerability|incident) must never shadow the ledger kind
         return self._append({"kind": "cra_vuln", **body, "deadlines": rec.deadlines(), "overdue": rec.overdue(),
                              "attachments": att})
@@ -197,10 +205,14 @@ class CRAEvidenceLocker:
                 if sha3_hex(body) != d.get("record_sha3"):
                     mismatched += 1
         except (ValueError, TypeError, AttributeError, RecursionError) as ex:   # a verdict, never a crash (fail-closed)
-            mismatched += 1
-            r["failures"] = (r.get("failures") or []) + [f"record scan aborted: {ex}"]
+            aborted = str(ex)
+        else:
+            aborted = ""
         r["records_checked"] = checked
-        r["record_digests_bound"] = mismatched == 0
+        r["record_digests_bound"] = mismatched == 0 and not aborted
+        if aborted:   # an aborted scan is stated as such, never as "a digest does not match" (a digest never computed)
+            r["chain_ok"] = False
+            r["failures"] = (r.get("failures") or []) + [f"record scan aborted: {aborted}"]
         if mismatched:
             r["chain_ok"] = False
             r["failures"] = (r.get("failures") or []) + [f"{mismatched} record(s) whose record_sha3 does not match their content"]

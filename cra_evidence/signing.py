@@ -74,9 +74,12 @@ def write_tip(out: str, key: Tuple[Any, str], entries: int, ledger_id: str, tip_
 
 def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledger_id: str, tip_sha256: str) -> Dict[str, Any]:
     """Minimal checker (the full profile lives in cryptovalid ≥ 0.11.3; this one is for self-tests)."""
-    _, Ed25519PublicKey, _ = _ed()
     if not trusted_pubkey_hex:
         return {"ok": False, "error": "tip_untrusted: no trusted log key given"}
+    try:
+        _, Ed25519PublicKey, _ = _ed()
+    except ImportError:
+        return {"ok": False, "error": "tip_unchecked: a signed tip is present but cannot be checked here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
     if not isinstance(tip, dict) or tip.get("kind") != TIP_KIND:
         return {"ok": False, "error": "tip_invalid: not a cryptovalid_tip/1 document"}
     # field TYPES as the three independent verifiers require them (a string "3" is not an entry count, a bool is not an int)
@@ -142,7 +145,7 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
     """PASS / FAIL / SKIP. Content-binding first (digest recomputed), then signature-binding, then the optional
     trust store {signer_id: public_key_hex} — a valid signature from an unknown signer is 'signed', not 'trusted'."""
     sp = sidecar_path(pack_path)
-    if not sp.exists():
+    if not sp.exists() and not os.path.lexists(sp):   # SKIP only when there is NO sidecar entry at all (a dangling symlink is one that cannot be read)
         return {"status": "SKIP", "detail": "pack not signed"}
     try:
         side = parse_line(sp.read_text(encoding="utf-8"))          # strict: duplicate keys / NaN refused like the verifiers
@@ -161,6 +164,9 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         return {"status": "FAIL", "detail": "pack changed after signature (digest differs from the signed one)"}
     try:
         _, Ed25519PublicKey, _ = _ed()
+    except ImportError:   # fail-closed, but the reason stated is the true one: the signature was not checked, not found invalid
+        return {"status": "FAIL", "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
+    try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001
         return {"status": "FAIL", "detail": f"signature invalid for the declared key ({type(e).__name__})"}

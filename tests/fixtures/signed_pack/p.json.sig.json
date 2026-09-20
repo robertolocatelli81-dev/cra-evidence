@@ -1,0 +1,9 @@
+{
+ "alg": "Ed25519",
+ "fingerprint": "4c6205aff7808044",
+ "public_key_hex": "a579b0d78674f76f8e474e8a143ac4e7d4dd001d25c7d09108e75f0131498e25",
+ "signature_hex": "831baee86792a4a92e2a2df71d4defbeac7e06e951a971b794919cadf5bfea9b515c568141e3cca3a9dfc5dadaa7a64e92cd3f434da132820223895d42c6a40c",
+ "signed_pack_sha3": "ab8f8c71663c664d8411bc158ad107a9579ccef2e0e46588ed943f6127aa6509",
+ "signed_utc": "2026-09-20T14:45:53+00:00",
+ "signer_id": "fixture-ci"
+}

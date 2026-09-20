@@ -9,7 +9,7 @@
 // source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
 // hash (SHA-256) to that value when the file is present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 import { createHash, verify as edVerify, createPublicKey } from "node:crypto";
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, existsSync, statSync, lstatSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
@@ -260,7 +260,7 @@ function checkTip(count, first, last, tipPath, pubHex) {
 
 function verifySidecar(packPath, pack, trustStore) {
   const sp = packPath + ".sig.json";
-  if (!existsSync(sp)) return { status: "SKIP", detail: "pack not signed" };
+  try { lstatSync(sp); } catch { return { status: "SKIP", detail: "pack not signed" }; }   // SKIP only when there is NO sidecar entry (a dangling symlink is one that cannot be read)
   let side; try { side = strictParse(readText(sp)); } catch (e) { return { status: "FAIL", detail: "unreadable: " + e.message }; }
   if (!isObj(side)) return { status: "FAIL", detail: "sidecar is not a JSON object" };
   let digest; try { digest = sha3(Buffer.from(canon(without(pack, "pack_sha3")), "utf-8")); } catch (e) { return { status: "FAIL", detail: "pack not canonicalisable" }; }
@@ -315,7 +315,7 @@ function main(argv) {
     }
     else if (args[i] === "--log-pubkey") key = args[++i]; else if (args[i] === "--require-sources") requireSources = true; else pack = args[i];
   }
-  if (!pack) { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); return 2; }
+  if (!pack || ledger === "" || key === "") { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); return 2; }
   const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key, requireSources });
   console.log(JSON.stringify(r, null, 1));
   return r.ok ? 0 : 1;

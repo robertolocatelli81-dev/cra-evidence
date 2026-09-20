@@ -308,6 +308,22 @@ class TestSourceStore(unittest.TestCase):
             del m.open
         self.assertEqual(opened, ["rb"])
 
+    def test_spdx_type_confusion_never_crashes(self):
+        """round 5 (Sonnet/Opus): a list where a string id is expected raised TypeError instead of being ignored"""
+        docs = [{"spdxVersion": "SPDX-2.3", "documentDescribes": [["x"]], "packages": [{"name": "a", "SPDXID": "S-a", "versionInfo": "1"}],
+                 "relationships": [{"spdxElementId": ["S-a"], "relatedSpdxElement": {"x": 1}, "relationshipType": "DESCRIBES"}]},
+                {"spdxVersion": "SPDX-2.3", "packages": 5, "relationships": "x", "documentDescribes": [{"a": 1}]},
+                {"spdxVersion": "SPDX-2.3", "packages": [{"name": "a", "externalRefs": 3, "checksums": {"a": 1}, "versionInfo": "1"}]},
+                {"@graph": [{"type": "software_Package", "spdxId": ["p1"], "name": "a"}, {"type": "SpdxDocument", "rootElement": [["r"]]},
+                            {"type": "Relationship", "relationshipType": "describes", "from": ["x"], "to": [{"a": 1}]},
+                            {"type": "software_Package", "spdxId": "p2", "name": "b", "verifiedUsing": 7, "externalIdentifier": "cpe"}]}]
+        for i, doc in enumerate(docs):
+            p = os.path.join(self.d, f"tc{i}.json")
+            with open(p, "w") as f:
+                json.dump(doc, f)
+            r = sbom_from_spdx(p, "tiny-cra-sample", "1.0.0")            # a record, or ValueError — never TypeError
+            self.assertIsInstance(r.components, list)
+
     def test_store_never_overwrites_different_bytes(self):
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         os.makedirs(sources_dir(self.led))
@@ -335,7 +351,16 @@ class TestSourceStore(unittest.TestCase):
         from dataclasses import asdict
         canonical_bytes(asdict(sb))                       # the INDEX carries no float (this raises on one; `_bind` would stringify it later)
         rec = self.lk.record_sbom(sb, source_path=p)
-        self.assertNotIn("0.8", json.dumps(rec["data"]))  # neither as a number nor as a string
+        def leaves(o):
+            if isinstance(o, dict):
+                for v in o.values():
+                    yield from leaves(v)
+            elif isinstance(o, list):
+                for v in o:
+                    yield from leaves(v)
+            else:
+                yield o
+        self.assertFalse(any(isinstance(x, float) or x == "0.8" for x in leaves(rec["data"])))   # neither as a number nor as its string
         with open(source_file(self.led, rec["data"]["source"]["sha256"]), "rb") as a, open(p, "rb") as b:
             self.assertEqual(a.read(), b.read())
 

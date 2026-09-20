@@ -78,3 +78,43 @@ class TestLockerPack(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSignedFixtureEveryConfig(unittest.TestCase):
+    """a genuinely signed pack (vendored) — with cryptography: trusted-signed; without: FAIL that says NOT checkable, never 'invalid'"""
+    FX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "signed_pack")
+
+    def _run(self):
+        from cra_evidence.verify_pack import verify_pack
+        trust = json.load(open(os.path.join(self.FX, "trust.json")))
+        return verify_pack(os.path.join(self.FX, "p.json"), trust_store=trust, log_pubkey_hex=trust["fixture-ci"])
+
+    def test_verdict_matches_the_backend_available(self):
+        r = self._run()
+        sig = next(l for l in r["layers"] if l["layer"] == "producer-signature")
+        tip = next(l for l in r["layers"] if l["layer"] == "signed-tip")
+        try:
+            import cryptography  # noqa: F401
+            self.assertEqual(r["authenticity"], "trusted-signed", r["layers"])
+            self.assertEqual((sig["status"], tip["status"]), ("PASS", "PASS"))
+        except ImportError:
+            self.assertFalse(r["ok"])
+            self.assertIn("NOT checkable", sig["detail"]); self.assertNotIn("invalid", sig["detail"])
+            self.assertIn("tip_unchecked", tip["detail"]); self.assertNotIn("invalid", tip["detail"])
+
+    def test_without_backend_the_reason_is_true(self):
+        import sys
+        saved = {k: v for k, v in sys.modules.items() if k == "cryptography" or k.startswith("cryptography.")}
+        for k in saved:
+            sys.modules[k] = None                       # simulate the "none" configuration in any interpreter
+        sys.modules["cryptography"] = None
+        try:
+            r = self._run()
+        finally:
+            for k in list(sys.modules):
+                if k == "cryptography" or k.startswith("cryptography."):
+                    del sys.modules[k]
+            sys.modules.update(saved)
+        self.assertFalse(r["ok"])
+        sig = next(l for l in r["layers"] if l["layer"] == "producer-signature")
+        self.assertIn("NOT checkable", sig["detail"]); self.assertNotIn("invalid", sig["detail"])

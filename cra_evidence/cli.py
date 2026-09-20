@@ -154,6 +154,8 @@ def main(argv: List[str] = None) -> int:
         _p({"seal": d, "verify": v})
         return 0 if v["ok"] else 1
     if a.cmd == "verify":
+        if a.ledger is not None and a.ledger == "":
+            p.error("verify: --ledger needs a path (empty string given)")
         ts = None
         if a.trust_store:
             from .ledger import load_trust_store

@@ -304,7 +304,7 @@ fn main() {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--ledger" => { i += 1; ledger = args.get(i).cloned(); }
+            "--ledger" => { i += 1; ledger = args.get(i).cloned(); if ledger.as_deref() == Some("") { eprintln!("usage: --ledger needs a path (empty string given)"); std::process::exit(2); } }
             "--trust-store" => { i += 1; trust_file = args.get(i).cloned(); }
             "--log-pubkey" => { i += 1; key = args.get(i).cloned(); }
             "--require-sources" => { require_sources = true; }

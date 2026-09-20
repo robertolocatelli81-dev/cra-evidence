@@ -64,9 +64,53 @@ def _refuse_floats(obj: Any, path: str = "$", depth: int = 0) -> None:
             _refuse_floats(v, f"{path}[{i}]", depth + 1)
 
 
+class deep_recursion:
+    """The profile allows nesting up to 512; CPython's JSON scanner/encoder spend several interpreter frames per
+    level once hooks are involved (measured 20/09/2026: parse_line stopped at 332 with the default limit of 1000).
+    Raise the limit while (de)serialising a profile-bounded document, restore it after."""
+    NEEDED = 8000
+
+    def __enter__(self):
+        import sys
+        self.old = sys.getrecursionlimit()
+        if self.old < self.NEEDED:
+            sys.setrecursionlimit(self.NEEDED)
+        return self
+
+    def __exit__(self, *a):
+        import sys
+        sys.setrecursionlimit(self.old)
+        return False
+
+
+def nesting_depth(text: str) -> int:
+    """Maximum bracket depth of a JSON text, counted outside strings, in linear time — the same pre-scan the JS/Go/Rust
+    verifiers run (`jsonNestingDepth`, `NestingDepth`) so that the reference refuses exactly what they refuse."""
+    depth = best = 0
+    in_str = esc = False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+            if depth > best:
+                best = depth
+        elif ch in "]}":
+            depth -= 1
+    return best
+
+
 def canonical_bytes(obj: Any) -> bytes:
     _refuse_floats(obj)
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
+    with deep_recursion():
+        return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
 
 
 def sha256_hex(obj: Any) -> str:

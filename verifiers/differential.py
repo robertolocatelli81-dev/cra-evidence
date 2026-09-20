@@ -257,6 +257,10 @@ def cases(base):
     for label, ch in (("nbsp", "\u00a0"), ("u2028", "\u2028"), ("nel_u0085", "\u0085"), ("bom_feff", "\ufeff")):
         case(f"ledger_blank_line_{label}", (lambda ch: lambda d: ledger_extra_line(d, ch))(ch))
     case("ledger_blank_line_ascii_tab_space", lambda d: ledger_extra_line(d, " \t "))
+    case("ledger_blank_line_crcr", lambda d: ledger_extra_line(d, "\r\r"))     # "\r\r\n": one \r is the terminator, the other is content → unparsable, in all four
+    def side_dangling(d):
+        build(d); os.symlink(os.path.join(d, "nowhere.sig.json"), os.path.join(d, "p.json.sig.json"))
+    case("sidecar_dangling_symlink", side_dangling)
     def cr_padding(d):   # a run of \r before the newline is CONTENT (one terminator only): the four must agree on what that content is
         build(d); p = os.path.join(d, "l.jsonl"); b = open(p, "rb").read(); i = b.index(b"\n"); open(p, "wb").write(b[:i] + b"\r\r\r" + b[i:])
     case("ledger_line_cr_padding", cr_padding)
@@ -328,6 +332,27 @@ def cases(base):
     def side_int_field(d):
         lk, key, pack, pk = build(d, sign=True); s = json.load(open(sidecar_path(pack))); s["alg"] = 7; json.dump(s, open(sidecar_path(pack), "w"))
     case("sidecar_alg_not_string", side_int_field)
+    def nested(n):
+        v = {"x": 1}
+        for _ in range(n):
+            v = [v]
+        return v
+    def ledger_depth(d, total):   # a well-formed, correctly chained line whose TOTAL bracket depth is `total` (512 accepted, 513 refused, in all four)
+        from cra_evidence.ledger import entry_hash
+        lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl"); last = json.loads(open(p).read().splitlines()[-1])
+        e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": {"deep": nested(total - 3)}}   # entry{data{deep[…{x}]}}: 3 levels + n arrays
+        e["self_hash"] = entry_hash(e) if total <= 512 else "0" * 64
+        line = json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        from cra_evidence.canonical import nesting_depth; assert nesting_depth(line) == total, nesting_depth(line)
+        open(p, "a").write(line + "\n")
+    case("ledger_line_depth_512", lambda d: ledger_depth(d, 512))
+    case("ledger_line_depth_513", lambda d: ledger_depth(d, 513))
+    def pack_depth(d, total):     # pack alone (ledger removed) with a nested extra field, re-hashed: pack-json must agree at the bound
+        build(d); os.remove(os.path.join(d, "l.jsonl")); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["deep"] = nested(total - 2)
+        json.dump(j, open(p, "w")); from cra_evidence.canonical import nesting_depth; assert nesting_depth(open(p).read()) == total
+        if total <= 512: rehash(p)
+    case("pack_depth_512", lambda d: pack_depth(d, 512))
+    case("pack_depth_513", lambda d: pack_depth(d, 513))
     if os.environ.get("CRA_ORACLE_BIG") == "1":
         def cr_padding_big(d):   # 66 MiB of \r before the newline: content above the bound in all four (Python must not buffer it whole)
             build(d); p = os.path.join(d, "l.jsonl"); b = open(p, "rb").read(); i = b.index(b"\n"); open(p, "wb").write(b[:i] + b"\r" * (66 << 20) + b[i:])
