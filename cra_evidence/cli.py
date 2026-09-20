@@ -156,9 +156,12 @@ def main(argv: List[str] = None) -> int:
     if a.cmd == "verify":
         ts = None
         if a.trust_store:
-            from .ledger import parse_line
-            with open(a.trust_store, encoding="utf-8") as f:
-                ts = parse_line(f.read())            # strict: a duplicate signer_id would make two readers disagree
+            from .ledger import load_trust_store
+            try:
+                with open(a.trust_store, encoding="utf-8") as f:
+                    ts = load_trust_store(f.read())   # strict: a duplicate signer_id would make two readers disagree
+            except (OSError, ValueError) as e:
+                print(f"trust store unreadable: {e}", file=sys.stderr); return 2
         r = verify_pack(a.pack, a.ledger, ts, a.log_pubkey, require_sources=a.require_sources); _p(r)
         return 0 if r["ok"] else 1
     if a.cmd == "feeds":

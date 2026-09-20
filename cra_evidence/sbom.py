@@ -7,10 +7,10 @@ transitive), a floor, not a scanner; (b) `sbom_from_cyclonedx` — ingest a Cycl
 generator (Syft, Trivy, cdxgen…) or `sbom_from_spdx`: the 2026 verdict of the competitor comparison is to
 interoperate with the leaders and add what they lack — tamper-evident, offline-verifiable evidence with Art. 14
 deadlines. The record is a normalised INDEX of the generator's document (name/version/type/purl/cpe/sha256/licence,
-flattened, de-duplicated); the generator's document itself is the evidence: `source_fingerprint()` binds its exact
-bytes (SHA-256) into the record and the locker stores the bytes next to the ledger (measured 20/09/2026 with sbomqs
-2.1.2: re-emitting only the index scored lower than every generator's original — 5.3→4.2 Syft, 6.6→4.4 cdxgen,
-4.8→3.7 Trivy — so the original is kept, not replaced). Export is a CycloneDX 1.6 or 1.7 SUBSET (bomFormat,
+flattened, de-duplicated); the generator's document itself is the evidence: its exact bytes (SHA-256) are bound
+into the record and the locker stores them next to the ledger (measured 20/09/2026 with sbomqs 2.1.2: 0.2.0's export,
+which was only the index, scored lower than every generator's original — 5.3→4.2 Syft, 6.6→4.4 cdxgen, 4.8→3.7
+Trivy — so since 0.3.0 the original is kept, not replaced; the enriched 0.3.0 index scores 5.3 / 5.5 / 4.9). Export is a CycloneDX 1.6 or 1.7 SUBSET (bomFormat,
 specVersion, serialNumber, metadata with tools/component, components with bom-ref/type/purl/cpe/hashes/licenses,
 dependencies only where they are known), declared as such and validated against the official schemas in the tests.
 """
@@ -105,7 +105,8 @@ class SBOMRecord:
                                 {"name": "cra-evidence:profile", "value": f"cra-evidence-min (depth: {self.depth})"},
                                 {"name": "cra-evidence:depth_note", "value": "'top-level-only' is the literal Annex I floor; most vulnerabilities live in transitive dependencies — prefer a transitive SBOM from a full generator when available"},
                                 {"name": "cra-evidence:sbom_sha3", "value": self.canonical_hash()}]},
-               "components": [{"type": c.type if c.type in CYCLONEDX_COMPONENT_TYPES else "library", "bom-ref": ref, "name": c.name, "version": c.version,
+               "components": [{"type": c.type if c.type in CYCLONEDX_COMPONENT_TYPES else "library", "bom-ref": ref, "name": c.name,
+                               **({"version": c.version} if c.version != "NOASSERTION" else {}),   # an SPDX token is not a version (optional since 1.4)
                                **({"supplier": {"name": c.supplier}} if c.supplier else {}),
                                **({"purl": c.purl} if c.purl else {}),
                                **({"cpe": c.cpe} if c.cpe else {}),
@@ -117,7 +118,7 @@ class SBOMRecord:
         if self.edges:
             # `dependsOn: []` is the POSITIVE statement "has no dependencies" (CycloneDX dependency definition): it is
             # emitted only for a component whose Requires-Dist was actually read; every other component is left out
-            # of the graph (= unknown) and the composition is declared incomplete
+            # of the graph and its composition is declared `unknown`
             ref_of = {_norm_key(c.name): r for c, r in zip(comps, refs)}
             ref_of[""] = primary_ref
             deps: Dict[str, List[str]] = {primary_ref: []}
@@ -131,8 +132,8 @@ class SBOMRecord:
                 if cr not in deps[pr]:
                     deps[pr].append(cr)
             out["dependencies"] = [{"ref": r, "dependsOn": d} for r, d in deps.items()]
-            if len(deps) < len(refs) + 1:
-                out["compositions"] = [{"aggregate": "incomplete", "dependencies": [r for r in refs if r not in deps]}]
+            if len(deps) < len(refs) + 1:   # "unknown": completeness inconclusive (CycloneDX enum) — "incomplete" would assert that more exist
+                out["compositions"] = [{"aggregate": "unknown", "dependencies": [r for r in refs if r not in deps]}]
         return out
 
 
@@ -364,16 +365,25 @@ def _norm_key(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name.lower())
 
 
-def _load_document(path: str) -> Any:
-    """A generator document is third-party input: a nesting that exhausts the parser (or a duplicate key, which two
-    readers would resolve differently) is a malformed document (ValueError), never a crash."""
+def _load_document(path: str, raw: Optional[bytes] = None) -> Tuple[bytes, Any]:
+    """A generator document is third-party input, read ONCE: the bytes that are parsed are the bytes that are
+    fingerprinted (two reads could see two versions of a file still being written). A nesting that exhausts the
+    parser, a duplicate key (two readers would resolve it differently) or invalid UTF-8 is a malformed document
+    (ValueError), never a crash."""
     from .ledger import parse_line
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
+    if raw is None:
+        with open(path, "rb") as f:
+            raw = f.read()
     try:
-        return parse_line(text)
+        return raw, parse_line(raw.decode("utf-8"), allow_floats=True)
     except RecursionError:
         raise ValueError("document malformed: JSON nested too deep") from None
+    except UnicodeDecodeError:
+        raise ValueError("document malformed: not UTF-8") from None
+
+
+def _fingerprint_bytes(raw: bytes, path: str) -> Dict[str, Any]:
+    return {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(path)}
 
 
 def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:
@@ -388,18 +398,18 @@ def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:
     return "", ""
 
 
-def sbom_from_cyclonedx(path: str, product_id: str, product_version: str) -> SBOMRecord:
+def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: Optional[bytes] = None) -> SBOMRecord:
     """Ingest a CycloneDX JSON (1.2 … 1.7) from ANY generator: components are walked recursively (a generator may
     nest `components[].components`), malformed components are skipped, a malformed document raises. The record's
     `source` says what the document declared (spec version, generator, total/nested component count, dependency
     edges, component types) and how many duplicates (same name+version+purl at two locations, as Syft emits for a
     workflow file referenced twice) the index merged — the count the auditor reads is the generator's, not ours."""
-    d = _load_document(path)
+    raw, d = _load_document(path, raw)
     if not isinstance(d, dict) or d.get("bomFormat") != "CycloneDX":
         raise ValueError("CycloneDX malformed: not a JSON object with bomFormat 'CycloneDX'")
     gen, gen_ver = _cdx_generator(d)
-    raw = d.get("components")
-    if not isinstance(raw, list):
+    items = d.get("components")
+    if not isinstance(items, list):
         raise ValueError("CycloneDX malformed: 'components' must be a list")
     comps: List[SBOMComponent] = []
     declared, nested, types = 0, 0, {}
@@ -429,12 +439,12 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str) -> SBO
             sup = c.get("supplier")
             comps.append(SBOMComponent(name=str(c["name"]), version=str(c.get("version", "") or ""),
                                        supplier=str(sup.get("name", "")) if isinstance(sup, dict) else "",
-                                       purl=str(c.get("purl", "") or ""), sha256=sha, license=str(lic)[:80],
+                                       purl=str(c.get("purl", "") or ""), sha256=sha, license=str(lic)[:512],   # the FIRST licence entry; the document has them all
                                        type=typ if typ in CYCLONEDX_COMPONENT_TYPES else "library", cpe=str(c.get("cpe", "") or "")))
             if isinstance(c.get("components"), list):
                 walk(c["components"], level + 1)
     try:
-        walk(raw, 0)
+        walk(items, 0)
     except RecursionError:
         raise ValueError("CycloneDX malformed: components nested too deep") from None
     deps = d.get("dependencies") if isinstance(d.get("dependencies"), list) else []
@@ -442,7 +452,7 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str) -> SBO
               "serial_number": str(d.get("serialNumber", "") or ""), "components_declared": declared, "components_nested": nested,
               "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": sum(len(x["dependsOn"]) for x in deps if isinstance(x, dict) and isinstance(x.get("dependsOn"), list)),
               "dependencies_declared": len(deps), "component_types": dict(sorted(types.items()))}
-    source.update(source_fingerprint(path))
+    source.update(_fingerprint_bytes(raw, path))
     return SBOMRecord(product_id=product_id, product_version=product_version, components=comps,
                       depth=f"external:cyclonedx:{gen or 'unknown'}", source=source)
 
@@ -590,7 +600,7 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     return comps, depth
 
 
-def sbom_from_spdx(path: str, product_id: str, product_version: str) -> SBOMRecord:
+def sbom_from_spdx(path: str, product_id: str, product_version: str, raw: Optional[bytes] = None) -> SBOMRecord:
     """Ingest an SPDX document: 2.2/2.3 JSON (`spdxVersion`, `packages`, `relationships`; DESCRIBES/DESCRIBED_BY
     /documentDescribes name the product) or 3.0 JSON-LD (`@graph` of Package elements in compact `type`/`spdxId`
     or expanded `@type`/`@id`/IRI form; `rootElement` of the Sbom/SpdxDocument or a `describes` relationship names
@@ -599,7 +609,7 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str) -> SBOMReco
     is declared the depth says `:no-root-declared` (the product may then be counted). Field names checked on the
     official spdx/spdx-examples documents (15/09/2026); other generators' output is parsed by these rules, not
     proven against every tool. A document of neither shape raises."""
-    d = _load_document(path)
+    raw, d = _load_document(path, raw)
     if not isinstance(d, dict):
         raise ValueError("SPDX document is not a JSON object")
     if str(d.get("spdxVersion", "")).startswith("SPDX-2"):
@@ -626,5 +636,14 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str) -> SBOMReco
     gv = re.match(r"^(.*?)[-\s]?(\d+\.\d+[\w.\-]*)$", source["generator"])
     if gv:   # "syft-1.52.0" / "trivy-0.74.0" → name + version
         source["generator"], source["generator_version"] = gv.group(1).rstrip("-"), gv.group(2)
-    source.update(source_fingerprint(path))
+    source.update(_fingerprint_bytes(raw, path))
     return SBOMRecord(product_id=product_id, product_version=product_version, components=comps, depth=depth, source=source)
+
+
+def reingest(raw: bytes, path: str, fmt: str, product_id: str, product_version: str) -> SBOMRecord:
+    """The same ingest function, on bytes already in hand (the locker re-derives the index from the bytes it stores)."""
+    if fmt == "cyclonedx-json":
+        return sbom_from_cyclonedx(path, product_id, product_version, raw=raw)
+    if fmt in ("spdx-json", "spdx-jsonld"):
+        return sbom_from_spdx(path, product_id, product_version, raw=raw)
+    raise ValueError(f"unknown source format {fmt!r}")

@@ -19,6 +19,7 @@ from .signing import verify_pack_signature, verify_tip
 
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
+MAX_SOURCE_BYTES = 256 << 20   # a stored generator document above this is refused unread (a symlink to /dev/zero must not hang a verifier)
 
 
 def _layer(name: str, status: str, detail: str = "") -> Dict[str, str]:
@@ -64,6 +65,9 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
             absent += 1
             continue
         try:
+            if os.path.getsize(fp) > MAX_SOURCE_BYTES:
+                bad.append(f"{h[:16]}… stored file exceeds {MAX_SOURCE_BYTES} bytes")
+                continue
             with open(fp, "rb") as f:
                 got = hashlib.sha256(f.read()).hexdigest()
         except OSError as e:

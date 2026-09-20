@@ -14,6 +14,7 @@ from cra_evidence.verify_pack import verify_pack
 from cra_evidence.vuln import VulnerabilityRecord
 from cra_evidence.sbom import sbom_from_cyclonedx
 from cra_evidence.locker import source_file
+from cra_evidence.ledger import load_trust_store
 
 CDX_DOC = {"bomFormat": "CycloneDX", "specVersion": "1.7", "version": 1,
            "metadata": {"tools": {"components": [{"type": "application", "name": "syft", "version": "1.52.0"}]}},
@@ -185,6 +186,41 @@ def cases(base):
     def tip_logkey(d):
         lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl.tip.json"); t = json.load(open(p)); t["log_pubkey_hex"] = "22" * 32; json.dump(t, open(p, "w")); return {"key": key[1]}
     case("tip_log_key_rewritten", tip_logkey)
+    def floaty(path, key, val):
+        t = open(path).read(); i = t.index('"' + key + '":'); j = i + len(key) + 3; k = j
+        while t[k] not in ",}": k += 1
+        open(path, "w").write(t[:j] + val + t[k:])
+    def pack_float(d):
+        build(d); floaty(os.path.join(d, "p.json"), "retention_years", "10.0")     # JSON.parse would give 10 and the digest would match
+    case("pack_float_integral", pack_float)
+    def ledger_float(d):
+        build(d); p = os.path.join(d, "l.jsonl"); lines = open(p).read().splitlines(); lines[0] = lines[0].replace('"idx":0', '"idx":0.0', 1); open(p, "w").write("\n".join(lines) + "\n")
+    case("ledger_line_float_integral", ledger_float)
+    def tip_float(d):
+        lk, key, pack, pk = build(d); floaty(os.path.join(d, "l.jsonl.tip.json"), "entries", "3.0"); return {"key": key[1]}
+    case("tip_entries_float", tip_float)
+    def side_fp_int(d):
+        lk, key, pack, pk = build(d, sign=True); s = json.load(open(sidecar_path(pack))); s["fingerprint"] = 123; json.dump(s, open(sidecar_path(pack), "w"))
+    case("sidecar_fingerprint_is_int", side_fp_int)
+    def pack_not_utf8(d):
+        build(d); p = os.path.join(d, "p.json"); b = open(p, "rb").read(); open(p, "wb").write(b.replace(b'"kind"', b'"k\xffnd"', 1))
+    case("pack_not_utf8", pack_not_utf8)
+    def trust_dup(d):
+        lk, key, pack, pk = build(d, sign=True); open(os.path.join(d, "trust.json"), "w").write('{"acme-ci": "' + "00" * 32 + '", "acme-ci": "' + key[1] + '"}'); return {"trust": os.path.join(d, "trust.json")}
+    case("trust_store_duplicate_key", trust_dup)
+    def trust_list(d):
+        build(d, sign=True); open(os.path.join(d, "trust.json"), "w").write("[]"); return {"trust": os.path.join(d, "trust.json")}
+    case("trust_store_not_object", trust_list)
+    def trust_int(d):
+        build(d, sign=True); open(os.path.join(d, "trust.json"), "w").write('{"acme-ci": 5}'); return {"trust": os.path.join(d, "trust.json")}
+    case("trust_store_value_not_string", trust_int)
+    def relocated_with_sources(d):
+        build_with_source(d); os.makedirs(os.path.join(d, "elsewhere")); shutil.move(os.path.join(d, "l.jsonl"), os.path.join(d, "elsewhere", "l.jsonl"))
+        shutil.move(os.path.join(d, "l.jsonl.sources"), os.path.join(d, "elsewhere", "l.jsonl.sources")); return {"ledger": os.path.join(d, "elsewhere", "l.jsonl")}
+    case("explicit_ledger_path_with_sources", relocated_with_sources)
+    def relocated_without_sources(d):
+        build_with_source(d); os.makedirs(os.path.join(d, "elsewhere")); shutil.move(os.path.join(d, "l.jsonl"), os.path.join(d, "elsewhere", "l.jsonl")); return {"ledger": os.path.join(d, "elsewhere", "l.jsonl"), "require_sources": True}
+    case("explicit_ledger_path_sources_left_behind", relocated_without_sources)
     if os.environ.get("CRA_ORACLE_BIG") == "1":   # 65 MiB line after the anchor: a scanner that stops silently would accept the prefix
         def big_line(d):
             build(d); open(os.path.join(d, "l.jsonl"), "a").write('{"idx": 3, "ts": "x", "prev_hash": "y", "data": {"pad": "' + "a" * (65 << 20) + '"}, "self_hash": "z"}\n')
@@ -235,7 +271,22 @@ def main():
     base = tempfile.mkdtemp()
     diverg, n = [], 0
     for name, pack, opts in cases(base):
-        trust = json.load(open(opts["trust"])) if opts.get("trust") else None
+        trust, unreadable = None, False
+        if opts.get("trust"):
+            try:
+                trust = load_trust_store(open(opts["trust"], encoding="utf-8").read())   # exactly what the CLI does
+            except ValueError:
+                unreadable = True
+        if unreadable:   # an unreadable trust store is exit 2 and no verdict in every verifier
+            exp, exp_fails, row = (None, "unreadable-input", None), [], {"python": (None, "unreadable-input", None)}
+            for lang, cmd in vs.items():
+                r = run_cli(cmd, pack, opts)
+                row[lang] = (None, "unreadable-input" if r.get("exit") == 2 and "error" in r else f"exit {r.get('exit')}", None)
+                if row[lang] != exp:
+                    diverg.append((name, lang, exp, exp_fails, r))
+            n += 1
+            print(f"{name:32s} python={exp[1]:14s} " + " ".join(f"{l}={row[l][1]}" for l in vs))
+            continue
         ref = verify_pack(pack, opts.get("ledger"), trust, opts.get("key"), require_sources=bool(opts.get("require_sources")))
         exp = (ref["ok"], ref["authenticity"], ref["anchored"])
         exp_fails = sorted(l["layer"] for l in ref["layers"] if l["status"] == "FAIL")

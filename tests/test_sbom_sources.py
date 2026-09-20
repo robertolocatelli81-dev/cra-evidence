@@ -61,7 +61,14 @@ class TestRealGenerators(unittest.TestCase):
             if s["format"] == "cyclonedx-json":
                 self.assertEqual(s["components_declared"], count_cdx(doc["components"]), p)
                 self.assertEqual(s["dependency_edges"], sum(len(x.get("dependsOn") or []) for x in doc.get("dependencies") or []), p)
-                self.assertEqual(len(r.components), s["components_declared"] - s["duplicates_merged"], p)
+                keys = set()
+                def walk(items):
+                    for c in items:
+                        if isinstance(c, dict) and c.get("name"):
+                            keys.add((c["name"], str(c.get("version", "") or ""), str(c.get("purl", "") or ""))); walk(c.get("components") or [])
+                walk(doc["components"])
+                self.assertEqual(len(r.components), len(keys), p)                                        # independent de-duplication
+                self.assertEqual(s["duplicates_merged"], count_cdx(doc["components"]) - len(keys), p)
             else:
                 self.assertEqual(s["packages_declared"], len(doc["packages"]), p)
                 self.assertEqual(s["relationships_declared"], len(doc["relationships"]), p)
@@ -247,6 +254,36 @@ class TestSourceStore(unittest.TestCase):
         with self.assertRaises(ValueError):
             sbom_from_spdx(deep, "p", "1")
 
+    def test_a_mutated_index_is_refused_even_with_the_right_document(self):
+        """found by Sonnet in round 2: the index was only co-located with the bytes, not a function of them"""
+        from dataclasses import replace
+        sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
+        for bad in (replace(sb, components=[SBOMComponent("left-pad", "9.9.9")]),
+                    replace(sb, components=sb.components[:-1]),
+                    replace(sb, source={**sb.source, "generator": "forged"})):
+            with self.assertRaises(ValueError) as cm:
+                self.lk.record_sbom(bad, source_path=self.src)
+            self.assertIn("does not match the document", str(cm.exception))
+        with self.assertRaises(ValueError):                                                   # another product's SBOM in this locker
+            self.lk.record_sbom(replace(sb, product_version="2.0"), source_path=self.src)
+        self.assertEqual(self.lk.verify()["entries"], 0)
+
+    def test_ingest_reads_the_file_once(self):
+        """found by Sonnet in round 2: two reads of a file still being written = index of A, hash of B"""
+        import cra_evidence.sbom as m
+        opened = []
+        real_open = open
+        def spy(path, *a, **k):
+            if str(path) == self.src:
+                opened.append(a[0] if a else k.get("mode", "r"))
+            return real_open(path, *a, **k)
+        m.open = spy
+        try:
+            sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
+        finally:
+            del m.open
+        self.assertEqual(opened, ["rb"])
+
     def test_store_never_overwrites_different_bytes(self):
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         os.makedirs(sources_dir(self.led))
@@ -336,16 +373,20 @@ class TestExport(unittest.TestCase):
         inst = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"]).to_cyclonedx_min()   # top-level floor: all direct…
         self.assertEqual(inst["dependencies"], [{"ref": inst["metadata"]["component"]["bom-ref"], "dependsOn": [c["bom-ref"] for c in inst["components"]]}])
         # …and NOTHING else: `dependsOn: []` would assert "no dependencies" for a component whose Requires-Dist was never read
-        self.assertEqual(inst["compositions"], [{"aggregate": "incomplete", "dependencies": [c["bom-ref"] for c in inst["components"]]}])
+        self.assertEqual(inst["compositions"], [{"aggregate": "unknown", "dependencies": [c["bom-ref"] for c in inst["components"]]}])   # not "incomplete": that would assert more exist
         tr = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"], transitive=True)
         deps = {d["ref"]: d["dependsOn"] for d in tr.to_cyclonedx_min("1.7")["dependencies"]}
         self.assertNotIn("no-such-dist-xyz@NOT-INSTALLED", deps)                                        # not read → not in the graph
         self.assertEqual(sorted(tr.to_cyclonedx_min("1.7")["compositions"][0]["dependencies"]), ["no-such-dist-xyz@NOT-INSTALLED"])
         cry = next(c for c in tr.components if c.name == "cryptography")
         self.assertEqual(deps["p@1"], ["pkg:pypi/cryptography@" + cry.version, "no-such-dist-xyz@NOT-INSTALLED"])
-        self.assertEqual(sorted(tr.source["requires_dist_read"])[:1], ["cffi"] if any(c.name == "cffi" for c in tr.components) else sorted(tr.source["requires_dist_read"])[:1])
+        self.assertIn("cryptography", tr.source["requires_dist_read"])
+        self.assertNotIn("no-such-dist-xyz", tr.source["requires_dist_read"])
         for key in tr.source["requires_dist_read"]:                                                    # every walked component IS in the graph
             self.assertTrue(any(r.startswith(f"pkg:pypi/{key}@") for r in deps), key)
+        comp = tr.to_cyclonedx_min("1.7")["compositions"][0]
+        self.assertEqual(comp["aggregate"], "unknown")
+        self.assertFalse(set(comp["dependencies"]) & set(deps), "a walked component is never in the unknown composition")
         rec = ingest(REAL[0]); ing = rec.to_cyclonedx_min()
         self.assertNotIn("dependencies", ing)                                                          # never re-invented for an ingested graph
         self.assertIn({"name": "cra-evidence:source_sha256", "value": rec.source["sha256"]}, ing["metadata"]["properties"])
@@ -368,6 +409,14 @@ class TestExport(unittest.TestCase):
         self.assertEqual(installed_license(Meta({"License": "MIT"})), "MIT")
         self.assertEqual(installed_license(Meta({"License": "UNKNOWN", "Classifier": ["License :: OSI Approved :: MIT License"]})), "MIT License")
         self.assertEqual(installed_license(Meta({})), "")
+        try:                                                                                  # the real distribution, not a synthetic object
+            from importlib import metadata as md
+            ver = md.version("cryptography")
+        except md.PackageNotFoundError:
+            return
+        if tuple(int(x) for x in ver.split(".")[:2]) >= (46, 0):
+            self.assertEqual(installed_license(md.metadata("cryptography")), "Apache-2.0 OR BSD-3-Clause")
+            self.assertEqual((md.metadata("cryptography").get("License") or "").strip(), "")
 
     def test_pep508_markers_decide_the_edges_of_this_interpreter(self):
         from cra_evidence.sbom import marker_applies

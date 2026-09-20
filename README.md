@@ -71,7 +71,7 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
   1.7 by default now — and scored with sbomqs 2.1.2: the 0.2.0 re-encoding scored *below* every original
   (Syft 5.3 → 4.2, cdxgen 6.6 → 4.4, Trivy 4.8 → 3.7 out of 10), which is why the original is kept; the 0.3.0 index
   export scores 5.3 / 5.5 / 4.9 on the same inputs (bom-ref, serialNumber, tools, component type, CPE, licence
-  expressions, and a dependency graph only from edges the producer knows: the installed floor's Requires-Dist graph with PEP 508 markers evaluated for this interpreter — `dependsOn: []` is CycloneDX's positive statement "no dependencies", so it is emitted only for a component whose metadata was actually read, and the composition is declared `incomplete` otherwise; never re-invented for an ingested document).
+  expressions, and a dependency graph only from edges the producer knows: the installed floor's Requires-Dist graph with PEP 508 markers evaluated for this interpreter — `dependsOn: []` is CycloneDX's positive statement "no dependencies", so it is emitted only for a component whose metadata was actually read, and the composition is declared `unknown` otherwise (`incomplete` would assert that more exist); never re-invented for an ingested document).
   Six unmodified generator documents are vendored as fixtures (`tests/fixtures/real_tools/`): the tests read the
   same dependency with the same purl, version and licence from every one of them and validate the exports with
   jsonschema; CI validates the four CycloneDX fixtures and every export with the official CycloneDX CLI 0.33.1, and the two SPDX
@@ -94,7 +94,9 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 - The seal signs its own time, time-source and token together with the whole previous chain; the verifier's policy
   defaults to the NIST IR 8547 draft dates for both the signature and the hash, and says when a renewal is due.
 - Pre-publication review by five models (two providers) in three rounds, plus the author: 44 findings turned into
-  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; the legal points were re-read on EUR-Lex
+  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; 0.3.0: three more rounds (Opus, Sonnet, Haiku;
+  Gemini Pro out of credits that day), 20 findings (listed in the CHANGELOG), each re-measured and turned into an oracle
+  case or a test; CI now also runs the suites with no optional dependency at all; the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.
 - The SRP schema is the 39-field ENISA glossary, stage by stage, derived by a test from the dated snapshot vendored
   in `spec/sources/` (`spec/SRP_FIELDS.md`); "complete" is never declared by silence — the payload lists what is
@@ -144,7 +146,7 @@ signature, trust store, seal) are checked by the four verifiers of this reposito
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 45 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 55 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 20/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

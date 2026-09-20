@@ -16,7 +16,8 @@ use std::path::Path;
 const PACK_KIND: &str = "cra_evidence_pack/1";
 const SCOPE_MARK: &str = "NOT a conformity assessment";
 const TIP_KIND: &str = "cryptovalid_tip/1";
-const MAX_LINE_BYTES: usize = 64 << 20;   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
+const MAX_LINE_BYTES: usize = 64 << 20;
+const MAX_SOURCE_BYTES: u64 = 256 << 20;   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
 
@@ -123,6 +124,7 @@ fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool)
     for h in &wanted {
         let fp = format!("{lp}.sources/{h}.json");
         if !Path::new(&fp).is_file() { absent += 1; continue; }
+        if std::fs::metadata(&fp).map(|m| m.len()).unwrap_or(0) > MAX_SOURCE_BYTES { bad.push(format!("{}… stored file exceeds {MAX_SOURCE_BYTES} bytes", &h[..16])); continue; }
         match std::fs::read(&fp) {
             Ok(raw) => { let got = sha256::hex(&raw); if &got == h { present += 1; } else { bad.push(format!("{}… stored bytes hash to {}…", &h[..16], &got[..16])); } }
             Err(_) => bad.push(format!("{}… unreadable", &h[..16])),
@@ -272,7 +274,11 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
     payload.insert("alg".to_string(), side.get("alg").cloned().unwrap_or(Json::Str("Ed25519".into())));
     if !ed_ok(pub_hex, canonical(&Json::Object(payload)).as_bytes(), gs(&side, "signature_hex").unwrap_or("")) { return ("FAIL".into(), "signature invalid for the declared key".into(), false); }
     let fp = sha256::hex(&unhex(pub_hex).unwrap_or_default())[..16].to_string();
-    if let Some(Json::Str(f)) = side.get("fingerprint") { if *f != fp { return ("FAIL".into(), "declared fingerprint does not match the signing key".into(), false); } }
+    match side.get("fingerprint") {
+        None | Some(Json::Null) => {}
+        Some(Json::Str(f)) if *f == fp => {}
+        Some(_) => return ("FAIL".into(), "declared fingerprint does not match the signing key".into(), false),
+    }
     if let Some(t) = trust {
         let sid = gs(&side, "signer_id").unwrap_or("");
         if let Some(Json::Str(exp)) = t.get(sid) { if !exp.is_empty() && exp == pub_hex { return ("PASS".into(), "trusted-signed".into(), true); } }
@@ -297,7 +303,11 @@ fn main() {
         i += 1;
     }
     let Some(pack) = pack else { eprintln!("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2) };
-    let trust = trust_file.map(|f| parse_obj(&std::fs::read_to_string(f).unwrap_or_default()).unwrap_or_else(|_| { eprintln!("trust store unreadable"); std::process::exit(2) }));
+    let trust = trust_file.map(|f| {
+        let o = parse_obj(&std::fs::read_to_string(f).unwrap_or_default()).unwrap_or_else(|_| { eprintln!("trust store unreadable"); std::process::exit(2) });
+        if !o.values().all(|v| matches!(v, Json::Str(_))) { eprintln!("trust store unreadable: values must be strings"); std::process::exit(2); }
+        o
+    });
     let out = verify(&pack, ledger.as_deref(), trust.as_ref(), key.as_deref(), require_sources);
     let layers: Vec<Json> = out.layers.iter().map(|l| { let mut m = BTreeMap::new(); m.insert("layer".into(), Json::Str(l.0.clone())); m.insert("status".into(), Json::Str(l.1.clone())); m.insert("detail".into(), Json::Str(l.2.clone())); Json::Object(m) }).collect();
     let mut m = BTreeMap::new();

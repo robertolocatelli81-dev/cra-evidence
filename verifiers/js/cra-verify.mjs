@@ -16,7 +16,7 @@ const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessme
 const RECORD_KINDS = new Set(["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"]);
 const TIP_KIND = "cryptovalid_tip/1", SPKI = Buffer.from("302a300506032b6570032100", "hex"), HEX64 = /^[0-9a-f]{64}$/;
 
-const MAX_LINE_BYTES = 64 << 20;   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
+const MAX_LINE_BYTES = 64 << 20, MAX_SOURCE_BYTES = 256 << 20;   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 function pyEscape(s) {
   if (!/[^\x20-\x7e]|["\\]/.test(s)) return '"' + s + '"';   // fast path: nothing to escape (a 65 MB pad must not build a 65 M-node rope)
   let out = '"';
@@ -128,8 +128,23 @@ const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 const sha3 = (b) => createHash("sha3-256").update(b).digest("hex");
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const without = (o, k) => { const c = {}; for (const x of Object.keys(o)) if (x !== k) c[x] = o[x]; return c; };
+function hasFloatToken(text) {   // a number token with '.', 'e' or 'E' outside strings: 10.0 would JSON.parse to 10 and hash alike
+  let inStr = false, esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "-" || (c >= "0" && c <= "9")) {
+      let j = i; while (j < text.length && /[-+0-9.eE]/.test(text[j])) j++;
+      if (/[.eE]/.test(text.slice(i, j))) return true;
+      i = j - 1;
+    }
+  }
+  return false;
+}
 function strictParse(text) {   // JSON.parse alone hides what the profile forbids
   if (/\b(NaN|Infinity)\b/.test(text) && !/"[^"]*\b(NaN|Infinity)\b[^"]*"/.test(text)) throw new Error("non-JSON constant");
+  if (hasFloatToken(text)) throw new Error("floating-point number (the profile forbids floats)");
   if (hasDuplicateKeys(text)) throw new Error("duplicate key");
   if (hasLoneSurrogate(text)) throw new Error("lone surrogate");
   if (jsonNestingDepth(text) > 512) throw new Error("nesting deeper than 512");
@@ -153,7 +168,7 @@ export function verifyPack(packPath, { ledgerPath = null, trustStore = null, log
 function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources = false) {
   const layers = [];
   let pack;
-  try { pack = strictParse(readFileSync(packPath, "utf-8")); layers.push(L("pack-json", "PASS")); }
+  try { pack = strictParse(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(packPath))); layers.push(L("pack-json", "PASS")); }
   catch (e) { return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("pack-json", "FAIL", String(e.message))], pack_sha3: null }; }
   if (!isObj(pack)) return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("pack-json", "FAIL", "pack is not a JSON object")], pack_sha3: null };
   layers.push(L("pack-kind", pack.kind === PACK_KIND ? "PASS" : "FAIL", String(pack.kind)));
@@ -279,7 +294,10 @@ function sourceDocuments(lp, entries, require, isFile) {
     const fp = join(lp + ".sources", h + ".json");
     if (!isFile(fp)) { absent++; continue; }
     let got;
-    try { got = sha256(readFileSync(fp)); } catch (e) { bad.push(`${h.slice(0, 16)}… unreadable (${e.code || e.name})`); continue; }
+    try {
+      if (statSync(fp).size > MAX_SOURCE_BYTES) { bad.push(`${h.slice(0, 16)}… stored file exceeds ${MAX_SOURCE_BYTES} bytes`); continue; }
+      got = sha256(readFileSync(fp));
+    } catch (e) { bad.push(`${h.slice(0, 16)}… unreadable (${e.code || e.name})`); continue; }
     if (got === h) present++; else bad.push(`${h.slice(0, 16)}… stored bytes hash to ${got.slice(0, 16)}…`);
   }
   if (bad.length) return L("source-documents", "FAIL", `${bad.length} source document(s) do not match their recorded SHA-256: ` + bad.slice(0, 3).join("; "));
@@ -290,7 +308,11 @@ function sourceDocuments(lp, entries, require, isFile) {
 function main(argv) {
   const args = argv.slice(2); let pack = null, ledger = null, trust = null, key = null, requireSources = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--ledger") ledger = args[++i]; else if (args[i] === "--trust-store") trust = JSON.parse(readFileSync(args[++i], "utf-8"));
+    if (args[i] === "--ledger") ledger = args[++i];
+    else if (args[i] === "--trust-store") {
+      try { trust = strictParse(readFileSync(args[++i], "utf-8")); if (!isObj(trust) || !Object.values(trust).every((v) => typeof v === "string")) throw new Error("not an object of strings"); }
+      catch (e) { console.error("trust store unreadable: " + e.message); return 2; }
+    }
     else if (args[i] === "--log-pubkey") key = args[++i]; else if (args[i] === "--require-sources") requireSources = true; else pack = args[i];
   }
   if (!pack) { console.error("usage: cra-verify.mjs <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); return 2; }

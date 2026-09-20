@@ -387,6 +387,8 @@ func ifs(c bool, a, b string) string {
 	return b
 }
 
+const maxSourceBytes = 256 << 20 // a stored generator document above this is refused unread (never a hang on /dev/zero)
+
 // sourceDocuments: the SBOM source documents recorded by hash must, when present next to the ledger, hash to it.
 func sourceDocuments(lp string, entries []*Object, require bool) layer {
 	wanted := map[string]bool{}
@@ -431,8 +433,13 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 	}
 	for _, h := range keys {
 		fp := filepath.Join(lp+".sources", h+".json")
-		if st, e := os.Stat(fp); e != nil || !st.Mode().IsRegular() {
+		st, e := os.Stat(fp)
+		if e != nil || !st.Mode().IsRegular() {
 			absent++
+			continue
+		}
+		if st.Size() > maxSourceBytes {
+			bad = append(bad, fmt.Sprintf("%s… stored file exceeds %d bytes", h[:16], maxSourceBytes))
 			continue
 		}
 		raw, err := os.ReadFile(fp)
@@ -495,9 +502,18 @@ func main() {
 	haveTrust := false
 	if trustFile != "" {
 		raw, err := os.ReadFile(trustFile)
-		if err != nil || json.Unmarshal(raw, &trust) != nil {
+		obj, perr := parseObject(raw) // the profile's strict parser: duplicate keys / floats / NaN refused, like every other input
+		if err != nil || perr != nil {
 			fmt.Fprintln(os.Stderr, "trust store unreadable")
 			os.Exit(2)
+		}
+		for k, v := range obj.Vals {
+			sv, ok := v.(string)
+			if !ok {
+				fmt.Fprintln(os.Stderr, "trust store unreadable: values must be strings")
+				os.Exit(2)
+			}
+			trust[k] = sv
 		}
 		haveTrust = true
 	}

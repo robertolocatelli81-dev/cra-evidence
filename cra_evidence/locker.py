@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .canonical import floatfree, sha3_hex
 from .ledger import Ledger
 from .longterm import AlgorithmPolicy, LongTermEvidence, Signer
-from .sbom import SBOMRecord, resolved_components
+from .sbom import SBOMRecord, reingest, resolved_components
 from .srp_notice import SRPNotice
 from .vuln import VulnerabilityRecord, parse_utc
 
@@ -87,6 +87,8 @@ class CRAEvidenceLocker:
         record is its index, not its replacement. If the file changed between ingest and record, or the store already
         holds different bytes under that name, the record is refused. store=False keeps the hash but no copy. An
         ingested SBOM without source_path is refused (its record would carry a hash nothing re-verified)."""
+        if (sbom.product_id, sbom.product_version) != (self.product_id, self.product_version):
+            raise ValueError(f"SBOM is for {sbom.product_id!r} {sbom.product_version!r}, this locker is for {self.product_id!r} {self.product_version!r}")
         cdx = sbom.to_cyclonedx_min(spec_version)
         resolved = len(resolved_components(sbom))
         source = dict(sbom.source)
@@ -103,6 +105,12 @@ class CRAEvidenceLocker:
             fp = {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(source_path)}
             if source["sha256"] != fp["sha256"]:
                 raise ValueError("source document changed since it was ingested: re-run the ingest on the current file")
+            # the index must be a FUNCTION of the bytes stored, not merely co-located with them: re-derive and compare
+            fresh = reingest(raw, source_path, str(source.get("format", "")), sbom.product_id, sbom.product_version)
+            volatile = {"file"}
+            if fresh.components != sbom.components or {k: v for k, v in fresh.source.items() if k not in volatile} != {k: v for k, v in source.items() if k not in volatile | {"stored_as"}}:
+                raise ValueError("SBOM index does not match the document at source_path (components or declared metadata differ): "
+                                 "the record would describe something the stored bytes do not")
             source.update(fp)
         if source_path is not None and store:
             dst = source_file(self.ledger.path, fp["sha256"])

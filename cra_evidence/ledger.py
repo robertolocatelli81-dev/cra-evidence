@@ -56,8 +56,28 @@ def _no_dup_keys(pairs):
     return d
 
 
-def parse_line(line: str):
-    return json.loads(line, parse_constant=_refuse_constant, object_pairs_hook=_no_dup_keys)
+def _refuse_float(tok: str):
+    raise ValueError(f"floating-point number {tok} (the profile forbids floats: `10.0` and `10` would hash alike in one reader and not in another)")
+
+
+def parse_line(line: str, allow_floats: bool = False):
+    """The profile's strict JSON: no NaN/Infinity, no duplicate keys, no floats (not even integral ones such as 10.0 —
+    JSON.parse would silently turn them into 10). allow_floats=True only for third-party generator documents, which
+    are stored as bytes, never canonicalised."""
+    return json.loads(line, parse_constant=_refuse_constant, object_pairs_hook=_no_dup_keys,
+                      parse_float=(float if allow_floats else _refuse_float))
+
+
+def load_trust_store(text: str) -> Dict[str, str]:
+    """{signer_id: public_key_hex}: strict JSON, an object, string values — anything else is unreadable (exit 2 in
+    every verifier), never a partial trust store."""
+    try:
+        d = parse_line(text)
+    except (ValueError, RecursionError) as e:
+        raise ValueError(f"trust store unreadable: {str(e)[:100]}") from None
+    if not isinstance(d, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in d.items()):
+        raise ValueError("trust store unreadable: must be a JSON object of signer_id -> public_key_hex strings")
+    return d
 
 
 def entry_hash(entry: Dict[str, Any]) -> str:
