@@ -19,7 +19,7 @@ from .signing import verify_pack_signature, verify_tip
 
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
-MAX_SOURCE_BYTES = 256 << 20   # a stored generator document above this is refused unread (a symlink to /dev/zero must not hang a verifier)
+from .sbom import MAX_SOURCE_BYTES   # noqa: E402 — a stored generator document above this is refused unread (a symlink to /dev/zero must not hang a verifier)
 
 
 def _layer(name: str, status: str, detail: str = "") -> Dict[str, str]:
@@ -130,7 +130,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                 if d.get("kind") in RECORD_KINDS:
                     if sha3_hex({k: v for k, v in d.items() if k != "record_sha3"}) != d.get("record_sha3"):
                         bound = False
-                    if d.get("kind") == "cra_pack_anchor" and d.get("anchored_pack_sha3") == pack.get("pack_sha3"):
+                    if d.get("kind") == "cra_pack_anchor" and isinstance(pack.get("pack_sha3"), str) and HEX64.fullmatch(pack["pack_sha3"]) and d.get("anchored_pack_sha3") == pack["pack_sha3"]:
                         anchor, anchor_idx = True, e.get("idx")
             if not bound:
                 layers.append(_layer("ledger-chain", "FAIL", "a record's record_sha3 does not match its content"))
@@ -148,9 +148,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
             layers.append(_source_documents(lp, entries, require_sources))
             # signed tip: the only thing that sees a truncated TAIL (records after the anchor silently dropped)
             tip_path = lp + ".tip.json"
-            if not entries:
-                layers.append(_layer("signed-tip", "FAIL", "ledger has no entries"))
-            elif log_pubkey_hex:
+            if log_pubkey_hex:
                 if not os.path.exists(tip_path):
                     layers.append(_layer("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"))
                 else:

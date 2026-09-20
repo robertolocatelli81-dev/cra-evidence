@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .canonical import floatfree, sha3_hex
 from .ledger import Ledger
 from .longterm import AlgorithmPolicy, LongTermEvidence, Signer
-from .sbom import SBOMRecord, reingest, resolved_components
+from .sbom import MAX_SOURCE_BYTES, SBOMRecord, reingest, resolved_components
 from .srp_notice import SRPNotice
 from .vuln import VulnerabilityRecord, parse_utc
 
@@ -100,6 +100,8 @@ class CRAEvidenceLocker:
             if not source.get("sha256"):
                 raise ValueError("source_path given but this SBOM was not ingested from a document (no fingerprint): "
                                  "a document can only be bound to the index that was read from it")
+            if os.path.getsize(source_path) > MAX_SOURCE_BYTES:
+                raise ValueError(f"source document exceeds {MAX_SOURCE_BYTES} bytes: refused unread (the verifiers refuse it too)")
             with open(source_path, "rb") as f:
                 raw = f.read()                      # read ONCE: the bytes hashed are the bytes stored
             fp = {"sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw), "file": os.path.basename(source_path)}
@@ -108,8 +110,10 @@ class CRAEvidenceLocker:
             # the index must be a FUNCTION of the bytes stored, not merely co-located with them: re-derive and compare
             fresh = reingest(raw, source_path, str(source.get("format", "")), sbom.product_id, sbom.product_version)
             volatile = {"file"}
-            if fresh.components != sbom.components or {k: v for k, v in fresh.source.items() if k not in volatile} != {k: v for k, v in source.items() if k not in volatile | {"stored_as"}}:
-                raise ValueError("SBOM index does not match the document at source_path (components or declared metadata differ): "
+            same = (fresh.components == sbom.components and fresh.edges == sbom.edges and fresh.depth == sbom.depth
+                    and {k: v for k, v in fresh.source.items() if k not in volatile} == {k: v for k, v in source.items() if k not in volatile | {"stored_as"}})
+            if not same:   # every field the export is built from: components, edges (dependencies), depth (profile label), declared metadata
+                raise ValueError("SBOM index does not match the document at source_path (components, edges, depth or declared metadata differ): "
                                  "the record would describe something the stored bytes do not")
             source.update(fp)
         if source_path is not None and store:

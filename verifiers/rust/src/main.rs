@@ -65,7 +65,7 @@ fn gi(o: &BTreeMap<String, Json>, k: &str) -> Option<i64> {
     }
 }
 fn unhex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.is_ascii() || s.len() % 2 != 0 {   // a byte slice of a non-ASCII string would panic: hostile input is a None, never a crash
         return None;
     }
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()
@@ -80,6 +80,7 @@ fn is_hex64(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 fn is_instant(s: &str) -> bool {
+    if !s.is_ascii() { return false; }
     // YYYY-MM-DDThh:mm:ss[.f]{Z|±hh:mm} — same shape as the other verifiers (values validated by the writers)
     let b = s.as_bytes();
     if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' {
@@ -178,6 +179,7 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
         let mut failures: Vec<String> = vec![];
         let (mut prev, mut n) = (GENESIS.to_string(), 0i64);
         for line in text.split('\n') {
+            let line = line.strip_suffix('\r').unwrap_or(line);   // the bound is on the content, terminator excluded
             if line.trim().is_empty() { continue; }
             if line.len() > MAX_LINE_BYTES { failures.push(format!("entry {n}: line exceeds {MAX_LINE_BYTES} bytes")); break; }
             let e = match parse_obj(line) { Ok(o) => o, Err(err) => { failures.push(format!("entry {n}: unparsable: {err}")); break; } };
@@ -200,7 +202,7 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
                     let k = gs(d, "kind").unwrap_or("");
                     if !RECORD_KINDS.contains(&k) { continue; }
                     if sha3_of(d, "record_sha3") != gs(d, "record_sha3").unwrap_or("") { bound = false; }
-                    if k == "cra_pack_anchor" && gs(d, "anchored_pack_sha3") == Some(declared.as_str()) { anchor_idx = gi(e, "idx"); }
+                    if k == "cra_pack_anchor" && is_hex64(&declared) && gs(d, "anchored_pack_sha3") == Some(declared.as_str()) { anchor_idx = gi(e, "idx"); }
                 }
             }
             if !bound { layers.push(Layer("ledger-chain".into(), "FAIL".into(), "a record's record_sha3 does not match its content".into())); }
@@ -250,7 +252,11 @@ fn check_tip(count: i64, first: &str, last: &str, tip_path: &str, pub_hex: &str)
     let (lid, th, ts, sig) = (gs(&tip, "ledger_id"), gs(&tip, "tip_sha256"), gs(&tip, "ts"), gs(&tip, "signature_hex"));
     let (Some(lid), Some(th), Some(ts), Some(sig)) = (lid, th, ts, sig) else { return Err("tip_invalid: bad fields".into()) };
     if !is_hex64(lid) || !is_hex64(th) || !is_instant(ts) { return Err("tip_invalid: bad fields".into()); }
-    if let Some(lk) = gs(&tip, "log_pubkey_hex") { if !lk.is_empty() && lk != pub_hex { return Err("tip_invalid: tip log key differs from the trusted log key".into()); } }
+    match tip.get("log_pubkey_hex") {   // "" = absent (cryptovalid profile); a non-string never equals the key
+        None | Some(Json::Null) => {}
+        Some(Json::Str(lk)) if lk.is_empty() || lk == pub_hex => {}
+        Some(_) => return Err("tip_invalid: tip log key differs from the trusted log key".into()),
+    }
     let payload = format!("{{\"entries\":{n},\"kind\":\"{TIP_KIND}\",\"ledger_id\":\"{lid}\",\"tip_sha256\":\"{th}\",\"ts\":\"{ts}\"}}");
     if !ed_ok(pub_hex, payload.as_bytes(), sig) { return Err("tip_invalid: tip signature invalid".into()); }
     if lid != first { return Err("tip_of_another_ledger".into()); }
@@ -279,8 +285,9 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
         Some(Json::Str(f)) if *f == fp => {}
         Some(_) => return ("FAIL".into(), "declared fingerprint does not match the signing key".into(), false),
     }
+    if !matches!(side.get("signer_id"), Some(Json::Str(_))) { return ("FAIL".into(), "signer_id must be a string".into(), false); }
     if let Some(t) = trust {
-        let sid = gs(&side, "signer_id").unwrap_or("");
+        let sid = gs(&side, "signer_id").unwrap_or("");   // a non-string signer_id already failed above
         if let Some(Json::Str(exp)) = t.get(sid) { if !exp.is_empty() && exp == pub_hex { return ("PASS".into(), "trusted-signed".into(), true); } }
         return ("PASS".into(), "signed by a key NOT in the trust store".into(), false);
     }

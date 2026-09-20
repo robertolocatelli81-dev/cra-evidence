@@ -221,6 +221,35 @@ def cases(base):
     def relocated_without_sources(d):
         build_with_source(d); os.makedirs(os.path.join(d, "elsewhere")); shutil.move(os.path.join(d, "l.jsonl"), os.path.join(d, "elsewhere", "l.jsonl")); return {"ledger": os.path.join(d, "elsewhere", "l.jsonl"), "require_sources": True}
     case("explicit_ledger_path_sources_left_behind", relocated_without_sources)
+    def tip_field(d, key, val):
+        lk, k, pack, pk = build(d); p = os.path.join(d, "l.jsonl.tip.json"); t = json.load(open(p)); t[key] = val; json.dump(t, open(p, "w")); return {"key": k[1]}
+    case("tip_entries_is_string", lambda d: tip_field(d, "entries", "3"))
+    case("tip_entries_is_bool", lambda d: tip_field(d, "entries", True))
+    case("tip_log_key_empty", lambda d: tip_field(d, "log_pubkey_hex", ""))          # "" = absent (cryptovalid profile): PASS everywhere
+    case("tip_log_key_not_string", lambda d: tip_field(d, "log_pubkey_hex", 5))
+    case("tip_log_key_null", lambda d: tip_field(d, "log_pubkey_hex", None))
+    case("tip_ts_non_ascii", lambda d: tip_field(d, "ts", "2026-09-20T10:00:00+0\u00e900"))
+    def side_field(d, key, val):
+        lk, k, pack, pk = build(d, sign=True); s = json.load(open(sidecar_path(pack))); s[key] = val; json.dump(s, open(sidecar_path(pack), "w"))
+    case("sidecar_pubkey_non_ascii", lambda d: side_field(d, "public_key_hex", "a\u00e9a"))
+    case("sidecar_signature_non_ascii", lambda d: side_field(d, "signature_hex", "a\u00e9a"))
+    def signer_id_int(d):   # signed by the legitimate key holder through the library internals with a non-string signer_id
+        from cra_evidence.signing import signed_payload, pack_digest
+        keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key")); sk, pk = key
+        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
+        pj = json.load(open(pack)); side = {"signer_id": 5, "public_key_hex": pk, "alg": "Ed25519", "signed_pack_sha3": pack_digest(pj), "signed_utc": AW}
+        side["signature_hex"] = sk.sign(signed_payload(side)).hex(); json.dump(side, open(sidecar_path(pack), "w"))
+        json.dump({"5": pk}, open(os.path.join(d, "trust.json"), "w")); return {"trust": os.path.join(d, "trust.json")}
+    case("sidecar_signer_id_not_string", signer_id_int)
+    def no_pack_sha3(d):   # pack without pack_sha3 next to an anchor record without anchored_pack_sha3: nothing may match "nothing"
+        from cra_evidence.locker import _bind
+        lk, key, pack, pk = build(d); lk.ledger.append(_bind({"kind": "cra_pack_anchor", "pack_file": "p.json"}))
+        j = json.load(open(pack)); del j["pack_sha3"]; json.dump(j, open(pack, "w"))
+    case("pack_without_sha3_anchor_without_hash", no_pack_sha3)
+    def crlf(d):
+        build(d); p = os.path.join(d, "l.jsonl"); t = open(p).read(); open(p, "w", newline="").write(t.replace("\n", "\r\n"))
+    case("ledger_crlf", crlf)
     if os.environ.get("CRA_ORACLE_BIG") == "1":   # 65 MiB line after the anchor: a scanner that stops silently would accept the prefix
         def big_line(d):
             build(d); open(os.path.join(d, "l.jsonl"), "a").write('{"idx": 3, "ts": "x", "prev_hash": "y", "data": {"pad": "' + "a" * (65 << 20) + '"}, "self_hash": "z"}\n')
@@ -231,6 +260,16 @@ def cases(base):
             e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": {"pad": "a" * (65 << 20)}}; e["self_hash"] = entry_hash(e)
             open(p, "a").write(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
         case("ledger_line_65MiB_valid_record", big_valid)
+        def exact(d, content_len):   # a well-formed, correctly chained line whose CONTENT (no terminator) is exactly content_len bytes
+            from cra_evidence.ledger import entry_hash
+            lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl"); last = json.loads(open(p).read().splitlines()[-1])
+            e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": {"pad": ""}}; e["self_hash"] = entry_hash(e)
+            base = len(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
+            e["data"]["pad"] = "a" * (content_len - base); e["self_hash"] = entry_hash(e)
+            line = json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True); assert len(line) == content_len
+            open(p, "a").write(line + "\n")
+        case("ledger_line_exactly_64MiB", lambda d: exact(d, 64 << 20))        # accepted by all four
+        case("ledger_line_64MiB_plus_1", lambda d: exact(d, (64 << 20) + 1))   # refused by all four
     if os.geteuid() != 0:   # root reads anything: the case would not be a case
         def unreadable(d):
             build_with_source(d); sd = os.path.join(d, "l.jsonl.sources")

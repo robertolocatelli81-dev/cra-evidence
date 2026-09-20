@@ -10,7 +10,7 @@ deadlines. The record is a normalised INDEX of the generator's document (name/ve
 flattened, de-duplicated); the generator's document itself is the evidence: its exact bytes (SHA-256) are bound
 into the record and the locker stores them next to the ledger (measured 20/09/2026 with sbomqs 2.1.2: 0.2.0's export,
 which was only the index, scored lower than every generator's original — 5.3→4.2 Syft, 6.6→4.4 cdxgen, 4.8→3.7
-Trivy — so since 0.3.0 the original is kept, not replaced; the enriched 0.3.0 index scores 5.3 / 5.5 / 4.9). Export is a CycloneDX 1.6 or 1.7 SUBSET (bomFormat,
+Trivy — so since 0.3.0 the original is kept, not replaced; the enriched 0.3.0 index scores 5.3 / 5.5 / 4.8). Export is a CycloneDX 1.6 or 1.7 SUBSET (bomFormat,
 specVersion, serialNumber, metadata with tools/component, components with bom-ref/type/purl/cpe/hashes/licenses,
 dependencies only where they are known), declared as such and validated against the official schemas in the tests.
 """
@@ -144,6 +144,7 @@ def _license_entry(lic: str) -> Dict[str, Any]:
 
 
 CYCLONEDX_EXPORT_VERSIONS = {"1.6", "1.7"}
+MAX_SOURCE_BYTES = 256 << 20   # a generator document above this is refused unread, at ingest and by every verifier
 CYCLONEDX_COMPONENT_TYPES = {"application", "framework", "library", "container", "platform", "operating-system", "device",
                              "device-driver", "firmware", "file", "machine-learning-model", "data", "cryptographic-asset"}
 
@@ -372,6 +373,8 @@ def _load_document(path: str, raw: Optional[bytes] = None) -> Tuple[bytes, Any]:
     (ValueError), never a crash."""
     from .ledger import parse_line
     if raw is None:
+        if os.path.getsize(path) > MAX_SOURCE_BYTES:
+            raise ValueError(f"document exceeds {MAX_SOURCE_BYTES} bytes: refused unread (third-party input is bounded before it is read)")
         with open(path, "rb") as f:
             raw = f.read()
     try:
@@ -400,7 +403,8 @@ def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:
 
 def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: Optional[bytes] = None) -> SBOMRecord:
     """Ingest a CycloneDX JSON (1.2 … 1.7) from ANY generator: components are walked recursively (a generator may
-    nest `components[].components`), malformed components are skipped, a malformed document raises. The record's
+    nest `components[].components`), a component without a name is skipped (an unknown `type` is indexed as
+    "library" — the declared value survives in `source.component_types` and in the stored bytes), a malformed document raises. The record's
     `source` says what the document declared (spec version, generator, total/nested component count, dependency
     edges, component types) and how many duplicates (same name+version+purl at two locations, as Syft emits for a
     workflow file referenced twice) the index merged — the count the auditor reads is the generator's, not ours."""

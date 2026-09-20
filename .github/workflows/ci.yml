@@ -32,6 +32,18 @@ jobs:
           assert subprocess.run(base + ["verify", pack]).returncode != 0, "tampered pack must FAIL"
           print("gate ok")
           PY
+  test-sign-only:
+    # cryptography present, no jsonschema and no cryptovalid wheel: the schema/interop tests skip, everything else runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Unit tests with cryptography only
+        run: |
+          pip install ".[sign]"
+          python -c "import jsonschema" 2>/dev/null && { echo "jsonschema must not be installed here"; exit 1; } || true
+          for t in tests/test_*.py; do echo "== $t"; python "$t"; done
   test-minimal:
     # the optional-dependency paths, measured: no cryptography (signing/seal/tip tests skip, everything else runs),
     # no jsonschema, no cryptovalid wheel — a regression in the fallback code or in the skip detection goes red here

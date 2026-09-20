@@ -154,14 +154,21 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 	} else if lp != "" && isFile(lp) {
 		f, _ := os.Open(lp)
 		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 1<<20), 64<<20)
+		sc.Buffer(make([]byte, 1<<20), maxLineBytes+2) // content up to the bound plus "\r\n": exactly 64 MiB of content is accepted
 		var entries []*Object
 		var failures []string
 		prev, n := genesis, 0
 		for sc.Scan() {
 			line := sc.Bytes()
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
 			if len(strings.TrimSpace(string(line))) == 0 {
 				continue
+			}
+			if len(line) > maxLineBytes {
+				failures = append(failures, fmt.Sprintf("entry %d: line exceeds %d bytes", n, maxLineBytes))
+				break
 			}
 			e, err := parseObject(line)
 			if err != nil {
@@ -211,7 +218,7 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 				if h, err := digest("sha3_256", d, "record_sha3"); err != nil || h != rs {
 					bound = false
 				}
-				if ap, _ := getS(d, "anchored_pack_sha3"); k == "cra_pack_anchor" && ap == declared {
+				if ap, _ := getS(d, "anchored_pack_sha3"); k == "cra_pack_anchor" && hex64.MatchString(declared) && ap == declared {
 					anchorIdx, _ = getInt(e, "idx")
 				}
 			}
@@ -308,8 +315,10 @@ func checkTip(count int, first, last, tipPath, pubHex string) (bool, string) {
 	if !okN || n < 0 || !ok1 || !ok2 || !ok3 || !ok4 || !hex64.MatchString(lid) || !hex64.MatchString(th) || !instantRe.MatchString(ts) {
 		return false, "tip_invalid: bad fields"
 	}
-	if lk, _ := getS(tip, "log_pubkey_hex"); lk != "" && lk != pubHex {
-		return false, "tip_invalid: tip log key differs from the trusted log key"
+	if v, has := tip.Vals["log_pubkey_hex"]; has && v != nil { // "" = absent (cryptovalid profile); a non-string never equals the key
+		if lk, ok := v.(string); !(ok && (lk == "" || lk == pubHex)) {
+			return false, "tip_invalid: tip log key differs from the trusted log key"
+		}
 	}
 	payload := []byte(fmt.Sprintf(`{"entries":%d,"kind":"%s","ledger_id":"%s","tip_sha256":"%s","ts":"%s"}`, n, tipKind, lid, th, ts))
 	if !edOK(pubHex, payload, sig) {
@@ -369,6 +378,9 @@ func verifySidecar(packPath string, pack *Object, declared string, trust map[str
 	if f, ok := side.Vals["fingerprint"]; ok && f != nil && f != fpHex {
 		return "FAIL", "declared fingerprint does not match the signing key", false
 	}
+	if _, isStr := side.Vals["signer_id"].(string); !isStr {
+		return "FAIL", "signer_id must be a string", false
+	}
 	if haveTrust {
 		sid, _ := getS(side, "signer_id")
 		exp, ok := trust[sid]
@@ -387,6 +399,7 @@ func ifs(c bool, a, b string) string {
 	return b
 }
 
+const maxLineBytes = 64 << 20    // cryptovalid MaxLineBytes: content of one JSONL line, terminator excluded
 const maxSourceBytes = 256 << 20 // a stored generator document above this is refused unread (never a hang on /dev/zero)
 
 // sourceDocuments: the SBOM source documents recorded by hash must, when present next to the ledger, hash to it.

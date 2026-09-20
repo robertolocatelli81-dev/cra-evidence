@@ -130,7 +130,7 @@ class Ledger:
             entry = {"idx": idx, "ts": ts or _now_ts(), "prev_hash": prev, "data": data}
             entry["self_hash"] = entry_hash(entry)
             line = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8") + b"\n"
-            if len(line) > MAX_LINE_BYTES:
+            if len(line) - 1 > MAX_LINE_BYTES:   # content without the terminator
                 raise ValueError(f"record would exceed {MAX_LINE_BYTES} bytes on one line: the verifiers refuse it, so it is not written")
             f.seek(0, os.SEEK_END)
             if unterminated:
@@ -151,7 +151,7 @@ class Ledger:
         with open(self.path, "rb") as f:
             for raw in f:
                 if raw.strip():
-                    if len(raw) > MAX_LINE_BYTES:
+                    if len(raw.rstrip(b"\r\n")) > MAX_LINE_BYTES:   # the bound is on the line's content, terminator excluded, in all four verifiers
                         raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
                     yield parse_line(raw.decode("utf-8"))   # NaN/Infinity are not JSON: fail
 

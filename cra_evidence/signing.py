@@ -15,7 +15,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+import re
+
 from .ledger import parse_line
+
+HEX64_RE = re.compile(r"[0-9a-f]{64}")
+INSTANT_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})")
 from .canonical import canonical_bytes, sha3_hex
 
 TIP_KIND = "cryptovalid_tip/1"
@@ -74,15 +79,22 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
         return {"ok": False, "error": "tip_untrusted: no trusted log key given"}
     if not isinstance(tip, dict) or tip.get("kind") != TIP_KIND:
         return {"ok": False, "error": "tip_invalid: not a cryptovalid_tip/1 document"}
-    if tip.get("log_pubkey_hex") not in (None, trusted_pubkey_hex):
+    # field TYPES as the three independent verifiers require them (a string "3" is not an entry count, a bool is not an int)
+    n = tip.get("entries")
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0 or not all(isinstance(tip.get(k), str) for k in ("ledger_id", "tip_sha256", "ts", "signature_hex")):
+        return {"ok": False, "error": "tip_invalid: bad field types"}
+    if not (HEX64_RE.fullmatch(tip["ledger_id"]) and HEX64_RE.fullmatch(tip["tip_sha256"]) and INSTANT_RE.fullmatch(tip["ts"])):
+        return {"ok": False, "error": "tip_invalid: bad fields"}
+    lk = tip.get("log_pubkey_hex")
+    if lk not in (None, "") and lk != trusted_pubkey_hex:   # "" = absent (cryptovalid profile, as Go/JS); a non-string never equals the key
         return {"ok": False, "error": "tip_invalid: tip log key differs from the trusted log key"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(trusted_pubkey_hex)).verify(
-            bytes.fromhex(tip["signature_hex"]), tip_payload(int(tip["entries"]), tip["ledger_id"], tip["tip_sha256"], tip["ts"]))
+            bytes.fromhex(tip["signature_hex"]), tip_payload(n, tip["ledger_id"], tip["tip_sha256"], tip["ts"]))
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"tip_invalid: {type(e).__name__}"}
-    if int(tip["entries"]) != entries:
-        return {"ok": False, "error": "tail_truncated" if entries < int(tip["entries"]) else "unsealed_tail"}
+    if n != entries:
+        return {"ok": False, "error": "tail_truncated" if entries < n else "unsealed_tail"}
     if tip["ledger_id"] != ledger_id:
         return {"ok": False, "error": "tip_of_another_ledger"}
     if tip["tip_sha256"] != tip_sha256:
@@ -111,7 +123,9 @@ def signed_payload(side: Dict[str, Any]) -> bytes:
 
 def sign_pack(pack_path: str, key: Tuple[Any, str], signer_id: str) -> Dict[str, Any]:
     sk, pk = key
-    pack = json.loads(Path(pack_path).read_text(encoding="utf-8"))
+    if not isinstance(signer_id, str) or not signer_id:
+        raise ValueError("signer_id must be a non-empty string")
+    pack = parse_line(Path(pack_path).read_text(encoding="utf-8"))
     digest = pack_digest(pack)
     if pack.get("pack_sha3") != digest:
         raise ValueError("pack_sha3 does not match the pack content: refusing to sign a broken pack")
@@ -153,6 +167,8 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
     fp = hashlib.sha256(bytes.fromhex(side["public_key_hex"])).hexdigest()[:16]   # recomputed, never echoed
     if side.get("fingerprint") not in (None, fp):
         return {"status": "FAIL", "detail": "declared fingerprint does not match the signing key"}
+    if not isinstance(side.get("signer_id"), str):
+        return {"status": "FAIL", "detail": "signer_id must be a string"}
     out = {"status": "PASS", "signer_id": side.get("signer_id"), "fingerprint": fp, "trusted": False}
     if trust_store is not None:
         expected = trust_store.get(side.get("signer_id", ""))

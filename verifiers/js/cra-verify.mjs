@@ -188,7 +188,8 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
   } else if (lp && isFile(lp)) {
     const entries = [], failures = [];
     let prev = GENESIS, n = 0;
-    for (const line of readFileSync(lp, "utf-8").split("\n")) {
+    for (let line of readFileSync(lp, "utf-8").split("\n")) {
+      if (line.endsWith("\r")) line = line.slice(0, -1);   // the bound is on the content, terminator (\n or \r\n) excluded
       if (!line.trim()) continue;
       if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }
       let e;
@@ -210,7 +211,7 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
         if (RECORD_KINDS.has(d.kind)) {
           let rh = null; try { rh = sha3(Buffer.from(canon(without(d, "record_sha3")), "utf-8")); } catch { rh = null; }
           if (rh !== d.record_sha3) bound = false;
-          if (d.kind === "cra_pack_anchor" && d.anchored_pack_sha3 === pack.pack_sha3) anchorIdx = e.idx;
+          if (d.kind === "cra_pack_anchor" && typeof pack.pack_sha3 === "string" && HEX64.test(pack.pack_sha3) && d.anchored_pack_sha3 === pack.pack_sha3) anchorIdx = e.idx;
         }
       }
       if (!bound) layers.push(L("ledger-chain", "FAIL", "a record's record_sha3 does not match its content"));
@@ -221,8 +222,7 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
       layers.push(L("pack-ledger-state", okState ? "PASS" : "FAIL", `declared entries=${ne} last=${String(pack.ledger_last_self_hash).slice(0, 12)}…; anchor idx=${anchorIdx}`));
       layers.push(sourceDocuments(lp, entries, requireSources, isFile));
       const tipPath = lp + ".tip.json";
-      if (!entries.length) layers.push(L("signed-tip", "FAIL", "ledger has no entries"));
-      else if (logPubkeyHex) {
+      if (logPubkeyHex) {
         if (!existsSync(tipPath)) layers.push(L("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"));
         else {
           const r = checkTip(entries.length, entries[0].self_hash, entries[entries.length - 1].self_hash, tipPath, logPubkeyHex);
@@ -252,7 +252,7 @@ function checkTip(count, first, last, tipPath, pubHex) {
   for (const k of ["entries", "ledger_id", "tip_sha256", "ts", "signature_hex"]) if (!(k in tip)) return { ok: false, error: `tip_invalid: tip missing field ${k}` };
   if (!Number.isInteger(tip.entries) || tip.entries < 0 || !["ledger_id", "tip_sha256", "ts", "signature_hex"].every((k) => typeof tip[k] === "string")) return { ok: false, error: "tip_invalid: bad field types" };
   if (!HEX64.test(tip.ledger_id) || !HEX64.test(tip.tip_sha256) || parseInstant(tip.ts) === null) return { ok: false, error: "tip_invalid: not a cryptovalid_tip/1 document" };
-  if (tip.log_pubkey_hex && tip.log_pubkey_hex !== pubHex) return { ok: false, error: "tip_invalid: tip log key differs from the trusted log key" };
+  if (tip.log_pubkey_hex !== undefined && tip.log_pubkey_hex !== null && tip.log_pubkey_hex !== "" && tip.log_pubkey_hex !== pubHex) return { ok: false, error: "tip_invalid: tip log key differs from the trusted log key" };   // "" = absent (cryptovalid profile); a non-string never equals the key
   if (!edOk(pubHex, tipPayload(tip.entries, tip.ledger_id, tip.tip_sha256, tip.ts), tip.signature_hex)) return { ok: false, error: "tip_invalid: tip signature invalid" };
   if (tip.ledger_id !== first) return { ok: false, error: "tip_of_another_ledger" };
   if (count < tip.entries) return { ok: false, error: `tail_truncated: file has ${count} entries, the signed tip commits to ${tip.entries}` };
@@ -273,7 +273,8 @@ function verifySidecar(packPath, pack, trustStore) {
   const fp = sha256(Buffer.from(side.public_key_hex, "hex")).slice(0, 16);
   if (side.fingerprint !== undefined && side.fingerprint !== null && side.fingerprint !== fp) return { status: "FAIL", detail: "declared fingerprint does not match the signing key" };
   const out = { status: "PASS", signer_id: side.signer_id, fingerprint: fp, trusted: false };
-  if (trustStore !== null) { const exp = trustStore[String(side.signer_id ?? "")]; out.trusted = Boolean(exp) && exp === side.public_key_hex; out.detail = out.trusted ? "trusted-signed" : "signed by a key NOT in the trust store"; }
+  if (typeof side.signer_id !== "string") return { status: "FAIL", detail: "signer_id must be a string" };
+  if (trustStore !== null) { const exp = trustStore[side.signer_id]; out.trusted = Boolean(exp) && exp === side.public_key_hex; out.detail = out.trusted ? "trusted-signed" : "signed by a key NOT in the trust store"; }
   else out.detail = "signed (signer not compared with a trust store)";
   return out;
 }

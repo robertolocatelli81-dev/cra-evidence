@@ -240,6 +240,19 @@ class TestSourceStore(unittest.TestCase):
         with open(source_file(self.led, rec["data"]["source"]["sha256"]), "rb") as f:
             self.assertEqual(hashlib.sha256(f.read()).hexdigest(), rec["data"]["source"]["sha256"])
 
+    def test_an_oversized_document_is_refused_unread(self):
+        from cra_evidence.sbom import MAX_SOURCE_BYTES
+        big = os.path.join(self.d, "big.json")
+        with open(big, "wb") as f:
+            f.truncate(MAX_SOURCE_BYTES + 1)                                                  # sparse: nothing is read if the guard holds
+        with self.assertRaises(ValueError) as cm:
+            sbom_from_cyclonedx(big, "tiny-cra-sample", "1.0.0")
+        self.assertIn("refused unread", str(cm.exception))
+        sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
+        from dataclasses import replace
+        with self.assertRaises(ValueError):                                                   # and at record time, before the read
+            self.lk.record_sbom(replace(sb, source={**sb.source, "sha256": "0" * 64}), source_path=big)
+
     def test_deeply_nested_and_duplicate_key_documents_are_malformed_not_crashes(self):
         deep = os.path.join(self.d, "deep.json")
         with open(deep, "w") as f:
@@ -260,7 +273,9 @@ class TestSourceStore(unittest.TestCase):
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         for bad in (replace(sb, components=[SBOMComponent("left-pad", "9.9.9")]),
                     replace(sb, components=sb.components[:-1]),
-                    replace(sb, source={**sb.source, "generator": "forged"})):
+                    replace(sb, source={**sb.source, "generator": "forged"}),
+                    replace(sb, edges=[["", "base64-js"]]),                                          # round 3 (Opus/Sonnet): a forged graph rode through
+                    replace(sb, depth="external:cyclonedx:trusted-tool")):
             with self.assertRaises(ValueError) as cm:
                 self.lk.record_sbom(bad, source_path=self.src)
             self.assertIn("does not match the document", str(cm.exception))
@@ -421,7 +436,6 @@ class TestExport(unittest.TestCase):
     def test_pep508_markers_decide_the_edges_of_this_interpreter(self):
         from cra_evidence.sbom import marker_applies
         self.assertTrue(marker_applies(""))
-        self.assertTrue(marker_applies("platform_python_implementation != 'PyPy'") in (True, False))
         self.assertEqual(marker_applies("python_version < '2.0'"), False)                         # cryptography's typing-extensions marker shape
         self.assertEqual(marker_applies("python_version >= '3.0' and os_name == 'posix'"), os.name == "posix")
         self.assertEqual(marker_applies("(python_version < '2.0' or python_version >= '3.0') and python_version >= '3.0'"), True)
