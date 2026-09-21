@@ -86,6 +86,8 @@ class SBOMRecord:
             raise ValueError(f"spec_version must be one of {sorted(CYCLONEDX_EXPORT_VERSIONS)}")
         if len(self.product_version) > SCHEMA_TEXT_MAX:
             raise ValueError(f"product_version longer than {SCHEMA_TEXT_MAX} characters cannot be exported as CycloneDX (schema maxLength)")
+        if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", self.record_id):
+            raise ValueError("record_id must be a UUID (it becomes the CycloneDX serialNumber urn:uuid:…)")
         from . import __version__
         # a declared-but-NOT-INSTALLED dependency is not a component of the product: it is NAMED in a property, never
         # listed as a component with a fabricated version (resolved_components() already excludes it from the floor)
@@ -126,23 +128,32 @@ class SBOMRecord:
             out["metadata"]["properties"].append({"name": "cra-evidence:declared_not_installed", "value": ", ".join(not_installed)})
         if self.edges:
             # `dependsOn: []` is the POSITIVE statement "has no dependencies" (CycloneDX dependency definition): it is
-            # emitted only for a component whose Requires-Dist was actually read; every other component is left out
-            # of the graph and its composition is declared `unknown`
+            # emitted only for a component whose Requires-Dist was actually read AND whose every declared child is
+            # exportable; a parent with a child that is not a component (declared but NOT-INSTALLED) has an
+            # incomplete list, so it is left out of the graph and declared `unknown` with the non-walked ones
             ref_of = {_norm_key(c.name): r for c, r in zip(comps, refs)}
             ref_of[""] = primary_ref
             deps: Dict[str, List[str]] = {primary_ref: []}
             for key in self.source.get("requires_dist_read", []):
                 if key in ref_of:
                     deps.setdefault(ref_of[key], [])
+            incomplete = set()
             for parent, child in self.edges:
                 pr, cr = ref_of.get(parent), ref_of.get(child)
-                if pr is None or cr is None or pr not in deps:
+                if pr is None or pr not in deps:
+                    continue
+                if cr is None:                  # the child was declared but is not a component of the product
+                    incomplete.add(pr)
                     continue
                 if cr not in deps[pr]:
                     deps[pr].append(cr)
-            out["dependencies"] = [{"ref": r, "dependsOn": d} for r, d in deps.items()]
-            if len(deps) < len(refs) + 1:   # "unknown": completeness inconclusive (CycloneDX enum) — "incomplete" would assert that more exist
-                out["compositions"] = [{"aggregate": "unknown", "dependencies": [r for r in refs if r not in deps]}]
+            for r in incomplete:
+                deps.pop(r, None)
+            if deps:
+                out["dependencies"] = [{"ref": r, "dependsOn": d} for r, d in deps.items()]
+            unknown = [r for r in [primary_ref] + refs if r not in deps]
+            if unknown:   # "unknown": completeness inconclusive (CycloneDX enum) — "incomplete" would assert that more exist
+                out["compositions"] = [{"aggregate": "unknown", "dependencies": unknown}]
         return out
 
 
@@ -547,11 +558,13 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     roots |= {r.get("spdxElementId") for r in rels if r.get("relationshipType") == "DESCRIBED_BY" and r.get("relatedSpdxElement") == "SPDXRef-DOCUMENT" and isinstance(r.get("spdxElementId"), str)}
     roots |= {x for x in _lst(d.get("documentDescribes")) if isinstance(x, str)}
     comps = []
+    root_purpose = ""
     for p in _lst(d.get("packages")):
         if not isinstance(p, dict) or not _clean(p.get("name")):
             continue                                     # counted by the caller as packages_unnamed
         sid = p.get("SPDXID")
         if isinstance(sid, str) and sid in roots:
+            root_purpose = root_purpose or _s(p.get("primaryPackagePurpose")).upper()   # the product's declared purpose → metadata.component.type
             continue                                     # the product itself is metadata, not a dependency
         refs = [r for r in _lst(p.get("externalRefs")) if isinstance(r, dict)]
         purl = next((r.get("referenceLocator", "") for r in refs if r.get("referenceType") == "purl"), "")
@@ -569,7 +582,7 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     depth = f"external:{_clean(d.get('spdxVersion')) or 'SPDX-2.x'}:{_agent_name(tool.replace('Tool:', '')) or 'unknown-tool'}"
     if not roots:
         depth += ":no-root-declared"   # the document names no described product: it may be counted among the components (declared)
-    return comps, depth
+    return comps, depth, root_purpose
 
 
 def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
@@ -610,7 +623,12 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
                     if expr and (rt == "hasConcludedLicense" or frm not in lic_of):
                         lic_of[frm] = expr
     comps = []
+    root_purpose = ""
     for e in g:
+        if _ld_type(e) in ("software_Package", "Package") and _ld_id(e) in roots and not root_purpose:
+            rp = _ld_prop(e, "software_primaryPurpose", "primaryPurpose")
+            rp = rp[0] if isinstance(rp, list) and rp else rp
+            root_purpose = _s(rp).rsplit("/", 1)[-1].upper().replace("OPERATINGSYSTEM", "OPERATING-SYSTEM")
         if _ld_type(e) not in ("software_Package", "Package") or not _clean(e.get("name")) or _ld_id(e) in roots:
             continue
         sha = next((h.get("hashValue", "") for h in _lst(_ld_prop(e, "verifiedUsing"))
@@ -632,7 +650,7 @@ def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     depth = f"external:SPDX-3.0:{_clean(tools[0]) if tools else 'unknown-tool'}"
     if not roots:
         depth += ":no-root-declared"
-    return comps, depth
+    return comps, depth, root_purpose
 
 
 def sbom_from_spdx(path: str, product_id: str, product_version: str, raw: Optional[bytes] = None) -> SBOMRecord:
@@ -648,14 +666,14 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str, raw: Option
     if not isinstance(d, dict):
         raise ValueError("SPDX document is not a JSON object")
     if str(d.get("spdxVersion", "")).startswith("SPDX-2"):
-        comps, depth = _spdx2_components(d)
+        comps, depth, root_purpose = _spdx2_components(d)
         pk = [x for x in _lst(d.get("packages")) if isinstance(x, dict)]
         rels = [r for r in _lst(d.get("relationships")) if isinstance(r, dict)]
         source = {"format": "spdx-json", "spec_version": _clean(d.get("spdxVersion")), "packages_declared": len(pk),
                   "packages_unnamed": sum(1 for x in pk if not _clean(x.get("name"))), "relationships_declared": len(rels),
                   "dependency_edges": sum(1 for r in rels if str(r.get("relationshipType", "")).upper() in ("DEPENDS_ON", "DEPENDENCY_OF"))}
     elif "@graph" in d:
-        comps, depth = _spdx3_components(d)
+        comps, depth, root_purpose = _spdx3_components(d)
         g = [e for e in _lst(d.get("@graph")) if isinstance(e, dict)]
         source = {"format": "spdx-jsonld", "spec_version": "SPDX-3.0",
                   "packages_declared": sum(1 for e in g if _ld_type(e) in ("software_Package", "Package")),
@@ -672,7 +690,10 @@ def sbom_from_spdx(path: str, product_id: str, product_version: str, raw: Option
     if gv:   # "syft-1.52.0" / "trivy-0.74.0" → name + version
         source["generator"], source["generator_version"] = gv.group(1).rstrip("-"), gv.group(2)
     source.update(_fingerprint_bytes(raw, path))
-    return SBOMRecord(product_id=product_id, product_version=product_version, components=comps, depth=depth, source=source)
+    if root_purpose:
+        source["root_purpose_declared"] = root_purpose     # kept as declared even when it has no CycloneDX counterpart (Trivy: SOURCE)
+    return SBOMRecord(product_id=product_id, product_version=product_version, components=comps, depth=depth, source=source,
+                      product_type=SPDX_PURPOSE_TO_TYPE.get(root_purpose, "application"))
 
 
 def reingest(raw: bytes, path: str, fmt: str, product_id: str, product_version: str) -> SBOMRecord:

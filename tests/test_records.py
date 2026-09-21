@@ -11,11 +11,11 @@ AW = "2026-09-12T08:00:00Z"   # explicit instants only: never `now()` in a test
 class TestSBOM(unittest.TestCase):
     def test_cyclonedx_min_and_dedup_and_hash_deterministic(self):
         c = [SBOMComponent("a", "1.0", purl="pkg:pypi/a@1.0"), SBOMComponent("a", "1.0", purl="pkg:pypi/a@1.0"), SBOMComponent("b", "2", sha256="ab" * 32)]
-        r = SBOMRecord("prod", "1", c, record_id="rid", generated_utc="2026-09-15T00:00:00+00:00")
+        r = SBOMRecord("prod", "1", c, record_id="00000000-0000-4000-8000-000000000000", generated_utc="2026-09-15T00:00:00+00:00")
         cdx = r.to_cyclonedx_min()
         self.assertEqual(cdx["bomFormat"], "CycloneDX"); self.assertEqual(len(cdx["components"]), 2)
         self.assertEqual(cdx["components"][1]["hashes"][0]["content"], "ab" * 32)
-        self.assertEqual(r.canonical_hash(), SBOMRecord("prod", "1", c, record_id="rid", generated_utc="2026-09-15T00:00:00+00:00").canonical_hash())
+        self.assertEqual(r.canonical_hash(), SBOMRecord("prod", "1", c, record_id="00000000-0000-4000-8000-000000000000", generated_utc="2026-09-15T00:00:00+00:00").canonical_hash())
 
     def test_installed_floor_is_honest(self):
         r = sbom_from_installed("p", "1", ["json", "this-package-does-not-exist-xyz"])

@@ -200,6 +200,13 @@ class TestSourceStore(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(layer(r, "source-documents")["status"], "FAIL")
 
+    def test_a_directory_at_the_stored_path_is_a_fail_not_absence(self):
+        """round 10 (Sonnet): "something is there but it is not the document" was reported as honest absence"""
+        rec, pack = self._record_and_pack()
+        fp = source_file(self.led, rec["data"]["source"]["sha256"]); os.remove(fp); os.makedirs(fp)
+        r = verify_pack(pack)
+        self.assertFalse(r["ok"]); self.assertIn("not a regular file", layer(r, "source-documents")["detail"])
+
     def test_no_store_keeps_the_hash(self):
         rec, pack = self._record_and_pack(store=False)
         self.assertEqual(len(rec["data"]["source"]["sha256"]), 64)
@@ -284,6 +291,12 @@ class TestSourceStore(unittest.TestCase):
             SBOMRecord("p", "v" * 1100, [SBOMComponent("a", "1")]).to_cyclonedx_min()
         syft = ingest(os.path.join(HERE, "fixtures", "real_tools", "syft-1.52.0_cyclonedx-1.7.json"))
         self.assertEqual(syft.product_type, "file")                                           # Syft declares the scanned directory as `file`
+        spdx = ingest(os.path.join(HERE, "fixtures", "real_tools", "syft-1.52.0_spdx-2.3.json"))
+        self.assertEqual(spdx.product_type, "file")                                           # the same scan in SPDX: primaryPackagePurpose FILE (round 10: it was a default)
+        trivy = ingest(os.path.join(HERE, "fixtures", "real_tools", "trivy-0.74.0_spdx-2.3.json"))
+        self.assertEqual((trivy.product_type, trivy.source["root_purpose_declared"]), ("application", "SOURCE"))   # no CycloneDX counterpart: default, declared value kept
+        with self.assertRaises(ValueError):
+            SBOMRecord("p", "1", [SBOMComponent("a", "1")], record_id="not-a-uuid").to_cyclonedx_min()
 
     def test_deeply_nested_and_duplicate_key_documents_are_malformed_not_crashes(self):
         deep = os.path.join(self.d, "deep.json")
@@ -457,19 +470,25 @@ class TestExport(unittest.TestCase):
             import cryptography  # noqa: F401
         except ImportError:
             self.skipTest("cryptography not installed (the installed-floor part of this test needs it)")
-        inst = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"]).to_cyclonedx_min()   # top-level floor: all direct…
-        self.assertEqual(inst["dependencies"], [{"ref": inst["metadata"]["component"]["bom-ref"], "dependsOn": [c["bom-ref"] for c in inst["components"]]}])
-        # a declared-but-NOT-INSTALLED name is NOT a component of the product (round 9, Sonnet: it was exported with a fabricated version)
-        self.assertNotIn("no-such-dist-xyz", json.dumps(inst["components"]) + json.dumps(inst["dependencies"]))
+        inst = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"]).to_cyclonedx_min()   # top-level floor with an absent name…
+        # a declared-but-NOT-INSTALLED name is NOT a component of the product (round 9, Sonnet: it was exported with a fabricated version),
+        # and the product's own list is then INCOMPLETE: no positive dependsOn for it, it goes to the unknown composition (round 10, Opus)
+        self.assertNotIn("no-such-dist-xyz", json.dumps(inst["components"]) + json.dumps(inst.get("dependencies", [])))
         self.assertIn({"name": "cra-evidence:declared_not_installed", "value": "no-such-dist-xyz"}, inst["metadata"]["properties"])
-        # …and NOTHING else: `dependsOn: []` would assert "no dependencies" for a component whose Requires-Dist was never read
-        self.assertEqual(inst["compositions"], [{"aggregate": "unknown", "dependencies": [c["bom-ref"] for c in inst["components"]]}])   # not "incomplete": that would assert more exist
+        self.assertNotIn("dependencies", inst)
+        self.assertEqual(inst["compositions"], [{"aggregate": "unknown", "dependencies": ["p@1"] + [c["bom-ref"] for c in inst["components"]]}])   # not "incomplete": that would assert more exist
+        clean = sbom_from_installed("p", "1", ["cryptography"]).to_cyclonedx_min()                     # every declared child exportable: the positive list is complete
+        self.assertEqual(clean["dependencies"], [{"ref": "p@1", "dependsOn": [c["bom-ref"] for c in clean["components"]]}])
         tr = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"], transitive=True)
-        deps = {d["ref"]: d["dependsOn"] for d in tr.to_cyclonedx_min("1.7")["dependencies"]}
         ex = tr.to_cyclonedx_min("1.7")
-        self.assertNotIn("no-such-dist-xyz", json.dumps(ex["components"]) + json.dumps(ex["dependencies"]))   # named only in the property
+        self.assertNotIn("no-such-dist-xyz", json.dumps(ex["components"]) + json.dumps(ex.get("dependencies", [])))   # named only in the property
+        deps = {d["ref"]: d["dependsOn"] for d in ex.get("dependencies", [])}
+        self.assertNotIn("p@1", deps)                                                                  # the product's list would be incomplete
+        self.assertIn("p@1", ex["compositions"][0]["dependencies"])
         cry = next(c for c in tr.components if c.name == "cryptography")
-        self.assertEqual(deps["p@1"], ["pkg:pypi/cryptography@" + cry.version])
+        self.assertIn("pkg:pypi/cryptography@" + cry.version, deps)                                    # a walked parent whose children are all exportable keeps its list
+        tr = sbom_from_installed("p", "1", ["cryptography"], transitive=True)
+        deps = {d["ref"]: d["dependsOn"] for d in tr.to_cyclonedx_min("1.7")["dependencies"]}
         self.assertIn("cryptography", tr.source["requires_dist_read"])
         self.assertNotIn("no-such-dist-xyz", tr.source["requires_dist_read"])
         for key in tr.source["requires_dist_read"]:                                                    # every walked component IS in the graph

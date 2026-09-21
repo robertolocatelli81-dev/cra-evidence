@@ -74,8 +74,16 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
     present, bad, absent = 0, [f"{malformed} record(s) with a malformed source hash"] if malformed else [], 0
     for h in sorted(wanted):
         fp = source_file(ledger_path, h)
-        if not os.path.isfile(fp):
-            absent += 1
+        try:
+            os.lstat(fp)
+        except FileNotFoundError:
+            absent += 1                         # genuinely absent (hash-only evidence)
+            continue
+        except OSError as e:
+            bad.append(f"{h[:16]}… stored path unusable ({e.errno})")
+            continue
+        if not os.path.isfile(fp):              # something IS there but it is not a regular file: never "absent"
+            bad.append(f"{h[:16]}… stored path is not a regular file")
             continue
         try:
             if os.path.getsize(fp) > MAX_SOURCE_BYTES:

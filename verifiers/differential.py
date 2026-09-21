@@ -158,6 +158,15 @@ def cases(base):
     case("sbom_source_absent", lambda d: build_with_source(d, "absent"))
     case("sbom_source_absent_required", lambda d: build_with_source(d, "absent"), require_sources=True)
     case("sbom_source_intact_required", lambda d: build_with_source(d), require_sources=True)
+    def source_replaced_by_dir(d):   # something is there but it is not the document: FAIL, never "absent" (round 10, Sonnet)
+        build_with_source(d); sd = os.path.join(d, "l.jsonl.sources"); f = os.listdir(sd)[0]; os.remove(os.path.join(sd, f)); os.makedirs(os.path.join(sd, f))
+    case("sbom_source_replaced_by_directory", source_replaced_by_dir)
+    def source_symlink_to_dir(d):
+        build_with_source(d); sd = os.path.join(d, "l.jsonl.sources"); f = os.listdir(sd)[0]; os.remove(os.path.join(sd, f)); os.symlink(d, os.path.join(sd, f))
+    case("sbom_source_symlink_to_directory", source_symlink_to_dir)
+    def source_dangling(d):
+        build_with_source(d); sd = os.path.join(d, "l.jsonl.sources"); f = os.listdir(sd)[0]; os.remove(os.path.join(sd, f)); os.symlink(os.path.join(d, "nowhere"), os.path.join(sd, f))
+    case("sbom_source_dangling_symlink", source_dangling)
     case("sbom_source_hash_is_int", lambda d: build_with_raw_source(d, 123))
     case("sbom_source_hash_is_null", lambda d: build_with_raw_source(d, None))
     case("sbom_source_hash_is_empty", lambda d: build_with_raw_source(d, ""))
@@ -459,7 +468,7 @@ def cases(base):
         build(d); return {"pack": "-"}
     case("cli_pack_is_a_dash", dash_pack, cli=True)
     def long_name(d):   # a 250-byte pack name is legal; its sidecar name (263 bytes) is not: lstat ENAMETOOLONG must be the same verdict in the four
-        lk, key, pack, pk = build(d); newp = os.path.join(d, "p" * 246 + ".json"); os.rename(pack, newp); shutil.move(os.path.join(d, "l.jsonl"), os.path.join(d, "l.jsonl"))
+        lk, key, pack, pk = build(d); newp = os.path.join(d, "p" * 246 + ".json"); os.rename(pack, newp)
         j = json.load(open(newp)); json.dump(j, open(newp, "w")); return {"pack": newp}
     case("pack_name_too_long_for_sidecar", long_name)
     if os.geteuid() != 0:

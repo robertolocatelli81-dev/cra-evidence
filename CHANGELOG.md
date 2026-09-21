@@ -15,8 +15,8 @@ read. Export: CycloneDX 1.6 or 1.7 (official 1.7 schema vendored), with serialNu
 (unique), component types, CPEs, SPDX licence *expressions* (`Apache-2.0 OR BSD-3-Clause`), and `dependencies` only
 from edges the producer knows — the installed floor's Requires-Dist graph as walked, with PEP 508 markers evaluated for this interpreter (`packaging` when importable, else a small evaluator; an unevaluable marker keeps the edge and is counted): `dependsOn: []` is emitted only for a component whose metadata was read, everything else is declared an `unknown` composition (CycloneDX's own value for "inconclusive") — never re-invented for an ingested graph; the installed floor reads PEP 639
 `License-Expression` (cryptography ships it since 46.0.0 with the legacy `License` field empty, measured on PyPI metadata 20/09/2026 — with such a distribution 0.2.0 recorded no licence).
-Validated with the official CycloneDX CLI 0.33.1 and pyspdxtools 0.8.5 in CI (positive controls included) and with jsonschema in the tests.
-Six unmodified generator documents vendored as fixtures. Differential oracle: 134 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing; a stored document made unreadable), and the failing layers must
+Validated with the official CycloneDX CLI 0.33.1 and pyspdxtools 0.8.5 (CI steps with positive controls; run green on the v0.3.0 tag) and with jsonschema in the tests.
+Six unmodified generator documents vendored as fixtures. Differential oracle: 137 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing; a stored document made unreadable), and the failing layers must
 agree too (ablation caught; before the fix Go/Rust skipped a non-string hash while Python/JS failed — found by self-review and by Haiku in round 1). Interop re-measured against cryptovalid 0.15.0. Found by the round-1 review (Opus) and fixed: the Python reference parsed pack, sidecar, tip and trust store with plain `json.loads` (duplicate keys accepted, first-wins for a reader, last-wins for the verifier — JS/Go/Rust refuse them) → strict parser everywhere; Python `verify_tip` did not check `kind` / `log_pubkey_hex` (the three did); the Go verifier ignored the scanner error (a line above 64 MiB ended the scan silently and the prefix verified); a `source_path` could be bound to an index not read from it; an ingested SBOM recorded without `source_path` carried a hash nothing re-verified (Sonnet) — now refused; a generator document nested too deep crashed the ingest instead of raising (Sonnet) — malformed now; the JS verifier built a 65 M-node string on a 65 MiB pad and died (fast path added); all four verifiers and the producer now share cryptovalid's 64 MiB line bound. Round 2 (Opus, Sonnet): the JS verifier accepted integral floats (`10.0` parses to 10 and hashes alike) while the other
 three refused them → number tokens with `.`/`e` refused in JS and in the Python parser (generator documents excepted: they are
 bytes, never canonicalised); the trust store was read laxly by JS and Go (a duplicate `signer_id` gave `trusted-signed` there and
@@ -38,7 +38,7 @@ graph and profile label rode through with the right document) → covered; gener
 being read at ingest and at record time; an anchor is matched only against a 64-hex `pack_sha3` (a pack without one matched
 an anchor without one in three verifiers); a stale `__pycache__` had stamped the day's scored exports as 0.2.0 → cache
 cleared, exports regenerated and re-scored (Syft 5.3, cdxgen 5.5, Trivy 4.8, installed floor 4.5); 39 fields vs 44 glossary
-rows reconciled in the texts; CI runs three dependency configurations. Oracle after round 3: 66 cases in CI, 70 with
+rows reconciled in the texts; CI runs three dependency configurations. Oracle after round 3: 66 cases, 70 with
 `CRA_ORACLE_BIG=1`, 0 divergences.
 Round 4 (Opus, Sonnet, Haiku) — input hygiene was still four rules, not one: a blank ledger line was ASCII-whitespace in
 Python and Unicode-whitespace in the three (a U+00A0 line broke the chain in the reference and passed elsewhere) → blank =
@@ -56,7 +56,7 @@ was resolved four ways (a non-string, an array, a trailing slash) → must be a 
 everywhere; a sidecar missing `signed_utc` (or with a non-string field) threw past the JS signature check → an invalid
 signature; the tip `ts` is checked by shape in all four (JS validated the calendar alone). A public sentence "Round 4: no
 material issues" had been written before round 4 ran — removed; this paragraph is what round 4 found. Oracle after round 4:
-93 cases in CI, 98 with `CRA_ORACLE_BIG=1`, 0 divergences.
+93 cases, 98 with `CRA_ORACLE_BIG=1`, 0 divergences.
 Round 5 (Opus, Sonnet, Haiku): the Python reference could not parse the profile's own nesting bound — with the strict hooks
 CPython's JSON scanner stopped at depth 332 (the three verifiers accept 512), so a record the producer had written (a
 verbatim CSAF/VEX attachment, a deep `details`) verified in JS/Go/Rust and failed in the reference, and the next append
@@ -69,7 +69,7 @@ crashed the ingest (`TypeError`) → type guards on every SPDX field; the writer
 line rules (bounded, one terminator, ASCII blank); without `cryptography` a valid signature was reported "invalid"
 (`ModuleNotFoundError` caught as an invalid signature) → "present but NOT checkable here", with a vendored signed fixture
 (its tests were hidden from CI by a misplaced `__main__` block until round 7 — CI now runs `unittest discover` and asserts that every TestCase class ran); `--ledger ""` is a usage error in all four; `WITH` exceptions carrying a version
-(`Classpath-exception-2.0`) are recognised as SPDX expressions. Oracle after round 5: 99 cases in CI, 104 with
+(`Classpath-exception-2.0`) are recognised as SPDX expressions. Oracle after round 5: 99 cases, 104 with
 `CRA_ORACLE_BIG=1`, 0 divergences.
 Round 6 (Opus, Fable 5.1 — Sonnet and Haiku found nothing; the two found the same three and one more each): the JS
 verifier's key-dropping copy lost an own `__proto__` key (a pack or entry with such a key verified in JS alone — and a
@@ -85,7 +85,7 @@ list crashed the ingest and hostile non-string fields (`name: ["a"]`) were strin
 ingested-format record without a hash passed `--require-sources` → malformed; the writer's tail reader bounds the
 content length; the store compares sizes before bytes; an unreadable ledger is `ledger-chain` in the reference too;
 the README sentence "until a round found nothing material" was not true of the record → replaced by the dated outcome.
-Oracle after round 6: 122 cases in CI, 127 with `CRA_ORACLE_BIG=1`, 0 divergences.
+Oracle after round 6: 122 cases, 127 with `CRA_ORACLE_BIG=1`, 0 divergences.
 Round 7 (Opus, Fable 5.1; Sonnet and Haiku found nothing): "is there a sidecar?" was four rules (a legal 250-byte pack name
 makes the sidecar name exceed NAME_MAX: `verifier-exception` in Python, "not signed" in JS/Rust, unreadable in Go) → one rule,
 lstat ENOENT/ENOTDIR = no sidecar, any other error = FAIL, with a case; a run of spaces above 64 MiB was a blank line in JS/Rust
@@ -95,12 +95,12 @@ every TestCase class ran; two README sentences were false of the code ("four pro
 they produce one valid chain; the seal policy "defaults to the NIST IR 8547 dates for both the signature and the hash": the
 default bounds Ed25519 only and the verdict says the hash is not bounded) → rewritten; `version` is bounded to the schema's
 maxLength (1024) at ingest and the product version refused above it (an 1100-character version made a schema-invalid
-export); the index's `metadata.component.type` is the generator's (Syft declares the scanned directory as `file`), not a
-default; an SPDX 3.0 `identifier` list was still stringified into `cpe` → never; a lone surrogate escape in a generator
+export); the index's `metadata.component.type` is the generator's (Syft declares the scanned directory as `file`; the SPDX branch
+followed in round 10), not a default; an SPDX 3.0 `identifier` list was still stringified into `cpe` → never; a lone surrogate escape in a generator
 document was a `TypeError` at record time → malformed at ingest; the verifier reads the ledger once (chain, binding, anchor,
 sources and tip judge one snapshot); the example pack is now signed (an ephemeral key, its public key in `trust.json`) as
 its README already said; oracle hygiene: a stale Rust binary is refused like a stale Go one, the Python-CLI rows run from the
-repo root. Oracle after round 7: 123 cases in CI, 130 with `CRA_ORACLE_BIG=1`, 0 divergences.
+repo root. Oracle after round 7: 123 cases, 130 with `CRA_ORACLE_BIG=1`, 0 divergences.
 Round 8 (Opus, Fable 5.1; Sonnet and Haiku found nothing): the CI guard "every TestCase class ran" could not match the
 `unittest -v` line format of Python 3.11/3.12 (the first push would have gone red on two of three rows) → matches both
 formats, with a fake-class positive control; an unknown flag, an abbreviation (`--require-source`, `--log`) or a second
@@ -112,7 +112,7 @@ alone → the pack's directory is resolved through the filesystem (`realpath`) i
 `version: ""` → omitted; a `kind` that is not a string crashed `evidence_pack` → ignored in the counts; verifiers/README
 listed five gated big-line cases for seven; `SECURITY.md` pointed at a file that does not exist; the README claim "no wall
 clock in tests" was broader than the tests → "the deadline arithmetic never reads the wall clock". Oracle after round 8:
-129 cases in CI, 136 with `CRA_ORACLE_BIG=1`, 0 divergences.
+129 cases, 136 with `CRA_ORACLE_BIG=1`, 0 divergences.
 Round 9 (Opus, Sonnet; Haiku found nothing; 21/09/2026): the full-dependency CI job piped `unittest` into `tee` without
 `pipefail` — it could not go red → `shell: bash`, `set -o pipefail`, and the guard asserts the suite ended `OK`; the
 reference read the pack through `pathlib`, which normalises `p.json/` to `p.json` (the three answer ENOTDIR) → OS path
@@ -123,7 +123,17 @@ ingest paths; a record tampered with its `record_sha3` left stale and the whole 
 the four but exercised by no test or case (the test that claimed to test the binding was caught by the chain) → oracle
 case and unit test on the binding layer alone; a value flag followed by a flag, and a pack named `-`, are usage errors in
 all four; a stored copy is removed if the append that records it fails; the README's "five models in three rounds"
-now says it is 0.1.0's history. Oracle: 134 cases in CI, 141 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
+now says it is 0.1.0's history. Oracle after round 9: 134 cases, 141 with `CRA_ORACLE_BIG=1`, 0 divergences.
+Round 10 (Opus, Sonnet; Haiku found nothing): after round 9 a parent whose declared child is not installed kept a
+positive `dependsOn` list with the child silently dropped (the product's own list read "no dependencies" while one was
+declared) → such a parent is left out of the graph and declared `unknown`; the SPDX ingest never set the product's type
+(the same Syft scan gave `file` from CycloneDX and the default `application` from SPDX) → the root's
+`primaryPackagePurpose` / `software_primaryPurpose` maps to `metadata.component.type`, a purpose without a CycloneDX
+counterpart is kept as declared in `source.root_purpose_declared`; a stored source path that exists but is not a
+regular file (a directory, a symlink to one, a dangling symlink) was reported as honest absence in all four → FAIL, three
+cases; `record_id` must be a UUID (it becomes the schema-patterned `serialNumber`); the texts said "measured 20/09" and
+"in CI" of cases that exist since 21/09 and of a workflow not yet run on 0.3.0 → dated 21/09/2026, and "in CI" is stated
+only where this release's CI run is green on the tag. Oracle: 137 cases, 144 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
 FAQ: no API at initial release; glossary unchanged; Digital Omnibus 2025/0360(COD) still a proposal).
 
 ## 0.2.0 — 2026-09-15

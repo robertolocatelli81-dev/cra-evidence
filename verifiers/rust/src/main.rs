@@ -128,7 +128,12 @@ fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool)
     if malformed > 0 { bad.push(format!("{malformed} record(s) with a malformed source hash")); }
     for h in &wanted {
         let fp = format!("{lp}.sources/{h}.json");
-        if !Path::new(&fp).is_file() { absent += 1; continue; }
+        match std::fs::symlink_metadata(&fp) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => { absent += 1; continue; }   // genuinely absent
+            Err(e) => { bad.push(format!("{}… stored path unusable ({e})", &h[..16])); continue; }
+            Ok(_) => {}
+        }
+        if !Path::new(&fp).is_file() { bad.push(format!("{}… stored path is not a regular file", &h[..16])); continue; }   // something IS there: never "absent"
         if std::fs::metadata(&fp).map(|m| m.len()).unwrap_or(0) > MAX_SOURCE_BYTES { bad.push(format!("{}… stored file exceeds {MAX_SOURCE_BYTES} bytes", &h[..16])); continue; }
         match std::fs::read(&fp) {
             Ok(raw) => { let got = sha256::hex(&raw); if &got == h { present += 1; } else { bad.push(format!("{}… stored bytes hash to {}…", &h[..16], &got[..16])); } }

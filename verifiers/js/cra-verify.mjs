@@ -297,7 +297,8 @@ function sourceDocuments(lp, entries, require, isFile) {
   let present = 0, absent = 0; const bad = malformed ? [`${malformed} record(s) with a malformed source hash`] : [];
   for (const h of [...wanted].sort()) {
     const fp = join(lp + ".sources", h + ".json");
-    if (!isFile(fp)) { absent++; continue; }
+    try { lstatSync(fp); } catch (e) { if (e.code === "ENOENT") { absent++; continue; } bad.push(`${h.slice(0, 16)}… stored path unusable (${e.code})`); continue; }
+    if (!isFile(fp)) { bad.push(`${h.slice(0, 16)}… stored path is not a regular file`); continue; }   // something IS there: never "absent"
     let got;
     try {
       if (statSync(fp).size > MAX_SOURCE_BYTES) { bad.push(`${h.slice(0, 16)}… stored file exceeds ${MAX_SOURCE_BYTES} bytes`); continue; }

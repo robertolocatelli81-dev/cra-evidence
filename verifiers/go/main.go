@@ -481,9 +481,17 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 	}
 	for _, h := range keys {
 		fp := filepath.Join(lp+".sources", h+".json")
+		if _, e := os.Lstat(fp); e != nil {
+			if os.IsNotExist(e) {
+				absent++ // genuinely absent (hash-only evidence)
+				continue
+			}
+			bad = append(bad, h[:16]+"… stored path unusable: "+e.Error())
+			continue
+		}
 		st, e := os.Stat(fp)
-		if e != nil || !st.Mode().IsRegular() {
-			absent++
+		if e != nil || !st.Mode().IsRegular() { // something IS there but it is not a regular file: never "absent"
+			bad = append(bad, h[:16]+"… stored path is not a regular file")
 			continue
 		}
 		if st.Size() > maxSourceBytes {
