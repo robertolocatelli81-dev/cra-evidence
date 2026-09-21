@@ -64,7 +64,7 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
   behaviour before each guard was added.
 - The generator's SBOM is the evidence, not our re-encoding of it (0.3.0). `cra sbom --from-cyclonedx/--from-spdx`
   hashes the exact bytes of the document (SHA-256) into the record and stores a copy in `<ledger>.sources/`; the
-  record keeps a normalised index (name, version, type, purl, CPE, SHA-256, licence; nested components walked;
+  record keeps a normalised index (name, version, type, purl, CPE, SHA-256, the first licence entry; nested components walked;
   duplicates counted, never hidden) and what the document declared (generator and version, spec version,
   components, dependency edges, component types). All four verifiers re-hash the stored bytes (`source-documents`
   layer: mismatch = FAIL, absent = SKIP or FAIL with `--require-sources`). Measured on 20/09/2026 with the real
@@ -153,7 +153,7 @@ by the four verifiers of this repository.
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 137 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 139 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 21/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

@@ -91,8 +91,9 @@ class SBOMRecord:
         from . import __version__
         # a declared-but-NOT-INSTALLED dependency is not a component of the product: it is NAMED in a property, never
         # listed as a component with a fabricated version (resolved_components() already excludes it from the floor)
-        not_installed = [c.name for c in dedup(self.components) if c.version == "NOT-INSTALLED"]
-        comps = [c for c in dedup(self.components) if c.version != "NOT-INSTALLED"]
+        installed_floor = self.source.get("format") == "installed"   # the sentinel is ours: an ingested document's literal "NOT-INSTALLED" is just a version string
+        not_installed = [c.name for c in dedup(self.components) if installed_floor and c.version == "NOT-INSTALLED"]
+        comps = [c for c in dedup(self.components) if not (installed_floor and c.version == "NOT-INSTALLED")]
         refs, used = [], set()
         for c in comps:
             ref = c.purl or f"{c.name}@{c.version}"

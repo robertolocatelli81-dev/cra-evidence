@@ -11,6 +11,7 @@ mod sha256;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use json::{canonical, Json, Parser};
 use std::collections::BTreeMap;
+
 use std::path::Path;
 
 const PACK_KIND: &str = "cra_evidence_pack/1";
@@ -19,6 +20,29 @@ const TIP_KIND: &str = "cryptovalid_tip/1";
 const MAX_LINE_BYTES: usize = 64 << 20;
 const MAX_SOURCE_BYTES: u64 = 256 << 20;
 fn is_hex_n(h: &str, n: usize) -> bool { h.len() == n && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) }
+/// One line's CONTENT (exactly one terminator excluded: \n, then at most one \r), read in bounded pieces; Err = above the bound.
+fn bounded_line<R: std::io::BufRead>(r: &mut R) -> Result<Option<Vec<u8>>, String> {
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let (consumed, done) = {
+            let avail = match r.fill_buf() { Ok(a) => a, Err(e) => return Err(format!("unreadable: {e}")) };
+            if avail.is_empty() { (0, true) } else {
+                match avail.iter().position(|&b| b == b'\n') {
+                    Some(i) => { buf.extend_from_slice(&avail[..i]); (i + 1, true) }
+                    None => { buf.extend_from_slice(avail); (avail.len(), false) }
+                }
+            }
+        };
+        r.consume(consumed);
+        if buf.len() > MAX_LINE_BYTES + 1 { return Err(format!("line exceeds {MAX_LINE_BYTES} bytes")); }   // content + one possible \r
+        if done {
+            if consumed == 0 && buf.is_empty() { return Ok(None); }   // EOF
+            if buf.last() == Some(&b'\r') { buf.pop(); }
+            if buf.len() > MAX_LINE_BYTES { return Err(format!("line exceeds {MAX_LINE_BYTES} bytes")); }
+            return Ok(Some(buf));
+        }
+    }
+}
 fn ledger_file_name_ok(v: &str) -> bool { !v.is_empty() && v != "." && v != ".." && !v.contains('/') && !v.contains('\\') }   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
@@ -188,13 +212,14 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
         layers.push(Layer("ledger-chain".into(), "FAIL".into(), "ledger explicitly required (ledger_path / log key / require_sources given) but not found".into()));
     } else if let Some(lp) = lp.filter(|p| is_file(p)) {
         let mut failures: Vec<String> = vec![];
-        let text = match std::fs::read_to_string(&lp) { Ok(t) => t, Err(e) => { failures.push(format!("ledger unreadable or not UTF-8: {e}")); String::new() } };
         let mut entries: Vec<BTreeMap<String, Json>> = vec![];
         let (mut prev, mut n) = (GENESIS.to_string(), 0i64);
-        for line in text.split('\n') {
-            let line = line.strip_suffix('\r').unwrap_or(line);   // exactly one terminator; a run of \r is content and counts
-            if line.len() > MAX_LINE_BYTES { failures.push(format!("entry {n}: line exceeds {MAX_LINE_BYTES} bytes")); break; }   // bound BEFORE the blank test
-            if line.trim_matches(|c| c == ' ' || c == '\t').is_empty() { continue; }   // blank = ASCII space/tab only
+        let mut reader = match std::fs::File::open(&lp) { Ok(f) => Some(std::io::BufReader::with_capacity(1 << 20, f)), Err(e) => { failures.push(format!("ledger unreadable: {e}")); None } };
+        loop {   // streamed, bounded: a hostile line is never buffered whole (a line above the content bound stops the read)
+            let Some(r) = reader.as_mut() else { break };
+            let raw = match bounded_line(r) { Ok(Some(b)) => b, Ok(None) => break, Err(msg) => { failures.push(format!("entry {n}: {msg}")); break; } };
+            let line = match std::str::from_utf8(&raw) { Ok(t) => t, Err(_) => { failures.push(format!("entry {n}: not UTF-8")); break; } };
+            if line.trim_matches(|c| c == ' ' || c == '\t').is_empty() { continue; }   // blank = ASCII space/tab only (the bound was applied before)
             let e = match parse_obj(line) { Ok(o) => o, Err(err) => { failures.push(format!("entry {n}: unparsable: {err}")); break; } };
             if gi(&e, "idx") != Some(n) { failures.push(format!("entry {n}: idx not sequential")); }
             if gs(&e, "prev_hash") != Some(prev.as_str()) { failures.push(format!("entry {n}: prev_hash does not link")); }

@@ -467,6 +467,20 @@ def cases(base):
     def dash_pack(d):
         build(d); return {"pack": "-"}
     case("cli_pack_is_a_dash", dash_pack, cli=True)
+    def ledger_sym_dotdot(d, tamper_real, lexical_copy):   # --ledger d/sym/../l.jsonl: the OS reads d/real/l.jsonl (sym → d/real/sub); a lexical join would look in d/
+        keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
+        real = os.path.join(d, "real"); os.makedirs(os.path.join(real, "sub")); os.symlink(os.path.join(real, "sub"), os.path.join(d, "sym"))
+        src = os.path.join(d, "syft.cdx.json"); json.dump(CDX_DOC, open(src, "w"))
+        lk = CRAEvidenceLocker(os.path.join(real, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        rec = lk.record_sbom(sbom_from_cyclonedx(src, "prodotto-ü", "1"), source_path=src); pack = os.path.join(real, "p.json"); lk.evidence_pack(pack)
+        h = rec["data"]["source"]["sha256"]; stored = source_file(os.path.join(real, "l.jsonl"), h)
+        if lexical_copy:
+            os.makedirs(os.path.join(d, "l.jsonl.sources")); shutil.copy(stored, os.path.join(d, "l.jsonl.sources", h + ".json"))
+        if tamper_real:
+            open(stored, "ab").write(b" ")
+        return {"pack": pack, "ledger": os.path.join(d, "sym", "..", "l.jsonl"), "require_sources": True}
+    case("ledger_via_symlink_dotdot_real_tampered_lexical_intact", lambda d: ledger_sym_dotdot(d, True, True))   # FAIL in all four
+    case("ledger_via_symlink_dotdot_real_intact_no_lexical", lambda d: ledger_sym_dotdot(d, False, False))      # PASS in all four
     def long_name(d):   # a 250-byte pack name is legal; its sidecar name (263 bytes) is not: lstat ENAMETOOLONG must be the same verdict in the four
         lk, key, pack, pk = build(d); newp = os.path.join(d, "p" * 246 + ".json"); os.rename(pack, newp)
         j = json.load(open(newp)); json.dump(j, open(newp, "w")); return {"pack": newp}

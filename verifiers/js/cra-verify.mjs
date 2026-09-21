@@ -328,7 +328,7 @@ function sourceDocuments(lp, entries, require, isFile) {
   if (!wanted.size && !malformed) return L("source-documents", "SKIP", "no SBOM source document recorded by hash");
   let present = 0, absent = 0; const bad = malformed ? [`${malformed} record(s) with a malformed source hash`] : [];
   for (const h of [...wanted].sort()) {
-    const fp = join(lp + ".sources", h + ".json");
+    const fp = lp + ".sources/" + h + ".json";   // concatenation, never path.join (which would resolve ".." lexically before a symlink)
     try { lstatSync(fp); } catch (e) { if (e.code === "ENOENT") { absent++; continue; } bad.push(`${h.slice(0, 16)}… stored path unusable (${e.code})`); continue; }
     if (!isFile(fp)) { bad.push(`${h.slice(0, 16)}… stored path is not a regular file`); continue; }   // something IS there: never "absent"
     let got;

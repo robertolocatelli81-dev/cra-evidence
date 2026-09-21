@@ -480,7 +480,7 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 		bad = append(bad, fmt.Sprintf("%d record(s) with a malformed source hash", malformed))
 	}
 	for _, h := range keys {
-		fp := filepath.Join(lp+".sources", h+".json")
+		fp := lp + ".sources/" + h + ".json" // concatenation, never filepath.Join (Clean would resolve ".." lexically before a symlink)
 		if _, e := os.Lstat(fp); e != nil {
 			if os.IsNotExist(e) {
 				absent++ // genuinely absent (hash-only evidence)

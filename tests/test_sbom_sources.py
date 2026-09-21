@@ -444,6 +444,7 @@ class TestExport(unittest.TestCase):
     def test_exports_validate_against_the_official_1_6_and_1_7_schemas(self):
         vs = self._validators()
         records = [ingest(p) for p in REAL] + [sbom_from_installed("cra-evidence", "0.3.0", ["cryptography"], transitive=True),
+                                                sbom_from_installed("cra-evidence", "0.3.0", ["cryptography", "no-such-dist-xyz"]),   # the `compositions: unknown` shape
                                                 SBOMRecord("p", "1", [SBOMComponent("a", "1", license="Apache-2.0 OR BSD-3-Clause"), SBOMComponent("b", "2", license="Proprietary")])]
         for r in records:
             for v, val in vs.items():
