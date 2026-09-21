@@ -152,7 +152,11 @@ a tampered copy at the real location, JS and Go verified PASS) → plain concate
 `NOT-INSTALLED` sentinel is applied to the installed floor only (an ingested document's literal string is a version);
 the round-11 CHANGELOG sentence named a CI run of the previous commit as if it covered the current one → no commit hash in
 this file, the release tag's run is named in the release notes. Oracle: 139 cases, 146 with `CRA_ORACLE_BIG=1`, 0
-divergences. Legal basis re-read 20/09/2026 (ENISA
+divergences.
+The review was stopped here by the author on 21/09/2026 after round 12: no round of the twelve ended without a finding;
+rounds 10–12 found edge cases (a 600 MiB ledger line, an explicit ledger path through a symlink and `..`) and premature
+sentences in this file, not verdict divergences on ordinary input. A thirteenth round had been started and was cancelled
+unread. What is stated above is what was measured on the code as released. Legal basis re-read 20/09/2026 (ENISA
 FAQ: no API at initial release; glossary unchanged; Digital Omnibus 2025/0360(COD) still a proposal).
 
 ## 0.2.0 — 2026-09-15
