@@ -101,7 +101,8 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
 def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=False) -> Dict[str, Any]:
     layers: List[Dict[str, str]] = []
     try:
-        pack = parse_line(Path(path).read_text(encoding="utf-8"))   # strict: duplicate keys / NaN refused, like the three verifiers
+        with open(path, "rb") as f:                                   # OS path semantics (pathlib would turn "p.json/" into "p.json"; the three do not)
+            pack = parse_line(f.read().decode("utf-8"))                # strict: duplicate keys / NaN / invalid UTF-8 refused, like the three verifiers
         layers.append(_layer("pack-json", "PASS"))
     except (OSError, ValueError, RecursionError) as e:
         return {"ok": False, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", str(e))], "pack_sha3": None}

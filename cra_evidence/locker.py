@@ -96,7 +96,7 @@ class CRAEvidenceLocker:
         cdx = sbom.to_cyclonedx_min(spec_version)
         resolved = len(resolved_components(sbom))
         source = dict(sbom.source)
-        raw = b""
+        raw, created = b"", None
         if source.get("sha256") and source_path is None:
             raise ValueError("this SBOM was ingested from a document: pass source_path so the bytes are re-hashed and stored "
                              "(store=False keeps the hash only) — a record that only LOOKS bound is refused")
@@ -134,14 +134,23 @@ class CRAEvidenceLocker:
                 with open(tmp, "wb") as f:
                     f.write(raw)
                 os.replace(tmp, dst)
+                created = dst
             source["stored_as"] = os.path.basename(dst)
-        return self._append({"kind": "cra_sbom", "product_id": self.product_id, "product_version": self.product_version,
+        try:
+            return self._append({"kind": "cra_sbom", "product_id": self.product_id, "product_version": self.product_version,
                              "sbom": cdx, "component_count": len(cdx["components"]), "resolved_components": resolved,
                              "source": source,
                              # conservative by design: zero RESOLVED components (a declared-but-NOT-INSTALLED dependency
                              # is not one) never EVIDENCES the Annex I floor, even for a product that truly has no
                              # dependencies (state that in the SBOM's note instead)
                              "sbom_floor_met": resolved > 0})
+        except Exception:
+            if created:                          # a stored document without its record is not evidence: undo this call's copy
+                try:
+                    os.remove(created)
+                except OSError:
+                    pass
+            raise
 
     def record_vulnerability(self, rec: VulnerabilityRecord, attachments: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """attachments: standard documents embedded content-bound, e.g. [{"format": "cyclonedx-vex", "document": {...}}]

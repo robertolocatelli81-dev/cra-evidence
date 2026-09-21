@@ -312,7 +312,7 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
 }
 
 fn flag_value(args: &[String], i: usize, flag: &str) -> String {   // a flag without a value, or with "", is a usage error — never a silent default
-    match args.get(i) { Some(v) if !v.is_empty() => v.clone(), _ => { eprintln!("usage: {flag} needs a value"); std::process::exit(2) } }
+    match args.get(i) { Some(v) if !v.is_empty() && !v.starts_with('-') => v.clone(), _ => { eprintln!("usage: {flag} needs a value"); std::process::exit(2) } }
 }
 
 fn main() {

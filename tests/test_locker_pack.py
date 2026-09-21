@@ -29,7 +29,8 @@ class TestLockerPack(unittest.TestCase):
         # (a) pack field changed
         p = json.load(open(self.pack)); p["product_version"] = "9"; json.dump(p, open(self.pack, "w"))
         self.assertFalse(verify_pack(self.pack)["ok"])
-        # (b) ledger record content changed with stale record_sha3 (content-binding)
+        # (b) ledger record content changed with stale record_sha3, entry re-hashed (the next prev_hash then breaks: the CHAIN catches it;
+        #     the binding layer alone is exercised by test_binding_alone_sees_a_rechained_record and the oracle case record_rechained_stale_record_sha3)
         self.lk.evidence_pack(self.pack)
         lines = open(self.led).read().split("\n"); e = json.loads(lines[0]); e["data"]["component_count"] = 99
         e["self_hash"] = __import__("cra_evidence.ledger", fromlist=["entry_hash"]).entry_hash(e)   # re-chained coherently…
@@ -116,6 +117,25 @@ class TestSignedFixtureEveryConfig(unittest.TestCase):
         self.assertFalse(r["ok"])
         sig = next(l for l in r["layers"] if l["layer"] == "producer-signature")
         self.assertIn("NOT checkable", sig["detail"]); self.assertNotIn("invalid", sig["detail"])
+
+
+
+class TestBindingAlone(unittest.TestCase):
+    def test_binding_alone_sees_a_rechained_record(self):
+        """record content changed, record_sha3 stale, the WHOLE chain re-linked coherently: only the record binding can see it"""
+        from cra_evidence.ledger import entry_hash
+        d = tempfile.mkdtemp(); led = os.path.join(d, "l.jsonl"); lk = CRAEvidenceLocker(led, "prod", "1.0")
+        lk.record_sbom(SBOMRecord("prod", "1.0", [SBOMComponent("a", "1")])); lk.record_vulnerability(VulnerabilityRecord("prod", "CVE-1", False, "2026-09-01T00:00:00Z"))
+        pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
+        es = [json.loads(l) for l in open(led).read().splitlines()]; es[1]["data"]["vuln_id"] = "CVE-9999"; prev = "0" * 64
+        for e in es:
+            e["prev_hash"] = prev; e["self_hash"] = entry_hash(e); prev = e["self_hash"]
+        open(led, "w").write("\n".join(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) for e in es) + "\n")
+        r = verify_pack(pack)
+        self.assertFalse(r["ok"])
+        lay = next(l for l in r["layers"] if l["layer"] == "ledger-chain")
+        self.assertEqual(lay["status"], "FAIL"); self.assertIn("record_sha3 does not match", lay["detail"])
+        shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -159,8 +159,10 @@ def main(argv: List[str] = None) -> int:
         return 0 if v["ok"] else 1
     if a.cmd == "verify":
         for flag, val in (("--ledger", a.ledger), ("--trust-store", a.trust_store), ("--log-pubkey", a.log_pubkey)):
-            if val is not None and val == "":
-                p.error(f"verify: {flag} needs a value (empty string given)")
+            if val is not None and (val == "" or val.startswith("-")):
+                p.error(f"verify: {flag} needs a value (got {val!r})")
+        if a.pack.startswith("-"):
+            p.error("verify: the pack must be a file path (got a flag-like argument)")
         if a.log_pubkey is not None and not re.fullmatch(r"[0-9a-f]{64}", a.log_pubkey):
             p.error("verify: --log-pubkey must be 64 lower-case hex characters")
         ts = None

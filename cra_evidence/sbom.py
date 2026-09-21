@@ -87,7 +87,10 @@ class SBOMRecord:
         if len(self.product_version) > SCHEMA_TEXT_MAX:
             raise ValueError(f"product_version longer than {SCHEMA_TEXT_MAX} characters cannot be exported as CycloneDX (schema maxLength)")
         from . import __version__
-        comps = dedup(self.components)
+        # a declared-but-NOT-INSTALLED dependency is not a component of the product: it is NAMED in a property, never
+        # listed as a component with a fabricated version (resolved_components() already excludes it from the floor)
+        not_installed = [c.name for c in dedup(self.components) if c.version == "NOT-INSTALLED"]
+        comps = [c for c in dedup(self.components) if c.version != "NOT-INSTALLED"]
         refs, used = [], set()
         for c in comps:
             ref = c.purl or f"{c.name}@{c.version}"
@@ -119,6 +122,8 @@ class SBOMRecord:
                               for c, ref in zip(comps, refs)]}
         if self.source.get("sha256"):
             out["metadata"]["properties"].append({"name": "cra-evidence:source_sha256", "value": self.source["sha256"]})
+        if not_installed:
+            out["metadata"]["properties"].append({"name": "cra-evidence:declared_not_installed", "value": ", ".join(not_installed)})
         if self.edges:
             # `dependsOn: []` is the POSITIVE statement "has no dependencies" (CycloneDX dependency definition): it is
             # emitted only for a component whose Requires-Dist was actually read; every other component is left out
@@ -344,7 +349,7 @@ def sbom_from_installed(product_id: str, product_version: str, top_level: List[s
             dist = md.distribution(name)
             ver = dist.version
             lic = installed_license(dist.metadata)
-            comps[key] = SBOMComponent(name=dist.metadata["Name"], version=ver, purl=pypi_purl(key, ver), license=lic)
+            comps[key] = SBOMComponent(name=dist.metadata["Name"], version=ver[:SCHEMA_TEXT_MAX], purl=pypi_purl(key, ver[:SCHEMA_TEXT_MAX]), license=lic)
             if transitive:
                 walked.append(key)
                 for r in dist.requires or []:

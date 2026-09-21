@@ -459,21 +459,22 @@ class TestExport(unittest.TestCase):
             self.skipTest("cryptography not installed (the installed-floor part of this test needs it)")
         inst = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"]).to_cyclonedx_min()   # top-level floor: all direct…
         self.assertEqual(inst["dependencies"], [{"ref": inst["metadata"]["component"]["bom-ref"], "dependsOn": [c["bom-ref"] for c in inst["components"]]}])
+        # a declared-but-NOT-INSTALLED name is NOT a component of the product (round 9, Sonnet: it was exported with a fabricated version)
+        self.assertNotIn("no-such-dist-xyz", json.dumps(inst["components"]) + json.dumps(inst["dependencies"]))
+        self.assertIn({"name": "cra-evidence:declared_not_installed", "value": "no-such-dist-xyz"}, inst["metadata"]["properties"])
         # …and NOTHING else: `dependsOn: []` would assert "no dependencies" for a component whose Requires-Dist was never read
         self.assertEqual(inst["compositions"], [{"aggregate": "unknown", "dependencies": [c["bom-ref"] for c in inst["components"]]}])   # not "incomplete": that would assert more exist
         tr = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"], transitive=True)
         deps = {d["ref"]: d["dependsOn"] for d in tr.to_cyclonedx_min("1.7")["dependencies"]}
-        self.assertNotIn("no-such-dist-xyz@NOT-INSTALLED", deps)                                        # not read → not in the graph
-        self.assertEqual(sorted(tr.to_cyclonedx_min("1.7")["compositions"][0]["dependencies"]), ["no-such-dist-xyz@NOT-INSTALLED"])
+        ex = tr.to_cyclonedx_min("1.7")
+        self.assertNotIn("no-such-dist-xyz", json.dumps(ex["components"]) + json.dumps(ex["dependencies"]))   # named only in the property
         cry = next(c for c in tr.components if c.name == "cryptography")
-        self.assertEqual(deps["p@1"], ["pkg:pypi/cryptography@" + cry.version, "no-such-dist-xyz@NOT-INSTALLED"])
+        self.assertEqual(deps["p@1"], ["pkg:pypi/cryptography@" + cry.version])
         self.assertIn("cryptography", tr.source["requires_dist_read"])
         self.assertNotIn("no-such-dist-xyz", tr.source["requires_dist_read"])
         for key in tr.source["requires_dist_read"]:                                                    # every walked component IS in the graph
             self.assertTrue(any(r.startswith(f"pkg:pypi/{key}@") for r in deps), key)
-        comp = tr.to_cyclonedx_min("1.7")["compositions"][0]
-        self.assertEqual(comp["aggregate"], "unknown")
-        self.assertFalse(set(comp["dependencies"]) & set(deps), "a walked component is never in the unknown composition")
+        self.assertNotIn("compositions", tr.to_cyclonedx_min("1.7"))                                  # every exported component was walked: nothing unknown
         rec = ingest(REAL[0]); ing = rec.to_cyclonedx_min()
         self.assertNotIn("dependencies", ing)                                                          # never re-invented for an ingested graph
         self.assertIn({"name": "cra-evidence:source_sha256", "value": rec.source["sha256"]}, ing["metadata"]["properties"])

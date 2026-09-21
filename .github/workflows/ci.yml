@@ -16,12 +16,16 @@ jobs:
           pip install ".[sign]" jsonschema referencing
           pip install https://github.com/robertolocatelli81-dev/cryptovalid-opencore/releases/download/v0.15.0/cryptovalid_opencore-0.15.0-py3-none-any.whl
       - name: Unit tests (every suite; interop against cryptovalid runs because the wheel is installed)
+        shell: bash
         run: |
+          set -o pipefail            # round 9: without it `tee` hid unittest's exit code — this job could not go red
           python -B -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee /tmp/ut.log
           python - <<'PY'
-          # round 7 (Fable): a `__main__` block above a class hid two tests from the per-file loop — every test class in every file must have run
+          # round 7: a `__main__` block above a class hid two tests from the per-file loop — every test class in every file must have run,
+          # and the suite must have ended OK (a FAIL line also names the class)
           import ast, glob, re
           ran = open("/tmp/ut.log").read()
+          assert re.search(r"^OK( \(skipped=\d+\))?$", ran, re.M), "unittest did not end with OK"
           seen = lambda cls: re.search(r"\." + re.escape(cls) + r"[.)]", ran) is not None   # 3.9: "(mod.Class)"; 3.11+: "(mod.Class.test)"
           assert not seen("NoSuchTestClassXYZ"), "positive control: a fake class name must not match"
           for f in glob.glob("tests/test_*.py"):

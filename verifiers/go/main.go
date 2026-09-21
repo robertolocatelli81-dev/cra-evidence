@@ -519,8 +519,8 @@ func main() {
 	var pack, ledger, trustFile, key string
 	requireSources := false
 	args := os.Args[1:]
-	next := func(i int) string { // a flag without its value is a usage error, never a panic
-		if i+1 >= len(args) {
+	next := func(i int) string { // a flag without its value (or whose "value" is a flag) is a usage error, never a panic
+		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 			fmt.Fprintln(os.Stderr, "usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]")
 			os.Exit(2)
 		}

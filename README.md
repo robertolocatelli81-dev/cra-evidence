@@ -96,10 +96,10 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
   is applied to the signature and to the hash alike, its default carries the NIST IR 8547 draft date for Ed25519 and
   no expiry for SHA3-256 (the verdict then says so: "their trust is NOT bounded in time"), and it says when a renewal
   is due.
-- Pre-publication review by five models (two providers) in three rounds, plus the author: 44 findings turned into
-  tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; 0.3.0: review rounds on 20/09/2026 (Opus, Sonnet, Haiku, then Fable 5.1;
-  Gemini Pro out of credits) — every finding of every round is listed in the CHANGELOG, each re-measured and turned into an
-  oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
+- Pre-publication review: for 0.1.0, five models (two providers) in three rounds, plus the author — 44 findings turned
+  into tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; for 0.3.0, further rounds on 20–21/09/2026
+  (Opus, Sonnet, Haiku; Fable 5.1 in rounds 6–8; Gemini Pro out of credits) — every finding of every round is listed in
+  the CHANGELOG, each re-measured and turned into an oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
   cryptography only, none); the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.
 - The SRP schema is the 39-field ENISA glossary (44 table rows in the vendored snapshot: 3 section headers, 2 unnumbered
@@ -153,7 +153,7 @@ by the four verifiers of this repository.
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 129 intact and tampered fixtures: the
+command line and the same verdict, plus a differential oracle that CI runs on 134 intact and tampered fixtures: the
 four verifiers must agree on every one, verdict and failing layers alike (measured 20/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 

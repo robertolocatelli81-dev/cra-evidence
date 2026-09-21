@@ -1,9 +1,9 @@
 {
  "alg": "Ed25519",
- "fingerprint": "cae0f333346abc58",
- "public_key_hex": "d08db21e09dddfbef45bb60dd3fc9ac7ec9df2a3fc2479f5d2704bc419c7bdab",
- "signature_hex": "0e23467e13121b15e6f4ed2e29a79ff2e17d248f75e0fb2f12276db61edb781fa9c315f4dcd44c3b4f3f1934931019c62a8f31f88bd208221792c23c6158ee0d",
- "signed_pack_sha3": "42b246ad07d49651c20df9c2d286083e5a2203f835402bb8b013fbab130fbedb",
- "signed_utc": "2026-09-20T18:17:13+00:00",
+ "fingerprint": "723b1eb516e496ca",
+ "public_key_hex": "93f9e2cdbe4fad19577bfda2803be62d6d33f9044cebd32236d982e0ec8790bd",
+ "signature_hex": "a6cd303b59315895e81b07c64b57402ad6f12b7a688d113f391353bffccbdbab1f138e58db3fc7da4e71dea06f433be8cba8d3ab9718e9f607614d36756d5c0d",
+ "signed_pack_sha3": "e790d1324c6da55f7dcb78cc62f709704eef443c14c3b137f16a7f4a78f7ae4e",
+ "signed_utc": "2026-09-21T05:18:39+00:00",
  "signer_id": "example-signer"
 }

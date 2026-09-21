@@ -316,7 +316,7 @@ function main(argv) {
   for (let i = 0; i < args.length; i++) {
     const eq = args[i].match(/^(--ledger|--trust-store|--log-pubkey)=(.*)$/);   // --flag=value is the same as --flag value (argparse accepts both)
     if (eq) { args.splice(i, 1, eq[1], eq[2]); }
-    const val = () => { if (i + 1 >= args.length || args[i + 1] === "") return null; return args[++i]; };   // a flag without a value, or with "", is a usage error — never a silent default
+    const val = () => { if (i + 1 >= args.length || args[i + 1] === "" || args[i + 1].startsWith("-")) return null; return args[++i]; };   // a flag without a value, or with "", is a usage error — never a silent default
     if (args[i] === "--ledger") { ledger = val(); if (ledger === null) return usage(); }
     else if (args[i] === "--trust-store") {
       const f = val(); if (f === null) return usage();

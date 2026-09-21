@@ -440,6 +440,24 @@ def cases(base):
         build(d); os.makedirs(os.path.join(d, "other")); os.makedirs(os.path.join(d, "real")); os.symlink(os.path.join(d, "real"), os.path.join(d, "other", "link"))
         return {"pack": os.path.join(d, "other", "link", "..", "p.json")}   # OS: d/real/.. = d → d/p.json; lexically: d/other/p.json (absent)
     case("pack_path_through_symlink_and_dotdot", symlinked_dir_dotdot)
+    def trailing(d, suffix):   # "p.json/" is ENOTDIR for the OS: pack-json FAIL in all four (pathlib used to normalise it away in the reference)
+        build(d); return {"pack": os.path.join(d, "p.json") + suffix}
+    case("pack_path_trailing_slash", lambda d: trailing(d, "/"))
+    case("pack_path_trailing_slash_dot", lambda d: trailing(d, "/."))
+    def rechained_stale_record_sha3(d):   # record content changed, record_sha3 left stale, the WHOLE chain re-linked coherently: only the binding layer sees it
+        from cra_evidence.ledger import entry_hash
+        build(d); p = os.path.join(d, "l.jsonl"); es = [json.loads(l) for l in open(p).read().splitlines()]
+        es[0]["data"]["vuln_id"] = "CVE-9999"; prev = "0" * 64
+        for e in es:
+            e["prev_hash"] = prev; e["self_hash"] = entry_hash(e); prev = e["self_hash"]
+        open(p, "w").write("\n".join(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) for e in es) + "\n")
+    case("record_rechained_stale_record_sha3", rechained_stale_record_sha3)
+    def flag_then_flag(d):
+        build(d); return {"raw_args": ["--ledger", "--require-sources"]}   # a value that is a flag is a missing value: usage in all four
+    case("cli_value_flag_followed_by_flag", flag_then_flag, cli=True)
+    def dash_pack(d):
+        build(d); return {"pack": "-"}
+    case("cli_pack_is_a_dash", dash_pack, cli=True)
     def long_name(d):   # a 250-byte pack name is legal; its sidecar name (263 bytes) is not: lstat ENAMETOOLONG must be the same verdict in the four
         lk, key, pack, pk = build(d); newp = os.path.join(d, "p" * 246 + ".json"); os.rename(pack, newp); shutil.move(os.path.join(d, "l.jsonl"), os.path.join(d, "l.jsonl"))
         j = json.load(open(newp)); json.dump(j, open(newp, "w")); return {"pack": newp}

@@ -114,8 +114,9 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
 
 
 # ── evidence-pack signature sidecar ───────────────────────────────────────────
-def sidecar_path(pack_path: str) -> Path:
-    return Path(pack_path).with_suffix(Path(pack_path).suffix + ".sig.json")
+def sidecar_path(pack_path: str) -> str:
+    """`<pack path>.sig.json` — the string as given, no normalisation (the three verifiers append the suffix to the argument as is)."""
+    return str(pack_path) + ".sig.json"
 
 
 def pack_digest(pack: Dict[str, Any]) -> str:
@@ -141,7 +142,8 @@ def sign_pack(pack_path: str, key: Tuple[Any, str], signer_id: str) -> Dict[str,
     sk, pk = key
     if not isinstance(signer_id, str) or not signer_id:
         raise ValueError("signer_id must be a non-empty string")
-    pack = parse_line(Path(pack_path).read_text(encoding="utf-8"))
+    with open(pack_path, "rb") as f:
+        pack = parse_line(f.read().decode("utf-8"))
     digest = pack_digest(pack)
     if pack.get("pack_sha3") != digest:
         raise ValueError("pack_sha3 does not match the pack content: refusing to sign a broken pack")
@@ -150,7 +152,8 @@ def sign_pack(pack_path: str, key: Tuple[Any, str], signer_id: str) -> Dict[str,
             "signed_pack_sha3": digest, "signed_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     # the signature covers WHO signed and WHEN, not only the digest (a sidecar with a rewritten signer_id must fail)
     side["signature_hex"] = sk.sign(signed_payload(side)).hex()
-    sidecar_path(pack_path).write_text(json.dumps(side, indent=1, sort_keys=True), encoding="utf-8")
+    with open(sidecar_path(pack_path), "w", encoding="utf-8") as f:
+        f.write(json.dumps(side, indent=1, sort_keys=True))
     return {"signed": True, "sidecar": str(sidecar_path(pack_path)), "fingerprint": side["fingerprint"]}
 
 
@@ -165,9 +168,11 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
     except OSError as e:
         return {"status": "FAIL", "detail": f"sidecar path unusable ({e.errno}: {e.strerror})"}
     try:
-        side = parse_line(sp.read_text(encoding="utf-8"))          # strict: duplicate keys / NaN refused like the verifiers
+        with open(sp, "rb") as f:
+            side = parse_line(f.read().decode("utf-8"))              # strict: duplicate keys / NaN / UTF-8 refused like the verifiers
         if pack is None:
-            pack = parse_line(Path(pack_path).read_text(encoding="utf-8"))   # the verifier passes the pack it already read (read once)
+            with open(pack_path, "rb") as f:
+                pack = parse_line(f.read().decode("utf-8"))          # the verifier passes the pack it already read (read once)
     except (OSError, ValueError, RecursionError) as e:
         return {"status": "FAIL", "detail": f"unreadable: {str(e)[:120]}"}
     if not isinstance(side, dict) or not isinstance(pack, dict):
