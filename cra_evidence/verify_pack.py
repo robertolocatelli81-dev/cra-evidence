@@ -190,9 +190,9 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                     except Exception as e:  # noqa: BLE001
                         layers.append(_layer("signed-tip", "FAIL", f"tip unreadable: {type(e).__name__}: {str(e)[:80]}"))
             elif os.path.exists(tip_path):
-                layers.append(_layer("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail truncation undetected)"))
+                layers.append(_layer("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"))
             else:
-                layers.append(_layer("signed-tip", "SKIP", "no tip: tail truncation undetectable offline (use a tip key / cryptovalid monitor)"))
+                layers.append(_layer("signed-tip", "SKIP", "no tip: tail not sealed — truncation, rewrite or additions undetectable offline (use a tip key / cryptovalid monitor)"))
     else:
         layers.append(_layer("ledger-chain", "SKIP", "ledger not next to the pack (honest: integrity of the chain not checked)"))
     sig = verify_pack_signature(path, trust_store, pack=pack)

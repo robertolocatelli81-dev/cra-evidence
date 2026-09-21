@@ -126,6 +126,8 @@ class SBOMRecord:
             out["metadata"]["properties"].append({"name": "cra-evidence:source_sha256", "value": self.source["sha256"]})
         if not_installed:
             out["metadata"]["properties"].append({"name": "cra-evidence:declared_not_installed", "value": ", ".join(not_installed)})
+        if self.source.get("root_purpose_declared") and SPDX_PURPOSE_TO_TYPE.get(self.source["root_purpose_declared"]) is None:
+            out["metadata"]["properties"].append({"name": "cra-evidence:root_purpose_declared", "value": self.source["root_purpose_declared"]})   # the default type above is then declared as such
         if self.edges:
             # `dependsOn: []` is the POSITIVE statement "has no dependencies" (CycloneDX dependency definition): it is
             # emitted only for a component whose Requires-Dist was actually read AND whose every declared child is
@@ -552,7 +554,7 @@ def _lst(v: Any) -> List[Any]:
     return v if isinstance(v, list) else []
 
 
-def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
+def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str, str]:
     rels = [r for r in _lst(d.get("relationships")) if isinstance(r, dict)]
     roots = {r.get("relatedSpdxElement") for r in rels if r.get("relationshipType") == "DESCRIBES" and r.get("spdxElementId") == "SPDXRef-DOCUMENT" and isinstance(r.get("relatedSpdxElement"), str)}
     roots |= {r.get("spdxElementId") for r in rels if r.get("relationshipType") == "DESCRIBED_BY" and r.get("relatedSpdxElement") == "SPDXRef-DOCUMENT" and isinstance(r.get("spdxElementId"), str)}
@@ -585,7 +587,7 @@ def _spdx2_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
     return comps, depth, root_purpose
 
 
-def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str]:
+def _spdx3_components(d: Dict[str, Any]) -> Tuple[List[SBOMComponent], str, str]:
     g = [e for e in _lst(d.get("@graph")) if isinstance(e, dict)]
     known = {"software_Package", "Package", "Relationship", "LifecycleScopedRelationship", "SpdxDocument", "software_Sbom", "Sbom",
              "software_File", "File", "CreationInfo", "Tool", "Organization", "Person", "Agent", "simplelicensing_LicenseExpression", "LicenseExpression"}

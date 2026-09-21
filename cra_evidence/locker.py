@@ -145,11 +145,15 @@ class CRAEvidenceLocker:
                              # dependencies (state that in the SBOM's note instead)
                              "sbom_floor_met": resolved > 0})
         except Exception:
-            if created:                          # a stored document without its record is not evidence: undo this call's copy
-                try:
-                    os.remove(created)
-                except OSError:
-                    pass
+            if created:                          # undo this call's copy — unless a concurrent record already relies on it (round 11, Sonnet)
+                with self._lock:
+                    referenced = any(isinstance(e.get("data"), dict) and isinstance(e["data"].get("source"), dict)
+                                     and e["data"]["source"].get("sha256") == fp["sha256"] for e in self.ledger.entries())
+                if not referenced:
+                    try:
+                        os.remove(created)
+                    except OSError:
+                        pass
             raise
 
     def record_vulnerability(self, rec: VulnerabilityRecord, attachments: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:

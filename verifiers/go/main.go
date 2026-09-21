@@ -265,9 +265,9 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 					layers = append(layers, layer{"signed-tip", ifs(ok, "PASS", "FAIL"), ifs(ok, "tip verified: no tail truncation", why)})
 				}
 			} else if isFile(tipPath) {
-				layers = append(layers, layer{"signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail truncation undetected)"})
+				layers = append(layers, layer{"signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"})
 			} else {
-				layers = append(layers, layer{"signed-tip", "SKIP", "no tip: tail truncation undetectable offline"})
+				layers = append(layers, layer{"signed-tip", "SKIP", "no tip: tail not sealed — truncation, rewrite or additions undetectable offline"})
 			}
 		}
 	} else {

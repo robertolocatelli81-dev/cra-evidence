@@ -98,7 +98,7 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
   is due.
 - Pre-publication review: for 0.1.0, five models (two providers) in three rounds, plus the author — 44 findings turned
   into tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; for 0.3.0, further rounds on 20–21/09/2026
-  (Opus, Sonnet, Haiku; Fable 5.1 in rounds 6–8; Gemini Pro out of credits) — every finding of every round is listed in
+  (Opus, Sonnet, Haiku; Fable 5.1 in rounds 6–9 until its use was revoked; Gemini Pro out of credits) — every finding of every round is listed in
   the CHANGELOG, each re-measured and turned into an oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
   cryptography only, none); the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.

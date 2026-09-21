@@ -238,8 +238,8 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
                     Ok(()) => layers.push(Layer("signed-tip".into(), "PASS".into(), "tip verified: no tail truncation".into())),
                     Err(why) => layers.push(Layer("signed-tip".into(), "FAIL".into(), why)),
                 } }
-            } else if is_file(&tip_path) { layers.push(Layer("signed-tip".into(), "SKIP".into(), "tip present but NOT checked: pass the trusted log key (tail truncation undetected)".into())); }
-            else { layers.push(Layer("signed-tip".into(), "SKIP".into(), "no tip: tail truncation undetectable offline".into())); }
+            } else if is_file(&tip_path) { layers.push(Layer("signed-tip".into(), "SKIP".into(), "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)".into())); }
+            else { layers.push(Layer("signed-tip".into(), "SKIP".into(), "no tip: tail not sealed — truncation, rewrite or additions undetectable offline".into())); }
         }
     } else {
         layers.push(Layer("ledger-chain".into(), "SKIP".into(), "ledger not next to the pack (honest: integrity of the chain not checked)".into()));

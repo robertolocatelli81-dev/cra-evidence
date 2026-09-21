@@ -9,7 +9,7 @@
 // source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
 // hash (SHA-256) to that value when the file is present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 import { createHash, verify as edVerify, createPublicKey } from "node:crypto";
-import { readFileSync, existsSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, statSync, lstatSync, realpathSync, openSync, readSync, closeSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
@@ -186,11 +186,10 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
   } else if (lp && isFile(lp)) {
     const entries = [], failures = [];
     let prev = GENESIS, n = 0;
-    let ledgerText;
-    try { ledgerText = readText(lp); } catch (e) { ledgerText = null; failures.push("ledger not UTF-8: " + e.message); }
-    for (let line of ledgerText === null ? [] : ledgerText.split("\n")) {
-      if (line.endsWith("\r")) line = line.slice(0, -1);   // exactly one terminator (\n or \r\n); a run of \r is content and counts
-      if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }   // the bound comes BEFORE the blank test (a 65 MiB run of spaces is refused too)
+    for (const rawLine of readLinesOrFail(lp, failures)) {   // streamed: a hostile line is never buffered whole (like the Python reference)
+      if (rawLine === null) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }   // the bound comes BEFORE the blank test
+      let line;
+      try { line = UTF8.decode(rawLine); } catch (err) { failures.push(`entry ${n}: not UTF-8`); break; }
       if (/^[ \t]*$/.test(line)) continue;                  // blank = ASCII space/tab only (U+00A0, U+2028, U+0085, U+FEFF are unparsable lines)
       let e;
       try { e = strictParse(line); } catch (err) { failures.push(`unparsable line: ${err.message}`); break; }
@@ -228,8 +227,8 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
           const r = checkTip(entries.length, entries[0].self_hash, entries[entries.length - 1].self_hash, tipPath, logPubkeyHex);
           layers.push(L("signed-tip", r.ok ? "PASS" : "FAIL", r.ok ? "tip verified: no tail truncation" : r.error));
         }
-      } else if (existsSync(tipPath)) layers.push(L("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail truncation undetected)"));
-      else layers.push(L("signed-tip", "SKIP", "no tip: tail truncation undetectable offline (use a tip key / cryptovalid monitor)"));
+      } else if (existsSync(tipPath)) layers.push(L("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"));
+      else layers.push(L("signed-tip", "SKIP", "no tip: tail not sealed — truncation, rewrite or additions undetectable offline (use a tip key / cryptovalid monitor)"));
     }
   } else layers.push(L("ledger-chain", "SKIP", "ledger not next to the pack (honest: integrity of the chain not checked)"));
   const sig = verifySidecar(packPath, pack, trustStore);
@@ -281,6 +280,39 @@ function verifySidecar(packPath, pack, trustStore) {
   if (trustStore !== null) { const exp = trustStore[side.signer_id]; out.trusted = Boolean(exp) && exp === side.public_key_hex; out.detail = out.trusted ? "trusted-signed" : "signed by a key NOT in the trust store"; }
   else out.detail = "signed (signer not compared with a trust store)";
   return out;
+}
+
+function readLinesOrFail(path, failures) {   // the open failure (EACCES, EISDIR…) is a ledger-chain failure, never an exception
+  try { return Array.from(boundedLinesOpen(path)); } catch (e) { failures.push("ledger unreadable: " + (e.code || e.message)); return []; }
+}
+function* boundedLinesOpen(path) {   // one line's CONTENT (terminator \n or \r\n excluded) as a Buffer; null = a line above the bound (read stops there)
+  const fd = openSync(path, "r"); const chunk = Buffer.allocUnsafe(1 << 20); let pending = [], pendingLen = 0;
+  try {
+    for (;;) {
+      const got = readSync(fd, chunk, 0, chunk.length, null);
+      if (got === 0) break;
+      let start = 0;
+      for (let i = 0; i < got; i++) {
+        if (chunk[i] !== 0x0a) continue;
+        const piece = chunk.subarray(start, i); start = i + 1;
+        if (pendingLen + piece.length > MAX_LINE_BYTES + 1) { yield null; return; }
+        let line = pending.length ? Buffer.concat([...pending, piece]) : Buffer.from(piece); pending = []; pendingLen = 0;
+        if (line.length && line[line.length - 1] === 0x0d) line = line.subarray(0, line.length - 1);   // exactly one terminator
+        if (line.length > MAX_LINE_BYTES) { yield null; return; }   // the bound is on the content
+        yield line;
+      }
+      if (start < got) {
+        const rest = Buffer.from(chunk.subarray(start, got)); pending.push(rest); pendingLen += rest.length;
+        if (pendingLen > MAX_LINE_BYTES + 1) { yield null; return; }   // more than content + one \r without a newline: above the bound
+      }
+    }
+    if (pendingLen) {   // last line without a terminator
+      let line = Buffer.concat(pending);
+      if (line.length && line[line.length - 1] === 0x0d) line = line.subarray(0, line.length - 1);
+      if (line.length > MAX_LINE_BYTES) { yield null; return; }
+      yield line;
+    }
+  } finally { closeSync(fd); }
 }
 
 function sourceDocuments(lp, entries, require, isFile) {

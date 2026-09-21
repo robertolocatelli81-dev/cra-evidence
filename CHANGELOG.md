@@ -15,7 +15,7 @@ read. Export: CycloneDX 1.6 or 1.7 (official 1.7 schema vendored), with serialNu
 (unique), component types, CPEs, SPDX licence *expressions* (`Apache-2.0 OR BSD-3-Clause`), and `dependencies` only
 from edges the producer knows — the installed floor's Requires-Dist graph as walked, with PEP 508 markers evaluated for this interpreter (`packaging` when importable, else a small evaluator; an unevaluable marker keeps the edge and is counted): `dependsOn: []` is emitted only for a component whose metadata was read, everything else is declared an `unknown` composition (CycloneDX's own value for "inconclusive") — never re-invented for an ingested graph; the installed floor reads PEP 639
 `License-Expression` (cryptography ships it since 46.0.0 with the legacy `License` field empty, measured on PyPI metadata 20/09/2026 — with such a distribution 0.2.0 recorded no licence).
-Validated with the official CycloneDX CLI 0.33.1 and pyspdxtools 0.8.5 (CI steps with positive controls; run green on the v0.3.0 tag) and with jsonschema in the tests.
+Validated with the official CycloneDX CLI 0.33.1 and pyspdxtools 0.8.5 (CI steps with positive controls; CI run 35565888807 on master `ace8f55`, 21/09/2026: all seven jobs green) and with jsonschema in the tests.
 Six unmodified generator documents vendored as fixtures. Differential oracle: 137 cases (incl. hostile `source.sha256` values: int, object, null, empty, upper-case, traversal, non-ASCII; `--require-sources` with the ledger missing; a stored document made unreadable), and the failing layers must
 agree too (ablation caught; before the fix Go/Rust skipped a non-string hash while Python/JS failed — found by self-review and by Haiku in round 1). Interop re-measured against cryptovalid 0.15.0. Found by the round-1 review (Opus) and fixed: the Python reference parsed pack, sidecar, tip and trust store with plain `json.loads` (duplicate keys accepted, first-wins for a reader, last-wins for the verifier — JS/Go/Rust refuse them) → strict parser everywhere; Python `verify_tip` did not check `kind` / `log_pubkey_hex` (the three did); the Go verifier ignored the scanner error (a line above 64 MiB ended the scan silently and the prefix verified); a `source_path` could be bound to an index not read from it; an ingested SBOM recorded without `source_path` carried a hash nothing re-verified (Sonnet) — now refused; a generator document nested too deep crashed the ingest instead of raising (Sonnet) — malformed now; the JS verifier built a 65 M-node string on a 65 MiB pad and died (fast path added); all four verifiers and the producer now share cryptovalid's 64 MiB line bound. Round 2 (Opus, Sonnet): the JS verifier accepted integral floats (`10.0` parses to 10 and hashes alike) while the other
 three refused them → number tokens with `.`/`e` refused in JS and in the Python parser (generator documents excepted: they are
@@ -113,7 +113,7 @@ alone → the pack's directory is resolved through the filesystem (`realpath`) i
 listed five gated big-line cases for seven; `SECURITY.md` pointed at a file that does not exist; the README claim "no wall
 clock in tests" was broader than the tests → "the deadline arithmetic never reads the wall clock". Oracle after round 8:
 129 cases, 136 with `CRA_ORACLE_BIG=1`, 0 divergences.
-Round 9 (Opus, Sonnet; Haiku found nothing; 21/09/2026): the full-dependency CI job piped `unittest` into `tee` without
+Round 9 (Opus, Sonnet; Haiku found nothing; Fable 5.1 also ran but its reports were discarded unread when its use was revoked; 21/09/2026): the full-dependency CI job piped `unittest` into `tee` without
 `pipefail` — it could not go red → `shell: bash`, `set -o pipefail`, and the guard asserts the suite ended `OK`; the
 reference read the pack through `pathlib`, which normalises `p.json/` to `p.json` (the three answer ENOTDIR) → OS path
 semantics in the reference, sidecar = the argument + `.sig.json`, two cases; a declared-but-NOT-INSTALLED name was exported
@@ -133,7 +133,16 @@ counterpart is kept as declared in `source.root_purpose_declared`; a stored sour
 regular file (a directory, a symlink to one, a dangling symlink) was reported as honest absence in all four → FAIL, three
 cases; `record_id` must be a UUID (it becomes the schema-patterned `serialNumber`); the texts said "measured 20/09" and
 "in CI" of cases that exist since 21/09 and of a workflow not yet run on 0.3.0 → dated 21/09/2026, and "in CI" is stated
-only where this release's CI run is green on the tag. Oracle: 137 cases, 144 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
+only where this release's CI run is green on the tag. Oracle: 137 cases, 144 with `CRA_ORACLE_BIG=1`, 0 divergences.
+Round 11 (Opus, Sonnet; Haiku found nothing): the CHANGELOG line above had said "run green on the v0.3.0 tag" before any
+tag existed — the same premature-sentence class as rounds 4 and 10 — → replaced by the measured run (master, all jobs
+green); the JS verifier read the whole ledger into memory before the per-line bound (the other three stream) → a bounded
+line reader (the oracle caught two bugs of the new reader before it was right: the bound was applied to the raw line, and
+an open failure escaped as an exception); a failed `record_sbom` could delete a stored document that a concurrent,
+already-recorded call relied on → the copy is removed only if no record references its hash; the tip's SKIP wording said
+"tail truncation" where a rewritten or extended tail is equally unseen without the tip key → "tail not sealed"; an SPDX
+root purpose without a CycloneDX counterpart is now declared in the export too (`cra-evidence:root_purpose_declared`);
+stale type hints fixed. Oracle: 137 cases, 144 with `CRA_ORACLE_BIG=1`, 0 divergences. Legal basis re-read 20/09/2026 (ENISA
 FAQ: no API at initial release; glossary unchanged; Digital Omnibus 2025/0360(COD) still a proposal).
 
 ## 0.2.0 — 2026-09-15
