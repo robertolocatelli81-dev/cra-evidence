@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1 — 2026-09-24
+An exception inside the verifier is not a finding about the pack. Measured on
+`examples/self_evidence/cra_pack.json`, a genuinely signed pack that verifies as `authenticity: signed`: with an
+internal error injected it came back `ok=false, authenticity=FAIL`, indistinguishable from a tampered pack — our own
+defect reported with the value of theirs. Every return now carries `assessed`, false only in the verifier-exception
+branch. `ok` and `authenticity` stay FAIL there (fail-closed: a pack that could not be verified must never read as
+verified), but a caller can tell "this verifier broke" from "this pack is bad". The field is on every return on
+purpose: one that appeared only on the bad path could not be told from an older build that has no field at all.
+
+The verdict tuple `(ok, authenticity, anchored)` and the exit codes are deliberately unchanged, because those are what
+the Go, JS and Rust verifiers are compared against by `verifiers/differential.py`. 121 tests pass; the differential
+oracle runs 139 cases with 0 divergences (js, rust).
+
 ## 0.3.0 — 2026-09-20
 The generator's SBOM document is the evidence. Measured with the real generators (Syft 1.52.0, Trivy 0.74.0, cdxgen
 12.8.4 — all emitting CycloneDX 1.7 by default) and sbomqs 2.1.2 on a 419-component npm tree: 0.2.0 stored only its
