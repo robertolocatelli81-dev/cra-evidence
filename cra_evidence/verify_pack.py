@@ -45,7 +45,12 @@ def verify_pack(path: str, ledger_path: Optional[str] = None, trust_store: Optio
     try:
         return _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources)
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "authenticity": "FAIL", "anchored": False,
+        # An exception in here is OUR defect, not the pack's: `ok`/`authenticity` stay FAIL (fail-closed, a pack that
+        # could not be verified must never read as verified), but `assessed=False` says the run was inconclusive rather
+        # than adverse. Measured 24/09/2026: a valid signed pack came back authenticity="FAIL" on an injected internal
+        # error, indistinguishable from a tampered one. The exit code and the (ok, authenticity, anchored) tuple are
+        # unchanged on purpose — the Go/JS/Rust verifiers are compared against them and do not carry this field yet.
+        return {"ok": False, "assessed": False, "authenticity": "FAIL", "anchored": False,
                 "layers": [_layer("verifier-exception", "FAIL", f"{type(e).__name__}: {str(e)[:160]}")], "pack_sha3": None}
 
 
@@ -113,9 +118,9 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
             pack = parse_line(f.read().decode("utf-8"))                # strict: duplicate keys / NaN / invalid UTF-8 refused, like the three verifiers
         layers.append(_layer("pack-json", "PASS"))
     except (OSError, ValueError, RecursionError) as e:
-        return {"ok": False, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", str(e))], "pack_sha3": None}
+        return {"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", str(e))], "pack_sha3": None}
     if not isinstance(pack, dict):
-        return {"ok": False, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", "pack is not a JSON object")], "pack_sha3": None}
+        return {"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", "pack is not a JSON object")], "pack_sha3": None}
     layers.append(_layer("pack-kind", "PASS" if pack.get("kind") == PACK_KIND else "FAIL", str(pack.get("kind"))))
     scope = pack.get("honest_scope")
     scope_ok = isinstance(scope, str) and HONEST_SCOPE_MARK in scope      # a string, not a list that happens to contain the mark
@@ -215,4 +220,6 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
         auth = "FAIL"
     hard_fail = any(l["status"] == "FAIL" for l in layers)
     ok = auth != "FAIL" and not hard_fail
-    return {"ok": ok, "authenticity": auth if ok else "FAIL", "anchored": anchored, "layers": layers, "pack_sha3": pack.get("pack_sha3")}
+    # `assessed` is present on EVERY return: a field that appears only on the bad path cannot be told from an older
+    # build that has no field at all (absent != false).
+    return {"ok": ok, "assessed": True, "authenticity": auth if ok else "FAIL", "anchored": anchored, "layers": layers, "pack_sha3": pack.get("pack_sha3")}

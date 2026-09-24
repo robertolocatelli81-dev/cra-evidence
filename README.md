@@ -55,6 +55,13 @@ signature, trust store) and one
 authenticity verdict: `trusted-signed` > `signed` > `anchored` > `FAIL`. Without the trusted log key the tip is not
 checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 
+Every result also carries `assessed`. It is false only when the run ended in the verifier's own exception rather than
+in a judgment about the pack: `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller can tell "this
+verifier broke" from "this pack is bad". Measured 24/09/2026: with an internal error injected, a genuinely signed pack
+that verifies as `authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. The field is present
+on every return, so its absence means an older build rather than "assessed". The verdict tuple and the exit codes are
+deliberately unchanged, because those are what the Go, JS and Rust verifiers are compared against.
+
 ## Measured, not promised
 
 - Every tamper the tests can build — a pack field, a ledger record with a stale digest, a re-chained record, a
