@@ -483,9 +483,30 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
     except RecursionError:
         raise ValueError("CycloneDX malformed: components nested too deep") from None
     deps = d.get("dependencies") if isinstance(d.get("dependencies"), list) else []
+    # CycloneDX 1.6 types a `dependsOn` item as refLinkType: "an element identified by the attribute bom-ref in the
+    # SAME BOM document". Counting the edges without resolving them says nothing about whether the graph closes —
+    # measured 24/09/2026 on an ORT reporter fixture where 1 of 6 edges pointed at a bom-ref absent from components,
+    # and this summary reported 6 edges with no sign of it.
+    def _refs(node):            # bom-ref values as they appear in the DOCUMENT, nested components included
+        out = set()
+        for c in node if isinstance(node, list) else []:
+            if isinstance(c, dict):
+                r = _s(c.get("bom-ref"))
+                if r:
+                    out.add(r)
+                out |= _refs(c.get("components"))
+        return out
+
+    known_refs = _refs(d.get("components"))
+    md_ref = _s(((d.get("metadata") or {}).get("component") or {}).get("bom-ref")) if isinstance(d.get("metadata"), dict) else ""
+    if md_ref:
+        known_refs.add(md_ref)
+    edges = [t for x in deps if isinstance(x, dict) and isinstance(x.get("dependsOn"), list) for t in x["dependsOn"]]
+    dangling = sorted({_s(t) for t in edges if _s(t) not in known_refs})
     source = {"format": "cyclonedx-json", "spec_version": _s(d.get("specVersion")), "generator": gen, "generator_version": gen_ver,
               "serial_number": _s(d.get("serialNumber")), "components_declared": declared, "components_nested": nested,
-              "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": sum(len(x["dependsOn"]) for x in deps if isinstance(x, dict) and isinstance(x.get("dependsOn"), list)),
+              "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": len(edges),
+              "dangling_edges": len(dangling), "dangling_refs": dangling[:10],
               "dependencies_declared": len(deps), "component_types": dict(sorted(types.items()))}
     source.update(_fingerprint_bytes(raw, path))
     md_comp = (d.get("metadata") or {}).get("component") if isinstance(d.get("metadata"), dict) else None
