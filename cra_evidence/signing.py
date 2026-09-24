@@ -187,8 +187,13 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         return {"status": "FAIL", "detail": "pack changed after signature (digest differs from the signed one)"}
     try:
         _, Ed25519PublicKey, _ = _ed()
-    except ImportError:   # fail-closed, but the reason stated is the true one: the signature was not checked, not found invalid
-        return {"status": "FAIL", "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
+    except ImportError:
+        # Fail-closed, and now SAID so in the verdict: this host could not run the check, so it is an absence rather
+        # than a finding about the pack. Measured 24/09/2026 while building the 0.3.1 release: a pack signed minutes
+        # earlier with the KMS key verified as authenticity=FAIL in a venv without `cryptography` — our own missing
+        # library reported with the value of a bad signature, on our own release artifact.
+        return {"status": "FAIL", "assessed": False,
+                "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
     if not sidecar_fields_ok(side):   # the signed fields must exist as strings (a missing field is never signed "as null")
         return {"status": "FAIL", "detail": "sidecar field missing or not a string (signed_pack_sha3, signer_id, signed_utc instant, public_key_hex, signature_hex; alg if present)"}
     if not (_hex_ok(side.get("public_key_hex"), 64) and _hex_ok(side.get("signature_hex"), 128)):

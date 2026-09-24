@@ -201,7 +201,10 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     else:
         layers.append(_layer("ledger-chain", "SKIP", "ledger not next to the pack (honest: integrity of the chain not checked)"))
     sig = verify_pack_signature(path, trust_store, pack=pack)
-    layers.append(_layer("producer-signature", sig["status"], sig.get("detail", "")))
+    sig_layer = _layer("producer-signature", sig["status"], sig.get("detail", ""))
+    if sig.get("assessed") is False:      # this host could not run the check: an absence, not a finding
+        sig_layer["assessed"] = False
+    layers.append(sig_layer)
     if sig["status"] == "FAIL":
         auth = "FAIL"
     elif trust_store is not None and sig["status"] == "SKIP":
@@ -222,4 +225,9 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     ok = auth != "FAIL" and not hard_fail
     # `assessed` is present on EVERY return: a field that appears only on the bad path cannot be told from an older
     # build that has no field at all (absent != false).
-    return {"ok": ok, "assessed": True, "authenticity": auth if ok else "FAIL", "anchored": anchored, "layers": layers, "pack_sha3": pack.get("pack_sha3")}
+    # An adverse finding wins; otherwise a layer this host could not read makes the run inconclusive (FAIL >
+    # NOT_ASSESSED > PASS). `ok` and `authenticity` stay as they are: fail-closed either way.
+    judged = any(l["status"] == "FAIL" and l.get("assessed", True) for l in layers)
+    absent = any(l.get("assessed") is False for l in layers)
+    return {"ok": ok, "assessed": judged or not absent, "authenticity": auth if ok else "FAIL",
+            "anchored": anchored, "layers": layers, "pack_sha3": pack.get("pack_sha3")}

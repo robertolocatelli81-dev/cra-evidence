@@ -1,7 +1,15 @@
 # Changelog
 
 ## 0.3.1 — 2026-09-24
-An exception inside the verifier is not a finding about the pack. Measured on
+A check this host could not run is not a finding about the pack. Two branches, both measured.
+
+**A missing library.** Found while building this very release: a pack signed minutes earlier with the KMS key
+verified as `authenticity: FAIL` in a venv without `cryptography` — our own missing library reported with the value
+of a bad signature, on our own release artifact. That branch now carries `assessed: false`; `ok` and `authenticity`
+stay FAIL (fail-closed), but the run reads as inconclusive rather than adverse. With `cryptography` present the same
+pack verifies `trusted-signed`.
+
+**An exception inside the verifier** is not a finding about the pack either. Measured on
 `examples/self_evidence/cra_pack.json`, a genuinely signed pack that verifies as `authenticity: signed`: with an
 internal error injected it came back `ok=false, authenticity=FAIL`, indistinguishable from a tampered pack — our own
 defect reported with the value of theirs. Every return now carries `assessed`, false only in the verifier-exception
