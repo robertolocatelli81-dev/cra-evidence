@@ -17,11 +17,33 @@ from typing import Any, Dict, Optional, Tuple
 
 import re
 
-from .ledger import parse_line
+from .ledger import parse_line, read_regular
 
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
 HEX128_RE = re.compile(r"[0-9a-f]{128}")
 
+
+
+# small-order / non-canonical Ed25519 keys: R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026); same list in the JS/Go/Rust verifiers
+WEAK_ED25519_KEYS = frozenset((
+    "0100000000000000000000000000000000000000000000000000000000000000",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0000000000000000000000000000000000000000000000000000000000000080",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+    "0100000000000000000000000000000000000000000000000000000000000080",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+))
+
+
+def weak_ed25519_key(pub_hex: str) -> bool:
+    """True for a small-order key or a non-canonical encoding (y >= p). `pub_hex` is lower-case hex of 64 characters."""
+    if pub_hex in WEAK_ED25519_KEYS:
+        return True
+    return (int.from_bytes(bytes.fromhex(pub_hex), "little") & ((1 << 255) - 1)) >= 2 ** 255 - 19
 
 def _hex_ok(v: Any, n: int) -> bool:
     """Signature/key hex as the profile writes it: lower-case, exactly n hex characters — `bytes.fromhex` would also
@@ -99,6 +121,8 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
     lk = tip.get("log_pubkey_hex")
     if lk not in (None, "") and lk != trusted_pubkey_hex:   # "" = absent (cryptovalid profile, as Go/JS); a non-string never equals the key
         return {"ok": False, "error": "tip_invalid: tip log key differs from the trusted log key"}
+    if weak_ed25519_key(trusted_pubkey_hex):
+        return {"ok": False, "error": "tip_invalid: weak log key (small order or non-canonical)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(trusted_pubkey_hex)).verify(
             bytes.fromhex(tip["signature_hex"]), tip_payload(n, tip["ledger_id"], tip["tip_sha256"], tip["ts"]))
@@ -167,12 +191,10 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         return {"status": "SKIP", "detail": "pack not signed"}
     except OSError as e:
         return {"status": "FAIL", "detail": f"sidecar path unusable ({e.errno}: {e.strerror})"}
-    try:
-        with open(sp, "rb") as f:
-            side = parse_line(f.read().decode("utf-8"))              # strict: duplicate keys / NaN / UTF-8 refused like the verifiers
+    try:                                                # a regular file within MAX_DOC_BYTES (a FIFO / device is a FAIL, never a hang)
+        side = parse_line(read_regular(sp).decode("utf-8"))              # strict: duplicate keys / NaN / UTF-8 refused like the verifiers
         if pack is None:
-            with open(pack_path, "rb") as f:
-                pack = parse_line(f.read().decode("utf-8"))          # the verifier passes the pack it already read (read once)
+            pack = parse_line(read_regular(pack_path).decode("utf-8"))   # the verifier passes the pack it already read (read once)
     except (OSError, ValueError, RecursionError) as e:
         return {"status": "FAIL", "detail": f"unreadable: {str(e)[:120]}"}
     if not isinstance(side, dict) or not isinstance(pack, dict):
@@ -198,12 +220,17 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         return {"status": "FAIL", "detail": "sidecar field missing or not a string (signed_pack_sha3, signer_id, signed_utc instant, public_key_hex, signature_hex; alg if present)"}
     if not (_hex_ok(side.get("public_key_hex"), 64) and _hex_ok(side.get("signature_hex"), 128)):
         return {"status": "FAIL", "detail": "signature invalid for the declared key (key/signature must be lower-case hex of exact length)"}
+    if weak_ed25519_key(side["public_key_hex"]):
+        return {"status": "FAIL", "detail": "signature invalid for the declared key (weak key: small order or non-canonical)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001
         return {"status": "FAIL", "detail": f"signature invalid for the declared key ({type(e).__name__})"}
     fp = hashlib.sha256(bytes.fromhex(side["public_key_hex"])).hexdigest()[:16]   # recomputed, never echoed
-    if side.get("fingerprint") not in (None, fp):
+    # absent = not declared; PRESENT must be the key's fingerprint — `null` is a malformed value like any other non-match
+    # (the signer always writes the 16-hex string). Measured 25/09/2026: `fingerprint: null` passed in the five while an
+    # int / list / object failed: absent != null.
+    if "fingerprint" in side and side["fingerprint"] != fp:
         return {"status": "FAIL", "detail": "declared fingerprint does not match the signing key"}
     if not isinstance(side.get("signer_id"), str):
         return {"status": "FAIL", "detail": "signer_id must be a string"}

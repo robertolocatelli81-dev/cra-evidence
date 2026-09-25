@@ -9,16 +9,46 @@
 // source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
 // hash (SHA-256) to that value when the file is present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 import { createHash, verify as edVerify, createPublicKey } from "node:crypto";
-import { readFileSync, existsSync, statSync, lstatSync, realpathSync, openSync, readSync, closeSync } from "node:fs";
+import { statSync, lstatSync, realpathSync, openSync, readSync, closeSync, fstatSync, constants as FS } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
 const RECORD_KINDS = new Set(["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"]);
 const INSTANT_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$/;
-const ledgerFileNameOk = (v) => typeof v === "string" && v !== "" && v !== "." && v !== ".." && !v.includes("/") && !v.includes("\\");
+const ledgerFileNameOk = (v) => typeof v === "string" && v !== "" && v !== "." && v !== ".." && !v.includes("/") && !v.includes("\\") && !v.includes("\u0000");   // NUL: never a file name
 const TIP_KIND = "cryptovalid_tip/1", SPKI = Buffer.from("302a300506032b6570032100", "hex"), HEX64 = /^[0-9a-f]{64}$/;
 
 const MAX_LINE_BYTES = 64 << 20, MAX_SOURCE_BYTES = 256 << 20;   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
+const MAX_DOC_BYTES = MAX_LINE_BYTES;   // ONE bound for every JSON document read: a ledger line, the pack, the sidecar, the tip, the trust store
+const FAULT_ENV = "CRA_VERIFY_INJECT_FAULT";   // test hook: "1" throws inside the guarded verification (only ever an inconclusive FAIL)
+// Every file is opened WITHOUT blocking (a FIFO with no writer) and read only if the OPEN descriptor is a regular file, within
+// the bound: a FIFO must not hang the verifier, a symlink to /dev/zero must not exhaust its memory (same rule in the four).
+const OPEN_FLAGS = FS.O_RDONLY | (FS.O_NONBLOCK ?? 0) | (FS.O_NOCTTY ?? 0);
+class Unreadable extends Error {}
+class NotRegular extends Unreadable { constructor() { super("not a regular file"); } }
+class TooLarge extends Unreadable { constructor(cap) { super(`larger than ${cap} bytes`); } }
+function openRegular(p) {   // refused BEFORE it is opened (opening a device can act on it); fstat on the descriptor closes the race
+  if (!statSync(p).isFile()) throw new NotRegular();
+  const fd = openSync(p, OPEN_FLAGS);
+  try { if (!fstatSync(fd).isFile()) throw new NotRegular(); } catch (e) { closeSync(fd); throw e; }
+  return fd;
+}
+function readRegular(p, cap = MAX_DOC_BYTES) {
+  const fd = openRegular(p);
+  try {
+    if (fstatSync(fd).size > cap) throw new TooLarge(cap);
+    const chunks = [], chunk = Buffer.allocUnsafe(1 << 20); let total = 0;
+    for (;;) {   // read to EOF, never past cap + 1 bytes (a file that grows while it is read is refused, not buffered)
+      const got = readSync(fd, chunk, 0, chunk.length, null);
+      if (got === 0) break;
+      total += got; if (total > cap) throw new TooLarge(cap);
+      chunks.push(Buffer.from(chunk.subarray(0, got)));
+    }
+    return Buffer.concat(chunks, total);
+  } finally { closeSync(fd); }
+}
+// lstat ENOENT / ENOTDIR = absent; anything else at the path (FIFO, device, directory, dangling symlink) is PRESENT and must read as a regular file
+const present = (p) => { try { lstatSync(p); return true; } catch (e) { return !(e.code === "ENOENT" || e.code === "ENOTDIR"); } };
 function pyEscape(s) {
   if (!/[^\x20-\x7e]|["\\]/.test(s)) return '"' + s + '"';   // fast path: nothing to escape (a 65 MB pad must not build a 65 M-node rope)
   let out = '"';
@@ -132,7 +162,7 @@ function badNumberToken(text) {   // outside strings: a token with '.', 'e', 'E'
   return null;
 }
 const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });   // strict: one invalid byte is unreadable, never U+FFFD; a BOM stays in the text (JSON.parse refuses it, as the other three)
-const readText = (p) => UTF8.decode(readFileSync(p));
+const readText = (p) => UTF8.decode(readRegular(p));   // a regular file within MAX_DOC_BYTES
 function strictParse(text) {   // JSON.parse alone hides what the profile forbids
   if (/\b(NaN|Infinity)\b/.test(text) && !/"[^"]*\b(NaN|Infinity)\b[^"]*"/.test(text)) throw new Error("non-JSON constant");
   const bad = badNumberToken(text); if (bad) throw new Error(bad);
@@ -142,8 +172,18 @@ function strictParse(text) {   // JSON.parse alone hides what the profile forbid
   return JSON.parse(text);
 }
 const HEX128 = /^[0-9a-f]{128}$/, EXTERNAL_FORMATS = new Set(["cyclonedx-json", "spdx-json", "spdx-jsonld"]);
+// small-order / non-canonical Ed25519 keys: R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026); same list in the JS/Go/Rust verifiers
+const WEAK_ED25519 = new Set(["0100000000000000000000000000000000000000000000000000000000000000", "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000080", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa", "0100000000000000000000000000000000000000000000000000000000000080", "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"]);
+function weakEd25519(pubHex) {
+  if (WEAK_ED25519.has(pubHex)) return true;
+  const pk = Buffer.from(pubHex, "hex");
+  if ((pk[31] & 0x7f) !== 0x7f || pk[0] < 0xed) return false;
+  for (let i = 1; i < 31; i++) if (pk[i] !== 0xff) return false;
+  return true;
+}
 function edOk(pubHex, msg, sigHex) {   // lower-case hex of exact length, as the profile writes it (Buffer.from(…, "hex") would truncate at the first non-hex char)
   if (typeof pubHex !== "string" || !HEX64.test(pubHex) || typeof sigHex !== "string" || !HEX128.test(sigHex)) return false;
+  if (weakEd25519(pubHex)) return false;
   try { return edVerify(null, msg, createPublicKey({ key: Buffer.concat([SPKI, Buffer.from(pubHex, "hex")]), format: "der", type: "spki" }), Buffer.from(sigHex, "hex")); }
   catch { return false; }
 }
@@ -154,8 +194,13 @@ function signedPayload(side) {
 const L = (layer, status, detail = "") => ({ layer, status, detail });
 
 export function verifyPack(packPath, { ledgerPath = null, trustStore = null, logPubkeyHex = null, requireSources = false } = {}) {
-  try { return verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources); }
-  catch (e) { return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("verifier-exception", "FAIL", String(e.message || e).slice(0, 160))], pack_sha3: null }; }
+  try {
+    if (process.env[FAULT_ENV] === "1") throw new Error(`injected internal error (${FAULT_ENV}=1)`);
+    return { ...verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources), assessed: true };
+  }
+  // an exception here is the VERIFIER's defect, not a finding about the pack: fail-closed (ok false, FAIL) but assessed=false,
+  // the same layer and shape as the Python reference — a tool fault must never read as a tampered pack
+  catch (e) { return { ok: false, assessed: false, authenticity: "FAIL", anchored: false, layers: [L("verifier-exception", "FAIL", `${e?.name ?? "Error"}: ${String(e?.message ?? e).slice(0, 160)}`)], pack_sha3: null }; }
 }
 
 function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources = false) {
@@ -178,12 +223,11 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
   let realPack; try { realPack = realpathSync.native(packPath); } catch { realPack = packPath; }   // the pack's REAL directory (OS realpath: symlinks resolved before "..", as Python/Go/Rust do), the same in all four
   const lp = ledgerPath || (lf !== undefined && lf !== null && !lfBad ? join(dirname(realPack), lf) : null);
   let anchored = false;
-  const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
   if (lfBad) {
     layers.push(L("ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"));
-  } else if ((ledgerPath || logPubkeyHex || requireSources) && !(lp && isFile(lp))) {
+  } else if ((ledgerPath || logPubkeyHex || requireSources) && !(lp && present(lp))) {
     layers.push(L("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"));
-  } else if (lp && isFile(lp)) {
+  } else if (lp && present(lp)) {
     const entries = [], failures = [];
     let prev = GENESIS, n = 0;
     for (const rawLine of readLinesOrFail(lp, failures)) {   // streamed: a hostile line is never buffered whole (like the Python reference)
@@ -219,15 +263,15 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
       const ne = pack.ledger_entries;
       const okState = Number.isInteger(ne) && ne > 0 && ne <= entries.length && entries[ne - 1].self_hash === pack.ledger_last_self_hash && (anchorIdx === null || anchorIdx >= ne);
       layers.push(L("pack-ledger-state", okState ? "PASS" : "FAIL", `declared entries=${ne} last=${String(pack.ledger_last_self_hash).slice(0, 12)}…; anchor idx=${anchorIdx}`));
-      layers.push(sourceDocuments(lp, entries, requireSources, isFile));
+      layers.push(sourceDocuments(lp, entries, requireSources));
       const tipPath = lp + ".tip.json";
       if (logPubkeyHex) {
-        if (!existsSync(tipPath)) layers.push(L("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"));
+        if (!present(tipPath)) layers.push(L("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"));
         else {
           const r = checkTip(entries.length, entries[0].self_hash, entries[entries.length - 1].self_hash, tipPath, logPubkeyHex);
           layers.push(L("signed-tip", r.ok ? "PASS" : "FAIL", r.ok ? "tip verified: no tail truncation" : r.error));
         }
-      } else if (existsSync(tipPath)) layers.push(L("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"));
+      } else if (present(tipPath)) layers.push(L("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"));
       else layers.push(L("signed-tip", "SKIP", "no tip: tail not sealed — truncation, rewrite or additions undetectable offline (use a tip key / cryptovalid monitor)"));
     }
   } else layers.push(L("ledger-chain", "SKIP", "ledger not next to the pack (honest: integrity of the chain not checked)"));
@@ -274,7 +318,7 @@ function verifySidecar(packPath, pack, trustStore) {
   try { sigOk = typeof side.public_key_hex === "string" && typeof side.signature_hex === "string" && edOk(side.public_key_hex, signedPayload(side), side.signature_hex); } catch { sigOk = false; }   // a payload that cannot be canonicalised (missing/odd fields) is an invalid signature, never an exception
   if (!sigOk) return { status: "FAIL", detail: "signature invalid for the declared key" };
   const fp = sha256(Buffer.from(side.public_key_hex, "hex")).slice(0, 16);
-  if (side.fingerprint !== undefined && side.fingerprint !== null && side.fingerprint !== fp) return { status: "FAIL", detail: "declared fingerprint does not match the signing key" };
+  if (Object.prototype.hasOwnProperty.call(side, "fingerprint") && side.fingerprint !== fp) return { status: "FAIL", detail: "declared fingerprint does not match the signing key" };
   const out = { status: "PASS", signer_id: side.signer_id, fingerprint: fp, trusted: false };
   if (typeof side.signer_id !== "string") return { status: "FAIL", detail: "signer_id must be a string" };
   if (trustStore !== null) { const exp = trustStore[side.signer_id]; out.trusted = Boolean(exp) && exp === side.public_key_hex; out.detail = out.trusted ? "trusted-signed" : "signed by a key NOT in the trust store"; }
@@ -282,11 +326,11 @@ function verifySidecar(packPath, pack, trustStore) {
   return out;
 }
 
-function readLinesOrFail(path, failures) {   // the open failure (EACCES, EISDIR…) is a ledger-chain failure, never an exception
+function readLinesOrFail(path, failures) {   // the open failure (EACCES, not a regular file…) is a ledger-chain failure, never an exception
   try { return Array.from(boundedLinesOpen(path)); } catch (e) { failures.push("ledger unreadable: " + (e.code || e.message)); return []; }
 }
 function* boundedLinesOpen(path) {   // one line's CONTENT (terminator \n or \r\n excluded) as a Buffer; null = a line above the bound (read stops there)
-  const fd = openSync(path, "r"); const chunk = Buffer.allocUnsafe(1 << 20); let pending = [], pendingLen = 0;
+  const fd = openRegular(path); const chunk = Buffer.allocUnsafe(1 << 20); let pending = [], pendingLen = 0;
   try {
     for (;;) {
       const got = readSync(fd, chunk, 0, chunk.length, null);
@@ -315,7 +359,7 @@ function* boundedLinesOpen(path) {   // one line's CONTENT (terminator \n or \r\
   } finally { closeSync(fd); }
 }
 
-function sourceDocuments(lp, entries, require, isFile) {
+function sourceDocuments(lp, entries, require) {
   const wanted = new Set(); let malformed = 0;
   for (const e of entries) {
     const d = isObj(e.data) ? e.data : {};
@@ -330,12 +374,14 @@ function sourceDocuments(lp, entries, require, isFile) {
   for (const h of [...wanted].sort()) {
     const fp = lp + ".sources/" + h + ".json";   // concatenation, never path.join (which would resolve ".." lexically before a symlink)
     try { lstatSync(fp); } catch (e) { if (e.code === "ENOENT") { absent++; continue; } bad.push(`${h.slice(0, 16)}… stored path unusable (${e.code})`); continue; }
-    if (!isFile(fp)) { bad.push(`${h.slice(0, 16)}… stored path is not a regular file`); continue; }   // something IS there: never "absent"
     let got;
-    try {
-      if (statSync(fp).size > MAX_SOURCE_BYTES) { bad.push(`${h.slice(0, 16)}… stored file exceeds ${MAX_SOURCE_BYTES} bytes`); continue; }
-      got = sha256(readFileSync(fp));
-    } catch (e) { bad.push(`${h.slice(0, 16)}… unreadable (${e.code || e.name})`); continue; }
+    try { got = sha256(readRegular(fp, MAX_SOURCE_BYTES)); }   // opened without blocking, judged on the open descriptor, bounded
+    catch (e) {
+      if (e instanceof NotRegular) bad.push(`${h.slice(0, 16)}… stored path is not a regular file`);   // something IS there: never "absent"
+      else if (e instanceof TooLarge) bad.push(`${h.slice(0, 16)}… stored file exceeds ${MAX_SOURCE_BYTES} bytes`);
+      else bad.push(`${h.slice(0, 16)}… unreadable (${e.code || e.name})`);
+      continue;
+    }
     if (got === h) present++; else bad.push(`${h.slice(0, 16)}… stored bytes hash to ${got.slice(0, 16)}…`);
   }
   if (bad.length) return L("source-documents", "FAIL", `${bad.length} source document(s) do not match their recorded SHA-256: ` + bad.slice(0, 3).join("; "));

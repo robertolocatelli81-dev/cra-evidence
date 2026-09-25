@@ -60,7 +60,14 @@ in a judgment about the pack: `ok` and `authenticity` stay `FAIL` there (fail-cl
 verifier broke" from "this pack is bad". Measured 24/09/2026: with an internal error injected, a genuinely signed pack
 that verifies as `authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. The field is present
 on every return, so its absence means an older build rather than "assessed". The verdict tuple and the exit codes are
-deliberately unchanged, because those are what the Go, JS and Rust verifiers are compared against.
+deliberately unchanged, because those are what the Go, JS and Rust verifiers are compared against. Since 25/09/2026
+(Unreleased) the Go, JS and Rust verifiers carry the same field and the same `verifier-exception` layer on their own
+internal errors, and the differential oracle compares `assessed` too.
+
+Every file a verifier reads must be a regular file — decided on the opened descriptor, without blocking on a FIFO — of
+at most 64 MiB (67108864 bytes) for a JSON document (pack, sidecar, tip, trust store, one ledger line) and 256 MiB for a
+stored generator document; anything else is refused unread, with the outcome of an unreadable file in that position.
+The bound limits what is read, not what parsing a document within it costs (measured peaks in `verifiers/README.md`).
 
 ## Measured, not promised
 
@@ -160,8 +167,9 @@ by the four verifiers of this repository.
 
 `verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
 (standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 139 intact and tampered fixtures: the
-four verifiers must agree on every one, verdict and failing layers alike (measured 21/09/2026: 0 divergences). An auditor can therefore verify a pack,
+command line and the same verdict, plus a differential oracle that CI runs on 160 intact and tampered fixtures: the
+four verifiers must agree on every one, verdict, `assessed` and failing layers alike, and 21 of them must also meet a
+declared outcome (measured 25/09/2026: 0 divergences). An auditor can therefore verify a pack,
 its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
 
 ## Signing with AWS KMS

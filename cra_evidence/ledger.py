@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -45,6 +46,57 @@ def _refuse_constant(name: str):
 
 
 MAX_LINE_BYTES = 64 << 20   # same bound as cryptovalid's Go verifier (MaxLineBytes): the four cra verifiers agree on it
+# ONE bound for every JSON document a verifier reads — a ledger line, the pack, the signature sidecar, the signed tip, the
+# trust store: the four verifiers refuse a larger one unread (the ledger as a whole is bounded per line, not in total).
+MAX_DOC_BYTES = MAX_LINE_BYTES
+
+
+class UnreadableFile(OSError):
+    """The path opened but is not something a verifier may read: not a regular file, or above the size bound."""
+
+
+class NotRegularFile(UnreadableFile):
+    def __init__(self) -> None:
+        super().__init__("not a regular file")
+
+
+class FileTooLarge(UnreadableFile):
+    def __init__(self, cap: int) -> None:
+        super().__init__(f"larger than {cap} bytes")
+
+
+_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_CLOEXEC", 0)
+
+
+def open_regular(path: str):
+    """Open for reading WITHOUT blocking (a FIFO with no writer, a device) and keep the descriptor only if it is a
+    regular file — decided on the open descriptor (fstat), so the check and the read see the same object. A FIFO,
+    /dev/zero (directly or through a symlink), a socket or a directory raise NotRegularFile before any byte is read.
+    Measured 25/09/2026: a FIFO in place of the pack, sidecar, tip or trust store blocked every verifier, and a symlink
+    to /dev/zero read until the process was killed for memory. A path that is not a regular file is refused BEFORE it is
+    opened (opening a device can act on it); the fstat on the open descriptor closes the race with a swap in between."""
+    if not stat.S_ISREG(os.stat(path).st_mode):
+        raise NotRegularFile()
+    fd = os.open(path, _OPEN_FLAGS)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise NotRegularFile()
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def read_regular(path: str, cap: int = MAX_DOC_BYTES) -> bytes:
+    """The bytes of a regular file of at most `cap` bytes (FileTooLarge above it: refused on the size fstat reports,
+    and again if more than `cap` bytes can be read — a file that grows while it is read is never buffered past the cap)."""
+    with open_regular(path) as f:
+        if os.fstat(f.fileno()).st_size > cap:
+            raise FileTooLarge(cap)
+        data = f.read(cap + 1)
+    if len(data) > cap:
+        raise FileTooLarge(cap)
+    return data
 
 
 def _no_dup_keys(pairs):
@@ -203,22 +255,26 @@ class Ledger:
         return entry
 
     # ── read / verify ──────────────────────────────────────────────────────
-    def entries(self) -> Iterator[Dict[str, Any]]:
-        if not os.path.exists(self.path):
-            return iter(())
-        with open(self.path, "rb") as f:
-            while True:
-                raw = f.readline(MAX_LINE_BYTES + 2)          # bounded read: a hostile line is never buffered whole
-                if not raw:
-                    break
-                if not raw.endswith(b"\n") and len(raw) == MAX_LINE_BYTES + 2:
-                    raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
-                content = line_content(raw)
-                if len(content) > MAX_LINE_BYTES:             # the bound is on the content, terminator excluded, BEFORE the blank test, in all four
-                    raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
-                if is_blank_line(content):
-                    continue
-                yield parse_line(content.decode("utf-8"))   # NaN/Infinity are not JSON: fail; invalid UTF-8: fail
+    def entries(self, f=None) -> Iterator[Dict[str, Any]]:
+        """The parsed entries of the ledger file, or of `f` (an already-open binary file, e.g. from open_regular())."""
+        if f is None:
+            if not os.path.exists(self.path):
+                return
+            with open_regular(self.path) as g:
+                yield from self.entries(g)
+            return
+        while True:
+            raw = f.readline(MAX_LINE_BYTES + 2)          # bounded read: a hostile line is never buffered whole
+            if not raw:
+                break
+            if not raw.endswith(b"\n") and len(raw) == MAX_LINE_BYTES + 2:
+                raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
+            content = line_content(raw)
+            if len(content) > MAX_LINE_BYTES:             # the bound is on the content, terminator excluded, BEFORE the blank test, in all four
+                raise ValueError(f"ledger line exceeds {MAX_LINE_BYTES} bytes (cryptovalid profile: refused, never truncated)")
+            if is_blank_line(content):
+                continue
+            yield parse_line(content.decode("utf-8"))   # NaN/Infinity are not JSON: fail; invalid UTF-8: fail
 
     def verify(self, entries: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Snapshot verification: every self_hash recomputes, every prev_hash links, idx contiguous, non-empty.

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,6 +41,7 @@ type layer struct {
 }
 type result struct {
 	Ok           bool    `json:"ok"`
+	Assessed     bool    `json:"assessed"` // false only when the verifier itself failed (verifier-exception): inconclusive, not adverse
 	Authenticity string  `json:"authenticity"`
 	Anchored     bool    `json:"anchored"`
 	Layers       []layer `json:"layers"`
@@ -93,6 +95,7 @@ func parseObject(b []byte) (*Object, error) {
 	}
 	return o, nil
 }
+
 var hex128 = regexp.MustCompile(`^[0-9a-f]{128}$`)
 
 func edOK(pubHex string, msg []byte, sigHex string) bool {
@@ -104,7 +107,28 @@ func edOK(pubHex string, msg []byte, sigHex string) bool {
 	if e1 != nil || e2 != nil || len(pub) != ed25519.PublicKeySize || len(sig) != ed25519.SignatureSize {
 		return false
 	}
+	if weakEd25519(pub) {
+		return false
+	}
 	return ed25519.Verify(ed25519.PublicKey(pub), msg, sig)
+}
+
+// small-order / non-canonical Ed25519 keys: R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026); same list in the JS/Go/Rust verifiers
+var weakEd25519Keys = map[string]bool{"0100000000000000000000000000000000000000000000000000000000000000": true, "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f": true, "0000000000000000000000000000000000000000000000000000000000000000": true, "0000000000000000000000000000000000000000000000000000000000000080": true, "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05": true, "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a": true, "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85": true, "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa": true, "0100000000000000000000000000000000000000000000000000000000000080": true, "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff": true}
+
+func weakEd25519(pk []byte) bool {
+	if len(pk) != 32 || weakEd25519Keys[hex.EncodeToString(pk)] {
+		return true
+	}
+	if pk[31]&0x7f != 0x7f || pk[0] < 0xed {
+		return false
+	}
+	for i := 1; i < 31; i++ {
+		if pk[i] != 0xff {
+			return false
+		}
+	}
+	return true
 }
 func short(s any, n int) string {
 	t := fmt.Sprint(s)
@@ -117,11 +141,18 @@ func short(s any, n int) string {
 func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust bool, logPub string, requireSources bool) (r result) {
 	defer func() {
 		if e := recover(); e != nil {
-			r = result{Ok: false, Authenticity: "FAIL", Layers: []layer{{"verifier-exception", "FAIL", fmt.Sprint(e)}}}
+			// a panic is the VERIFIER's defect, not a finding about the pack: fail-closed (ok false, FAIL) but assessed=false,
+			// the same layer and shape as the Python reference — a tool fault must never read as a tampered pack
+			r = result{Ok: false, Assessed: false, Authenticity: "FAIL", Layers: []layer{{"verifier-exception", "FAIL", short("panic: "+fmt.Sprint(e), 160)}}}
+			return
 		}
+		r.Assessed = true
 	}()
+	if os.Getenv(faultEnv) == "1" {
+		panic("injected internal error (" + faultEnv + "=1)")
+	}
 	var layers []layer
-	raw, err := os.ReadFile(packPath)
+	raw, err := readRegular(packPath, maxDocBytes)
 	if err != nil {
 		return result{Authenticity: "FAIL", Layers: []layer{{"pack-json", "FAIL", err.Error()}}}
 	}
@@ -162,19 +193,24 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 			lp = filepath.Join(filepath.Dir(realPack), lf)
 		}
 	}
-	isFile := func(p string) bool { st, e := os.Stat(p); return e == nil && st.Mode().IsRegular() }
 	anchored := false
 	if lfBad {
 		layers = append(layers, layer{"ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"})
-	} else if (ledgerPath != "" || logPub != "" || requireSources) && !(lp != "" && isFile(lp)) {
+	} else if (ledgerPath != "" || logPub != "" || requireSources) && !(lp != "" && present(lp)) {
 		layers = append(layers, layer{"ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"})
-	} else if lp != "" && isFile(lp) {
-		f, _ := os.Open(lp)
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 1<<20), maxLineBytes+2) // content up to the bound plus "\r\n": exactly 64 MiB of content is accepted
+	} else if lp != "" && present(lp) {
 		var entries []*Object
 		var failures []string
 		prev, n := genesis, 0
+		var src io.Reader = strings.NewReader("") // an unreadable ledger is an empty stream plus a failure
+		f, _, oerr := openRegular(lp)             // something is there: it must open as a regular file (never "absent", never a hang)
+		if oerr != nil {
+			failures = append(failures, "ledger unreadable: "+oerr.Error())
+		} else {
+			src = f
+		}
+		sc := bufio.NewScanner(src)
+		sc.Buffer(make([]byte, 1<<20), maxLineBytes+2) // content up to the bound plus "\r\n": exactly 64 MiB of content is accepted
 		for sc.Scan() {
 			line := sc.Bytes()
 			// bufio.ScanLines already drops exactly one trailing \r (dropCR): no second strip here — a run of \r is content
@@ -209,8 +245,10 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 		if err := sc.Err(); err != nil { // a line above 64 MiB (cryptovalid MaxLineBytes) or an I/O error ends the scan: the prefix is NOT the ledger
 			failures = append(failures, fmt.Sprintf("entry %d: line exceeds 64 MiB or unreadable: %v", n, err))
 		}
-		f.Close()
-		if n == 0 {
+		if f != nil {
+			f.Close()
+		}
+		if n == 0 && oerr == nil {
 			failures = append(failures, "empty_ledger: zero entries, nothing to verify")
 		}
 		if len(failures) > 0 {
@@ -258,13 +296,13 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 			first, _ := getS(entries[0], "self_hash")
 			lastHash, _ := getS(entries[len(entries)-1], "self_hash")
 			if logPub != "" {
-				if !isFile(tipPath) {
+				if !present(tipPath) {
 					layers = append(layers, layer{"signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"})
 				} else {
 					ok, why := checkTip(len(entries), first, lastHash, tipPath, logPub)
 					layers = append(layers, layer{"signed-tip", ifs(ok, "PASS", "FAIL"), ifs(ok, "tip verified: no tail truncation", why)})
 				}
-			} else if isFile(tipPath) {
+			} else if present(tipPath) {
 				layers = append(layers, layer{"signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"})
 			} else {
 				layers = append(layers, layer{"signed-tip", "SKIP", "no tip: tail not sealed — truncation, rewrite or additions undetectable offline"})
@@ -311,9 +349,9 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 }
 
 func checkTip(count int, first, last, tipPath, pubHex string) (bool, string) {
-	raw, err := os.ReadFile(tipPath)
+	raw, err := readRegular(tipPath, maxDocBytes)
 	if err != nil {
-		return false, "tip_unreadable"
+		return false, "tip_unreadable: " + err.Error()
 	}
 	tip, err := parseObject(raw)
 	if err != nil {
@@ -362,7 +400,7 @@ func verifySidecar(packPath string, pack *Object, declared string, trust map[str
 		}
 		return "FAIL", "sidecar path unusable: " + err.Error(), false // any other lstat error (ENAMETOOLONG, EACCES…) is never "not signed"
 	}
-	raw, err := os.ReadFile(sp)
+	raw, err := readRegular(sp, maxDocBytes)
 	if err != nil {
 		return "FAIL", "unreadable: " + err.Error(), false
 	}
@@ -406,7 +444,7 @@ func verifySidecar(packPath string, pack *Object, declared string, trust map[str
 	pb, _ := hex.DecodeString(pub)
 	fp := sha256.Sum256(pb)
 	fpHex := hex.EncodeToString(fp[:])[:16]
-	if f, ok := side.Vals["fingerprint"]; ok && f != nil && f != fpHex {
+	if f, ok := side.Vals["fingerprint"]; ok && f != fpHex { // absent = not declared; present (null included) must be the key's fingerprint
 		return "FAIL", "declared fingerprint does not match the signing key", false
 	}
 	if _, isStr := side.Vals["signer_id"].(string); !isStr {
@@ -431,11 +469,71 @@ func ifs(c bool, a, b string) string {
 }
 
 func ledgerFileNameOK(v string) bool {
-	return v != "" && v != "." && v != ".." && !strings.ContainsAny(v, "/\\")
+	return v != "" && v != "." && v != ".." && !strings.ContainsAny(v, "/\\\x00") // NUL: never a file name
 }
 
-const maxLineBytes = 64 << 20    // cryptovalid MaxLineBytes: content of one JSONL line, terminator excluded
-const maxSourceBytes = 256 << 20 // a stored generator document above this is refused unread (never a hang on /dev/zero)
+const maxLineBytes = 64 << 20              // cryptovalid MaxLineBytes: content of one JSONL line, terminator excluded
+const maxDocBytes = maxLineBytes           // ONE bound for every JSON document read: a ledger line, the pack, the sidecar, the tip, the trust store
+const maxSourceBytes = 256 << 20           // a stored generator document above this is refused unread
+const faultEnv = "CRA_VERIFY_INJECT_FAULT" // test hook: "1" panics inside the guarded verification (only ever an inconclusive FAIL)
+
+var errNotRegular = errors.New("not a regular file")
+
+type tooLarge struct{ cap int64 }
+
+func (e tooLarge) Error() string { return fmt.Sprintf("larger than %d bytes", e.cap) }
+
+// openRegular opens WITHOUT blocking (a FIFO with no writer, a device) and keeps the descriptor only if it is a regular
+// file, decided on the open descriptor (fstat): a FIFO must not hang the verifier, a symlink to /dev/zero must not
+// exhaust its memory — the same rule in the four verifiers.
+func openRegular(p string) (*os.File, os.FileInfo, error) {
+	if pre, err := os.Stat(p); err != nil { // refused BEFORE it is opened (opening a device can act on it); the fstat below closes the race
+		return nil, nil, err
+	} else if !pre.Mode().IsRegular() {
+		return nil, nil, errNotRegular
+	}
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	if !st.Mode().IsRegular() {
+		f.Close()
+		return nil, nil, errNotRegular
+	}
+	return f, st, nil
+}
+
+// readRegular: the bytes of a regular file of at most max bytes (refused on the fstat size, and again if more can be read).
+func readRegular(p string, max int64) ([]byte, error) {
+	f, st, err := openRegular(p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if st.Size() > max {
+		return nil, tooLarge{max}
+	}
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, tooLarge{max}
+	}
+	return b, nil
+}
+
+// present: lstat ENOENT / ENOTDIR = absent; anything else at the path (FIFO, device, directory, dangling symlink) is
+// present and must then read as a regular file or be a FAIL — never a silent "absent".
+func present(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil || !(os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR))
+}
 
 // sourceDocuments: the SBOM source documents recorded by hash must, when present next to the ledger, hash to it.
 func sourceDocuments(lp string, entries []*Object, require bool) layer {
@@ -489,17 +587,15 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 			bad = append(bad, h[:16]+"… stored path unusable: "+e.Error())
 			continue
 		}
-		st, e := os.Stat(fp)
-		if e != nil || !st.Mode().IsRegular() { // something IS there but it is not a regular file: never "absent"
+		raw, err := readRegular(fp, maxSourceBytes) // opened without blocking, judged on the open descriptor, bounded
+		var tl tooLarge
+		if errors.Is(err, errNotRegular) { // something IS there but it is not a regular file: never "absent"
 			bad = append(bad, h[:16]+"… stored path is not a regular file")
 			continue
-		}
-		if st.Size() > maxSourceBytes {
+		} else if errors.As(err, &tl) {
 			bad = append(bad, fmt.Sprintf("%s… stored file exceeds %d bytes", h[:16], maxSourceBytes))
 			continue
-		}
-		raw, err := os.ReadFile(fp)
-		if err != nil {
+		} else if err != nil {
 			bad = append(bad, h[:16]+"… unreadable")
 			continue
 		}
@@ -580,9 +676,13 @@ func main() {
 	trust := map[string]string{}
 	haveTrust := false
 	if trustFile != "" {
-		raw, err := os.ReadFile(trustFile)
+		raw, err := readRegular(trustFile, maxDocBytes) // a regular file within the bound (a FIFO / device is unreadable, never a hang)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "trust store unreadable: "+err.Error())
+			os.Exit(2)
+		}
 		obj, perr := parseObject(raw) // the profile's strict parser: duplicate keys / floats / NaN refused, like every other input
-		if err != nil || perr != nil {
+		if perr != nil {
 			fmt.Fprintln(os.Stderr, "trust store unreadable")
 			os.Exit(2)
 		}

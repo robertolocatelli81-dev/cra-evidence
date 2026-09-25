@@ -9,22 +9,41 @@ import hashlib
 import json
 import os
 import re
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .canonical import sha3_hex
-from .ledger import Ledger, parse_line
+from .ledger import FileTooLarge, Ledger, NotRegularFile, open_regular, parse_line, read_regular
 from .locker import HONEST_SCOPE_MARK, PACK_KIND, RECORD_KINDS, source_file
 from .signing import verify_pack_signature, verify_tip
 
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
 EXTERNAL_FORMATS = ("cyclonedx-json", "spdx-json", "spdx-jsonld")
-from .sbom import MAX_SOURCE_BYTES   # noqa: E402 — a stored generator document above this is refused unread (a symlink to /dev/zero must not hang a verifier)
+from .sbom import MAX_SOURCE_BYTES   # noqa: E402 — a stored generator document above this is refused unread
+# Every file a verifier reads (pack, sidecar, ledger, tip, trust store, stored source document) is opened without
+# blocking and read only if the OPEN descriptor is a regular file, within a declared bound (ledger.read_regular): a FIFO
+# must not hang a verifier and a symlink to /dev/zero must not exhaust its memory — in the four verifiers alike.
+FAULT_ENV = "CRA_VERIFY_INJECT_FAULT"   # test hook: "1" raises inside the guarded verification (only ever an inconclusive FAIL)
+
+
+def _present(p: str) -> bool:
+    """lstat ENOENT / ENOTDIR = absent. Anything else at that path — a FIFO, a device, a directory, a dangling symlink,
+    a path lstat refuses — is PRESENT, and must then read as a regular file or be a FAIL: never a silent 'absent'."""
+    try:
+        os.lstat(p)
+        return True
+    except (FileNotFoundError, NotADirectoryError, ValueError):   # ValueError: an embedded NUL names nothing (as os.path.exists)
+        return False
+    except OSError:
+        return True
+
+
+def _why(e: BaseException) -> str:
+    return (e.strerror if isinstance(e, OSError) and e.strerror and not isinstance(e, (NotRegularFile, FileTooLarge)) else str(e))[:120]
 
 
 def ledger_file_name_ok(v: Any) -> bool:
-    return isinstance(v, str) and v not in ("", ".", "..") and "/" not in v and "\\" not in v
+    return isinstance(v, str) and v not in ("", ".", "..") and "/" not in v and "\\" not in v and "\x00" not in v   # NUL: never a file name (25/09/2026)
 
 
 def _layer(name: str, status: str, detail: str = "") -> Dict[str, str]:
@@ -43,13 +62,16 @@ def verify_pack(path: str, ledger_path: Optional[str] = None, trust_store: Optio
     if log_pubkey_hex is not None and not (isinstance(log_pubkey_hex, str) and HEX64.fullmatch(log_pubkey_hex)):
         raise ValueError("log_pubkey_hex must be 64 lower-case hex characters")
     try:
+        if os.environ.get(FAULT_ENV) == "1":
+            raise RuntimeError(f"injected internal error ({FAULT_ENV}=1)")
         return _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources)
     except Exception as e:  # noqa: BLE001
         # An exception in here is OUR defect, not the pack's: `ok`/`authenticity` stay FAIL (fail-closed, a pack that
         # could not be verified must never read as verified), but `assessed=False` says the run was inconclusive rather
         # than adverse. Measured 24/09/2026: a valid signed pack came back authenticity="FAIL" on an injected internal
         # error, indistinguishable from a tampered one. The exit code and the (ok, authenticity, anchored) tuple are
-        # unchanged on purpose — the Go/JS/Rust verifiers are compared against them and do not carry this field yet.
+        # unchanged on purpose. Since 25/09/2026 the Go/JS/Rust verifiers carry the same layer and `assessed=False` on
+        # their own internal errors (recover / catch / catch_unwind), and the oracle compares `assessed` too.
         return {"ok": False, "assessed": False, "authenticity": "FAIL", "anchored": False,
                 "layers": [_layer("verifier-exception", "FAIL", f"{type(e).__name__}: {str(e)[:160]}")], "pack_sha3": None}
 
@@ -87,15 +109,14 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
         except OSError as e:
             bad.append(f"{h[:16]}… stored path unusable ({e.errno})")
             continue
-        if not os.path.isfile(fp):              # something IS there but it is not a regular file: never "absent"
+        try:                                    # opened without blocking, judged on the open descriptor, bounded
+            got = hashlib.sha256(read_regular(fp, MAX_SOURCE_BYTES)).hexdigest()
+        except NotRegularFile:                  # something IS there but it is not a regular file: never "absent"
             bad.append(f"{h[:16]}… stored path is not a regular file")
             continue
-        try:
-            if os.path.getsize(fp) > MAX_SOURCE_BYTES:
-                bad.append(f"{h[:16]}… stored file exceeds {MAX_SOURCE_BYTES} bytes")
-                continue
-            with open(fp, "rb") as f:
-                got = hashlib.sha256(f.read()).hexdigest()
+        except FileTooLarge:
+            bad.append(f"{h[:16]}… stored file exceeds {MAX_SOURCE_BYTES} bytes")
+            continue
         except OSError as e:
             bad.append(f"{h[:16]}… unreadable ({type(e).__name__})")
             continue
@@ -114,8 +135,9 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
 def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=False) -> Dict[str, Any]:
     layers: List[Dict[str, str]] = []
     try:
-        with open(path, "rb") as f:                                   # OS path semantics (pathlib would turn "p.json/" into "p.json"; the three do not)
-            pack = parse_line(f.read().decode("utf-8"))                # strict: duplicate keys / NaN / invalid UTF-8 refused, like the three verifiers
+        # OS path semantics (pathlib would turn "p.json/" into "p.json"; the three do not); a regular file within
+        # MAX_DOC_BYTES; strict: duplicate keys / NaN / invalid UTF-8 refused, like the three verifiers
+        pack = parse_line(read_regular(path).decode("utf-8"))
         layers.append(_layer("pack-json", "PASS"))
     except (OSError, ValueError, RecursionError) as e:
         return {"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", str(e))], "pack_sha3": None}
@@ -147,16 +169,22 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     anchored = False
     if lf_bad:
         layers.append(_layer("ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"))
-    elif (ledger_path or log_pubkey_hex or require_sources) and not (lp and os.path.isfile(lp)):
+    elif (ledger_path or log_pubkey_hex or require_sources) and not (lp and _present(lp)):
         # the caller asked for a chain/tip/source check by name: a missing ledger is a FAIL, never a silent skip
         layers.append(_layer("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"))
-    elif lp and os.path.isfile(lp):
+    elif lp and _present(lp):
         led = Ledger(lp)
-        try:                                            # the file is read ONCE; chain, binding, anchor, sources and tip all judge this snapshot
-            entries = list(led.entries())
-            lv = led.verify(entries)
-        except (ValueError, TypeError, RecursionError, OSError) as ex:
-            entries, lv = [], {"chain_ok": False, "failures": [f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}"], "entries": 0}
+        try:                                            # something is there: it must open as a regular file (a FIFO / device / directory is a FAIL, never "absent")
+            fh = open_regular(lp)
+        except OSError as ex:
+            entries, lv = [], {"chain_ok": False, "failures": [f"ledger unreadable: {_why(ex)}"], "entries": 0}
+        else:
+            with fh:
+                try:                                    # the file is read ONCE; chain, binding, anchor, sources and tip all judge this snapshot
+                    entries = list(led.entries(fh))
+                    lv = led.verify(entries)
+                except (ValueError, TypeError, RecursionError, OSError) as ex:
+                    entries, lv = [], {"chain_ok": False, "failures": [f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}"], "entries": 0}
         if not lv["chain_ok"]:
             layers.append(_layer("ledger-chain", "FAIL", "; ".join(lv["failures"][:3])))
         else:
@@ -185,16 +213,16 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
             # signed tip: the only thing that sees a truncated TAIL (records after the anchor silently dropped)
             tip_path = lp + ".tip.json"
             if log_pubkey_hex:
-                if not os.path.exists(tip_path):
+                if not _present(tip_path):
                     layers.append(_layer("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"))
                 else:
                     try:
-                        tip = parse_line(Path(tip_path).read_text(encoding="utf-8"))
+                        tip = parse_line(read_regular(tip_path).decode("utf-8"))   # a regular file within MAX_DOC_BYTES
                         tv = verify_tip(tip, log_pubkey_hex, len(entries), entries[0]["self_hash"], entries[-1]["self_hash"])
                         layers.append(_layer("signed-tip", "PASS" if tv.get("ok") else "FAIL", str(tv.get("error") or "tip verified: no tail truncation")))
                     except Exception as e:  # noqa: BLE001
                         layers.append(_layer("signed-tip", "FAIL", f"tip unreadable: {type(e).__name__}: {str(e)[:80]}"))
-            elif os.path.exists(tip_path):
+            elif _present(tip_path):
                 layers.append(_layer("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"))
             else:
                 layers.append(_layer("signed-tip", "SKIP", "no tip: tail not sealed — truncation, rewrite or additions undetectable offline (use a tip key / cryptovalid monitor)"))

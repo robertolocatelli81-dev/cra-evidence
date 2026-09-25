@@ -57,7 +57,10 @@ def _ed_sign(sk, msg: bytes) -> str:
 
 
 def _ed_verify(pub_hex: str, sig_hex: str, msg: bytes) -> bool:
+    from .signing import weak_ed25519_key
     try:
+        if len(pub_hex) != 64 or weak_ed25519_key(pub_hex.lower()):
+            return False
         from cryptography.hazmat.primitives.asymmetric import ed25519
         ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_hex)).verify(bytes.fromhex(sig_hex), msg)
         return True

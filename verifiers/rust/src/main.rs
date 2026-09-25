@@ -12,6 +12,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use json::{canonical, Json, Parser};
 use std::collections::BTreeMap;
 
+use std::io::Read;
 use std::path::Path;
 
 const PACK_KIND: &str = "cra_evidence_pack/1";
@@ -19,6 +20,52 @@ const SCOPE_MARK: &str = "NOT a conformity assessment";
 const TIP_KIND: &str = "cryptovalid_tip/1";
 const MAX_LINE_BYTES: usize = 64 << 20;
 const MAX_SOURCE_BYTES: u64 = 256 << 20;
+const MAX_DOC_BYTES: u64 = MAX_LINE_BYTES as u64;   // ONE bound for every JSON document read: a ledger line, the pack, the sidecar, the tip, the trust store
+const FAULT_ENV: &str = "CRA_VERIFY_INJECT_FAULT";  // test hook: "1" panics inside the guarded verification (only ever an inconclusive FAIL)
+#[cfg(target_os = "linux")]
+const OPEN_FLAGS: i32 = 0o4000 | 0o400;   // O_NONBLOCK | O_NOCTTY (Linux, x86_64 and aarch64)
+#[cfg(target_os = "macos")]
+const OPEN_FLAGS: i32 = 0x0004 | 0x20000; // O_NONBLOCK | O_NOCTTY (Darwin)
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+const OPEN_FLAGS: i32 = 0;
+
+enum ReadErr { NotRegular, TooLarge(u64), Io(String) }
+impl std::fmt::Display for ReadErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self { ReadErr::NotRegular => write!(f, "not a regular file"), ReadErr::TooLarge(c) => write!(f, "larger than {c} bytes"), ReadErr::Io(e) => write!(f, "{e}") }
+    }
+}
+/// Open WITHOUT blocking (a FIFO with no writer, a device) and keep the handle only if the OPEN descriptor is a regular
+/// file (fstat): a FIFO must not hang the verifier, a symlink to /dev/zero must not exhaust its memory — same rule in the four.
+fn open_regular(p: &str) -> Result<(std::fs::File, u64), ReadErr> {
+    // refused BEFORE it is opened (opening a device can act on it); the fstat on the open handle closes the race
+    if !std::fs::metadata(p).map_err(|e| ReadErr::Io(e.to_string()))?.is_file() { return Err(ReadErr::NotRegular); }
+    let mut o = std::fs::OpenOptions::new();
+    o.read(true);
+    #[cfg(unix)]
+    { use std::os::unix::fs::OpenOptionsExt; o.custom_flags(OPEN_FLAGS); }
+    let f = o.open(p).map_err(|e| ReadErr::Io(e.to_string()))?;
+    let md = f.metadata().map_err(|e| ReadErr::Io(e.to_string()))?;
+    if !md.is_file() { return Err(ReadErr::NotRegular); }
+    Ok((f, md.len()))
+}
+/// The bytes of a regular file of at most `cap` bytes (refused on the fstat size, and again if more can be read).
+fn read_regular(p: &str, cap: u64) -> Result<Vec<u8>, ReadErr> {
+    let (f, len) = open_regular(p)?;
+    if len > cap { return Err(ReadErr::TooLarge(cap)); }
+    let mut buf = Vec::new();
+    f.take(cap + 1).read_to_end(&mut buf).map_err(|e| ReadErr::Io(e.to_string()))?;
+    if buf.len() as u64 > cap { return Err(ReadErr::TooLarge(cap)); }
+    Ok(buf)
+}
+fn read_text(p: &str) -> Result<String, String> {
+    let b = read_regular(p, MAX_DOC_BYTES).map_err(|e| e.to_string())?;
+    String::from_utf8(b).map_err(|_| "stream did not contain valid UTF-8".to_string())
+}
+/// lstat ENOENT / ENOTDIR = absent; anything else at the path (FIFO, device, directory, dangling symlink) is PRESENT and must read as a regular file.
+fn present(p: &str) -> bool {
+    match std::fs::symlink_metadata(p) { Ok(_) => true, Err(e) => !(e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(20)) }
+}
 fn is_hex_n(h: &str, n: usize) -> bool { h.len() == n && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) }
 /// One line's CONTENT (exactly one terminator excluded: \n, then at most one \r), read in bounded pieces; Err = above the bound.
 fn bounded_line<R: std::io::BufRead>(r: &mut R) -> Result<Option<Vec<u8>>, String> {
@@ -43,11 +90,12 @@ fn bounded_line<R: std::io::BufRead>(r: &mut R) -> Result<Option<Vec<u8>>, Strin
         }
     }
 }
-fn ledger_file_name_ok(v: &str) -> bool { !v.is_empty() && v != "." && v != ".." && !v.contains('/') && !v.contains('\\') }   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
+fn ledger_file_name_ok(v: &str) -> bool { !v.is_empty() && v != "." && v != ".." && !v.contains('/') && !v.contains('\\') && !v.contains('\0') }   // NUL: never a file name   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
 
 struct Layer(String, String, String);
+static PANIC_MSG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 fn has_float(v: &Json) -> bool {
     match v {
@@ -100,8 +148,17 @@ fn ed_ok(pub_hex: &str, msg: &[u8], sig_hex: &str) -> bool {
     if !is_hex64(pub_hex) || !is_hex_n(sig_hex, 128) { return false; }   // lower-case hex of exact length, as the profile writes it
     let (Some(p), Some(s)) = (unhex(pub_hex), unhex(sig_hex)) else { return false };
     let (Ok(pb), Ok(sb)) = (<[u8; 32]>::try_from(p.as_slice()), <[u8; 64]>::try_from(s.as_slice())) else { return false };
+    if weak_ed25519(&pb) { return false; }
     let Ok(vk) = VerifyingKey::from_bytes(&pb) else { return false };
     vk.verify(msg, &Signature::from_bytes(&sb)).is_ok()
+}
+// small-order / non-canonical Ed25519 keys: R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026); same list in the JS/Go/Rust verifiers
+const WEAK_ED25519: [&str; 10] = ["0100000000000000000000000000000000000000000000000000000000000000", "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000080", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa", "0100000000000000000000000000000000000000000000000000000000000080", "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"];
+fn weak_ed25519(pk: &[u8; 32]) -> bool {
+    let h: String = pk.iter().map(|b| format!("{:02x}", b)).collect();
+    if WEAK_ED25519.contains(&h.as_str()) { return true; }
+    if pk[31] & 0x7f != 0x7f || pk[0] < 0xed { return false; }
+    pk[1..31].iter().all(|&b| b == 0xff)
 }
 fn is_hex64(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
@@ -126,7 +183,7 @@ fn is_instant(s: &str) -> bool {
     rest == "Z" || (rest.len() == 6 && (rest.starts_with('+') || rest.starts_with('-')) && rest[1..3].bytes().all(|c| c.is_ascii_digit()) && &rest[3..4] == ":" && rest[4..6].bytes().all(|c| c.is_ascii_digit()))
 }
 
-struct Out { ok: bool, auth: String, anchored: bool, layers: Vec<Layer>, pack_sha3: Option<String> }
+struct Out { ok: bool, assessed: bool, auth: String, anchored: bool, layers: Vec<Layer>, pack_sha3: Option<String> }
 
 fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool) -> Layer {
     let mut wanted: Vec<String> = Vec::new();
@@ -157,11 +214,11 @@ fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool)
             Err(e) => { bad.push(format!("{}… stored path unusable ({e})", &h[..16])); continue; }
             Ok(_) => {}
         }
-        if !Path::new(&fp).is_file() { bad.push(format!("{}… stored path is not a regular file", &h[..16])); continue; }   // something IS there: never "absent"
-        if std::fs::metadata(&fp).map(|m| m.len()).unwrap_or(0) > MAX_SOURCE_BYTES { bad.push(format!("{}… stored file exceeds {MAX_SOURCE_BYTES} bytes", &h[..16])); continue; }
-        match std::fs::read(&fp) {
+        match read_regular(&fp, MAX_SOURCE_BYTES) {   // opened without blocking, judged on the open descriptor, bounded
             Ok(raw) => { let got = sha256::hex(&raw); if &got == h { present += 1; } else { bad.push(format!("{}… stored bytes hash to {}…", &h[..16], &got[..16])); } }
-            Err(_) => bad.push(format!("{}… unreadable", &h[..16])),
+            Err(ReadErr::NotRegular) => bad.push(format!("{}… stored path is not a regular file", &h[..16])),   // something IS there: never "absent"
+            Err(ReadErr::TooLarge(_)) => bad.push(format!("{}… stored file exceeds {MAX_SOURCE_BYTES} bytes", &h[..16])),
+            Err(ReadErr::Io(_)) => bad.push(format!("{}… unreadable", &h[..16])),
         }
     }
     if !bad.is_empty() {
@@ -177,8 +234,9 @@ fn source_documents(lp: &str, entries: &[BTreeMap<String, Json>], require: bool)
 }
 
 fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<String, Json>>, log_pub: Option<&str>, require_sources: bool) -> Out {
-    let fail = |layer: &str, detail: String| Out { ok: false, auth: "FAIL".into(), anchored: false, layers: vec![Layer(layer.into(), "FAIL".into(), detail)], pack_sha3: None };
-    let raw = match std::fs::read_to_string(pack_path) { Ok(t) => t, Err(e) => return fail("pack-json", e.to_string()) };
+    if std::env::var(FAULT_ENV).as_deref() == Ok("1") { panic!("injected internal error ({FAULT_ENV}=1)"); }
+    let fail = |layer: &str, detail: String| Out { ok: false, assessed: true, auth: "FAIL".into(), anchored: false, layers: vec![Layer(layer.into(), "FAIL".into(), detail)], pack_sha3: None };
+    let raw = match read_text(pack_path) { Ok(t) => t, Err(e) => return fail("pack-json", e) };
     let pack = match parse_obj(&raw) { Ok(o) => o, Err(e) => return fail("pack-json", e) };
     let mut layers = vec![Layer("pack-json".into(), "PASS".into(), String::new())];
     let l = |layers: &mut Vec<Layer>, name: &str, ok: bool, detail: String| layers.push(Layer(name.into(), if ok { "PASS" } else { "FAIL" }.into(), detail));
@@ -203,18 +261,17 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
             real.parent().unwrap_or(Path::new(".")).join(lf).to_string_lossy().to_string()
         }) },
     };
-    let is_file = |p: &str| Path::new(p).is_file();
     let mut anchored = false;
     let required = ledger_path.is_some() || log_pub.is_some() || require_sources;
     if lf_bad {
         layers.push(Layer("ledger-chain".into(), "FAIL".into(), "ledger_file malformed: must be a plain file name (string, no path separators)".into()));
-    } else if required && !lp.as_deref().map(is_file).unwrap_or(false) {
+    } else if required && !lp.as_deref().map(present).unwrap_or(false) {
         layers.push(Layer("ledger-chain".into(), "FAIL".into(), "ledger explicitly required (ledger_path / log key / require_sources given) but not found".into()));
-    } else if let Some(lp) = lp.filter(|p| is_file(p)) {
+    } else if let Some(lp) = lp.filter(|p| present(p)) {
         let mut failures: Vec<String> = vec![];
         let mut entries: Vec<BTreeMap<String, Json>> = vec![];
         let (mut prev, mut n) = (GENESIS.to_string(), 0i64);
-        let mut reader = match std::fs::File::open(&lp) { Ok(f) => Some(std::io::BufReader::with_capacity(1 << 20, f)), Err(e) => { failures.push(format!("ledger unreadable: {e}")); None } };
+        let mut reader = match open_regular(&lp) { Ok((f, _)) => Some(std::io::BufReader::with_capacity(1 << 20, f)), Err(e) => { failures.push(format!("ledger unreadable: {e}")); None } };   // something is there: it must open as a regular file
         loop {   // streamed, bounded: a hostile line is never buffered whole (a line above the content bound stops the read)
             let Some(r) = reader.as_mut() else { break };
             let raw = match bounded_line(r) { Ok(Some(b)) => b, Ok(None) => break, Err(msg) => { failures.push(format!("entry {n}: {msg}")); break; } };
@@ -229,7 +286,7 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
             entries.push(e);
             n += 1;
         }
-        if n == 0 { failures.push("empty_ledger: zero entries, nothing to verify".into()); }
+        if n == 0 && reader.is_some() { failures.push("empty_ledger: zero entries, nothing to verify".into()); }
         if !failures.is_empty() {
             failures.truncate(3);
             layers.push(Layer("ledger-chain".into(), "FAIL".into(), failures.join("; ")));
@@ -258,12 +315,12 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
             let first = gs(&entries[0], "self_hash").unwrap_or("").to_string();
             let last = gs(&entries[entries.len() - 1], "self_hash").unwrap_or("").to_string();
             if let Some(pk) = log_pub {
-                if !is_file(&tip_path) { layers.push(Layer("signed-tip".into(), "FAIL".into(), "trusted log key given but no tip file next to the ledger".into())); }
+                if !present(&tip_path) { layers.push(Layer("signed-tip".into(), "FAIL".into(), "trusted log key given but no tip file next to the ledger".into())); }
                 else { match check_tip(entries.len() as i64, &first, &last, &tip_path, pk) {
                     Ok(()) => layers.push(Layer("signed-tip".into(), "PASS".into(), "tip verified: no tail truncation".into())),
                     Err(why) => layers.push(Layer("signed-tip".into(), "FAIL".into(), why)),
                 } }
-            } else if is_file(&tip_path) { layers.push(Layer("signed-tip".into(), "SKIP".into(), "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)".into())); }
+            } else if present(&tip_path) { layers.push(Layer("signed-tip".into(), "SKIP".into(), "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)".into())); }
             else { layers.push(Layer("signed-tip".into(), "SKIP".into(), "no tip: tail not sealed — truncation, rewrite or additions undetectable offline".into())); }
         }
     } else {
@@ -280,11 +337,11 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
         else if anchored { "anchored" } else { "FAIL" }.to_string();
     let ok = auth != "FAIL" && !layers.iter().any(|l| l.1 == "FAIL");
     if !ok { auth = "FAIL".into(); }
-    Out { ok, auth, anchored, layers, pack_sha3: if declared.is_empty() { None } else { Some(declared) } }
+    Out { ok, assessed: true, auth, anchored, layers, pack_sha3: if declared.is_empty() { None } else { Some(declared) } }
 }
 
 fn check_tip(count: i64, first: &str, last: &str, tip_path: &str, pub_hex: &str) -> Result<(), String> {
-    let tip = parse_obj(&std::fs::read_to_string(tip_path).map_err(|e| format!("tip_unreadable: {e}"))?).map_err(|e| format!("tip_unreadable: {e}"))?;
+    let tip = parse_obj(&read_text(tip_path).map_err(|e| format!("tip_unreadable: {e}"))?).map_err(|e| format!("tip_unreadable: {e}"))?;
     if gs(&tip, "kind") != Some(TIP_KIND) { return Err("tip_invalid: not a cryptovalid_tip/1 document".into()); }
     let n = gi(&tip, "entries").filter(|n| *n >= 0).ok_or("tip_invalid: bad fields")?;
     let (lid, th, ts, sig) = (gs(&tip, "ledger_id"), gs(&tip, "tip_sha256"), gs(&tip, "ts"), gs(&tip, "signature_hex"));
@@ -310,7 +367,7 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
         if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(20) { return ("SKIP".into(), "pack not signed".into(), false); }
         return ("FAIL".into(), format!("sidecar path unusable ({e})"), false);
     }
-    let raw = match std::fs::read_to_string(&sp) { Ok(r) => r, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
+    let raw = match read_text(&sp) { Ok(r) => r, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
     let side = match parse_obj(&raw) { Ok(o) => o, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
     let dg = sha3_of(pack, "pack_sha3");
     if declared != dg { return ("FAIL".into(), "content does not match pack_sha3 (modified after signing)".into(), false); }
@@ -328,7 +385,7 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
     if !ed_ok(pub_hex, canonical(&Json::Object(payload)).as_bytes(), gs(&side, "signature_hex").unwrap_or("")) { return ("FAIL".into(), "signature invalid for the declared key".into(), false); }
     let fp = sha256::hex(&unhex(pub_hex).unwrap_or_default())[..16].to_string();
     match side.get("fingerprint") {
-        None | Some(Json::Null) => {}
+        None => {}   // absent = not declared; present (null included) must be the key's fingerprint
         Some(Json::Str(f)) if *f == fp => {}
         Some(_) => return ("FAIL".into(), "declared fingerprint does not match the signing key".into(), false),
     }
@@ -368,14 +425,28 @@ fn main() {
     }
     let Some(pack) = pack else { eprintln!("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2) };
     let trust = trust_file.map(|f| {
-        let o = parse_obj(&std::fs::read_to_string(f).unwrap_or_default()).unwrap_or_else(|_| { eprintln!("trust store unreadable"); std::process::exit(2) });
+        let text = read_text(&f).unwrap_or_else(|e| { eprintln!("trust store unreadable: {e}"); std::process::exit(2) });   // a regular file within the bound: a FIFO / device is unreadable, never a hang
+        let o = parse_obj(&text).unwrap_or_else(|_| { eprintln!("trust store unreadable"); std::process::exit(2) });
         if !o.values().all(|v| matches!(v, Json::Str(_))) { eprintln!("trust store unreadable: values must be strings"); std::process::exit(2); }
         o
     });
-    let out = verify(&pack, ledger.as_deref(), trust.as_ref(), key.as_deref(), require_sources);
+    // a panic inside verify is the VERIFIER's defect, not a finding about the pack: fail-closed (ok false, FAIL) but
+    // assessed=false, the same layer and shape as the Python reference (the hook keeps the message, prints nothing)
+    std::panic::set_hook(Box::new(|info| {
+        let p = info.payload();
+        let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".into());
+        if let Ok(mut m) = PANIC_MSG.lock() { *m = msg; }
+    }));
+    let out = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| verify(&pack, ledger.as_deref(), trust.as_ref(), key.as_deref(), require_sources))) {
+        Ok(o) => o,
+        Err(_) => {
+            let msg: String = PANIC_MSG.lock().map(|m| m.clone()).unwrap_or_default().chars().take(160).collect();
+            Out { ok: false, assessed: false, auth: "FAIL".into(), anchored: false, layers: vec![Layer("verifier-exception".into(), "FAIL".into(), format!("panic: {msg}"))], pack_sha3: None }
+        }
+    };
     let layers: Vec<Json> = out.layers.iter().map(|l| { let mut m = BTreeMap::new(); m.insert("layer".into(), Json::Str(l.0.clone())); m.insert("status".into(), Json::Str(l.1.clone())); m.insert("detail".into(), Json::Str(l.2.clone())); Json::Object(m) }).collect();
     let mut m = BTreeMap::new();
-    m.insert("ok".into(), Json::Bool(out.ok)); m.insert("authenticity".into(), Json::Str(out.auth.clone())); m.insert("anchored".into(), Json::Bool(out.anchored));
+    m.insert("ok".into(), Json::Bool(out.ok)); m.insert("assessed".into(), Json::Bool(out.assessed)); m.insert("authenticity".into(), Json::Str(out.auth.clone())); m.insert("anchored".into(), Json::Bool(out.anchored));
     m.insert("layers".into(), Json::Array(layers)); m.insert("pack_sha3".into(), out.pack_sha3.map(Json::Str).unwrap_or(Json::Null));
     println!("{}", canonical(&Json::Object(m)));
     std::process::exit(if out.ok { 0 } else { 1 });

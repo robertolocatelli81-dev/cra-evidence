@@ -168,9 +168,9 @@ def main(argv: List[str] = None) -> int:
         ts = None
         if a.trust_store:
             from .ledger import load_trust_store
-            try:
-                with open(a.trust_store, encoding="utf-8") as f:
-                    ts = load_trust_store(f.read())   # strict: a duplicate signer_id would make two readers disagree
+            from .ledger import read_regular
+            try:   # a regular file within MAX_DOC_BYTES (a FIFO / device is unreadable, never a hang); strict JSON: a duplicate signer_id would make two readers disagree
+                ts = load_trust_store(read_regular(a.trust_store).decode("utf-8"))
             except (OSError, ValueError) as e:
                 print(f"trust store unreadable: {e}", file=sys.stderr); return 2
         r = verify_pack(a.pack, a.ledger, ts, a.log_pubkey, require_sources=a.require_sources); _p(r)
