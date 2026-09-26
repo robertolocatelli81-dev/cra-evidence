@@ -6,11 +6,13 @@
   `assessed` is false — the verifier's own exception, or (Python) no `cryptography` to check a producer signature — and
   no layer judged against the pack; 1 stays the exit code of a finding, 0 of a verified pack, 2 of unusable input. Until
   0.3.2 both "the tool could not judge" and "the pack is bad" exited 1, so a script reading only the exit code could not
-  tell them apart; omega-evidence already used 77. Measured 27/09/2026: with an internal error injected
-  (`CRA_VERIFY_INJECT_FAULT=1`) on an intact pack, the four verifiers exit 77; without `cryptography`, the Python CLI
-  exits 77 on the signed example pack. The differential oracle now compares the exit code exactly (before, only "0 if
-  and only if ok"): 168 cases, 0 disagreements over Python, JS, Go and Rust; with the JS verifier put back to exit 1,
-  it reports that one case. A caller that checks for a non-zero exit sees no change.
+  tell them apart; omega-evidence uses 77 for the same case (`omega_evidence/verifier.py`). Measured 27/09/2026: with an
+  internal error injected (`CRA_VERIFY_INJECT_FAULT=1`), on an intact and on a tampered pack, the four verifiers exit 77;
+  without `cryptography`, the Python CLI exits 77 on a signed intact pack and 1 on the same pack with a ledger line
+  edited (the ledger layer judged it). The differential oracle now compares the exit code exactly (before, only "0 if
+  and only if ok"): 169 cases, 0 disagreements over Python, JS, Go and Rust; with the JS verifier put back to exit 1 it
+  reports the one case that changes. A new test covers the host without `cryptography`; both "always 1" and "always 77
+  when not ok" make it fail. A caller that checks for a non-zero exit sees no change.
 
 ## Corrections (2026-09-26)
 

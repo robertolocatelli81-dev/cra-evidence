@@ -58,13 +58,16 @@ checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 Every result also carries `assessed`. It is false when the verifier could not judge and no layer judged against the
 pack: the run ended in the verifier's own exception, or (Python) this host lacks `cryptography` to check a producer
 signature. `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller can tell "this verifier could not
-judge" from "this pack is bad", and since 27/09/2026 (Unreleased) so can the exit code: 0 verified, 1 a finding
-against the pack, 77 not assessed, 2 unusable input or arguments — the same in the four verifiers, as in omega-evidence. Measured 24/09/2026: with an internal error injected, a genuinely signed pack
-that verifies as `authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. The field is present
-on every return, so its absence means an older build rather than "assessed". Until 0.3.2 the exit code stayed 1 in
-that case, the same as for a bad pack. Since 25/09/2026
-(Unreleased) the Go, JS and Rust verifiers carry the same field and the same `verifier-exception` layer on their own
-internal errors, and the differential oracle compares `assessed` too.
+judge" from "this pack is bad". The field is present on every return, so its absence means an older build rather than
+"assessed". Measured 24/09/2026: with an internal error injected, a genuinely signed pack that verifies as
+`authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. Since 0.3.2 the Go, JS and Rust
+verifiers carry the same field and the same `verifier-exception` layer on their own internal errors, and the
+differential oracle compares `assessed` too.
+
+Exit codes of `cra verify` and of the three other verifiers, since 27/09/2026 (Unreleased): 0 verified, 1 a finding
+against the pack, 77 not assessed, 2 unusable input or arguments. Until 0.3.2 a run that could not judge exited 1, the
+same as a bad pack. 77 is the value omega-evidence already uses for the same case (`omega_evidence/verifier.py`); it is
+not meant in its sysexits sense.
 
 Every file a verifier reads must be a regular file — decided on the opened descriptor, without blocking on a FIFO — of
 at most 64 MiB (67108864 bytes) for a JSON document (pack, sidecar, tip, trust store, one ledger line) and 256 MiB for a

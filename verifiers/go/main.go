@@ -724,10 +724,11 @@ func main() {
 	r := verifyPack(pack, ledger, trust, haveTrust, key, requireSources)
 	out, _ := json.MarshalIndent(r, "", " ")
 	fmt.Println(string(out))
-	if !r.Ok {
-		if !r.Assessed {
-			os.Exit(77) // NOT ASSESSED: the verifier itself failed (verifier-exception), as the Python reference
-		}
-		os.Exit(1)
+	if r.Ok {
+		return
 	}
+	if !r.Assessed {
+		os.Exit(77) // NOT ASSESSED: the verifier itself failed (verifier-exception), as the Python reference
+	}
+	os.Exit(1)
 }

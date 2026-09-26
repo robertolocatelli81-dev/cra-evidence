@@ -150,6 +150,26 @@ class TestFileObjects(unittest.TestCase):
         self.assertEqual((code, j["assessed"]), (77, False))   # 77 = NOT ASSESSED since 27/09/2026 (was 1, as a bad pack)
 
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography needed to sign")
+    def test_without_cryptography_intact_is_not_assessed_tampered_is_a_finding(self):
+        """A host without `cryptography`: a signed intact pack is 77 (not assessed), a tampered one stays 1 because
+        another layer judged it — `assessed` false must never hide a finding (27/09/2026)."""
+        keygen(os.path.join(self.d, "k.key")); sign_pack(self.pack, load_key(os.path.join(self.d, "k.key")), "acme-ci")
+        shim = os.path.join(self.d, "nocrypto"); os.mkdir(shim)
+        with open(os.path.join(shim, "sitecustomize.py"), "w") as f:     # the child cannot import cryptography
+            f.write("import sys\nsys.modules['cryptography'] = None\n")
+        env = {"PYTHONPATH": shim + os.pathsep + ROOT}
+        code, j, err = cli(self.pack, env=env)
+        self.assertEqual((code, j["ok"], j["assessed"]), (77, False, False), err[-300:])
+        self.assertIn("NOT checkable here", fail_detail(j, "producer-signature") or "")
+        led = os.path.join(self.d, "l.jsonl"); lines = open(led, encoding="utf-8").read().splitlines()
+        rec = json.loads(lines[0]); rec["ts"] = rec["ts"] + "x"; lines[0] = json.dumps(rec, separators=(",", ":"))
+        with open(led, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        code, j, err = cli(self.pack, env=env)
+        self.assertEqual((code, j["ok"], j["assessed"]), (1, False, True), err[-300:])
+        self.assertIsNotNone(fail_detail(j, "ledger-chain"), j["layers"])
+
+    @unittest.skipUnless(HAVE_CRYPTO, "cryptography needed to sign")
     def test_fingerprint_null_is_malformed_absent_is_not_declared(self):
         keygen(os.path.join(self.d, "k.key")); key = load_key(os.path.join(self.d, "k.key"))
         sign_pack(self.pack, key, "acme-ci")
