@@ -1,5 +1,20 @@
 # Changelog
 
+## Corrections (2026-09-26)
+
+- Small-order keys allow a forgery on any message, not on "a share of messages" (correction to the 0.3.2 notes). The
+  0.3.2 note said that, for the small-order points other than the identity, a forgery holds only "on a share of
+  messages". By the verification equation, that is true of one fixed construction (R = identity, S = 0), but it
+  understated the risk: with any small-order public key A, of order n = 2, 4 or 8, anyone can produce a signature on any
+  message. Pick S and a guess g for k mod n, set R = [S]B − [g]A, compute k = H(R ‖ A ‖ M) mod L as the verifier does,
+  and retry until k ≡ g (mod n); each try succeeds with probability about 1/n. Measured on 2026-09-26 with curve
+  arithmetic written for the measurement, not this repository's code: for each of the 8 small-order public keys, a
+  signature on one message chosen in advance verified under OpenSSL, through Python `cryptography` (1 to 16 tries) and
+  through Node 22 `crypto` (1 to 17 tries) — the same backend, so one measurement, not two independent ones. In the
+  Python probe, the same construction against an ordinary key verified 0 times in 2000 (null control). The refusal of
+  these keys added in 0.3.2 is unchanged; this corrects only the description of what it prevents. The source comments
+  that repeated the wording are corrected too.
+
 ## 0.3.2 — 2026-09-26
 
 - An instant must exist (26/09/2026). `signed_utc` in the signature sidecar and `ts` in the signed tip were checked by a
