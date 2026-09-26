@@ -147,7 +147,7 @@ class TestFileObjects(unittest.TestCase):
         self.assertEqual((r["ok"], r["assessed"], r["authenticity"]), (False, False, "FAIL"))
         self.assertEqual([l["layer"] for l in r["layers"]], ["verifier-exception"])
         code, j, _ = cli(self.pack, env={"CRA_VERIFY_INJECT_FAULT": "1"})
-        self.assertEqual((code, j["assessed"]), (1, False))
+        self.assertEqual((code, j["assessed"]), (77, False))   # 77 = NOT ASSESSED since 27/09/2026 (was 1, as a bad pack)
 
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography needed to sign")
     def test_fingerprint_null_is_malformed_absent_is_not_declared(self):

@@ -461,5 +461,5 @@ fn main() {
     m.insert("ok".into(), Json::Bool(out.ok)); m.insert("assessed".into(), Json::Bool(out.assessed)); m.insert("authenticity".into(), Json::Str(out.auth.clone())); m.insert("anchored".into(), Json::Bool(out.anchored));
     m.insert("layers".into(), Json::Array(layers)); m.insert("pack_sha3".into(), out.pack_sha3.map(Json::Str).unwrap_or(Json::Null));
     println!("{}", canonical(&Json::Object(m)));
-    std::process::exit(if out.ok { 0 } else { 1 });
+    std::process::exit(if out.ok { 0 } else if !out.assessed { 77 } else { 1 });   // 77 = NOT ASSESSED, as the Python reference
 }

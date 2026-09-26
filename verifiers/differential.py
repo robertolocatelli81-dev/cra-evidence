@@ -667,6 +667,11 @@ def meets(r, exp):
     return (r.get("exit") == 0) == bool(r.get("ok"))
 
 
+def _exit_for(ref):
+    """The exit code the CLI contract assigns to a reference result: 0 verified, 77 not assessed, 1 a finding."""
+    return 0 if ref["ok"] else (77 if ref.get("assessed") is False else 1)
+
+
 def main():
     require = set((sys.argv[sys.argv.index("--require") + 1] if "--require" in sys.argv else "").split(",")) - {""}
     vs = {}
@@ -741,7 +746,7 @@ def main():
         exp_fails = sorted(l["layer"] for l in ref["layers"] if l["status"] == "FAIL")
         row = {"python": exp}
         if "expect" in opts:   # the reference itself must meet the declared outcome (and, through the CLI row, so must its command line)
-            ref_r = {**ref, "exit": 0 if ref["ok"] else 1, "fails": exp_fails, "details": {l["layer"]: l.get("detail", "") for l in ref["layers"] if l["status"] == "FAIL"}}
+            ref_r = {**ref, "exit": _exit_for(ref), "fails": exp_fails, "details": {l["layer"]: l.get("detail", "") for l in ref["layers"] if l["status"] == "FAIL"}}
             if not meets(ref_r, opts["expect"]):
                 diverg.append((name, "python", opts["expect"], [], ref_r))
             vs_rows = {"python-cli": [sys.executable, "-m", "cra_evidence.cli", "verify"], **vs}
@@ -753,7 +758,9 @@ def main():
             row[lang] = got
             # the verdict, `assessed` AND the set of failing layers must agree: a FAIL for the wrong reason — or an
             # inconclusive run reported as a finding — is a divergence too
-            if got != exp or (r.get("exit", 1) == 0) != ref["ok"] or r.get("fails") != exp_fails or r.get("assessed") != ref["assessed"]:
+            # the exit code too, exactly: 0 verified, 77 not assessed, 1 a finding (27/09/2026 — before, only "0 iff ok"
+            # was compared, so a port answering 1 for "the tool is broken" agreed with one answering 77)
+            if got != exp or r.get("exit") != _exit_for(ref) or r.get("fails") != exp_fails or r.get("assessed") != ref["assessed"]:
                 diverg.append((name, lang, exp, exp_fails, r))
             elif "expect" in opts and not meets(r, opts["expect"]):   # agreement is not enough: each row must meet the declared outcome, reason included
                 diverg.append((name, lang, opts["expect"], exp_fails, r))

@@ -725,6 +725,9 @@ func main() {
 	out, _ := json.MarshalIndent(r, "", " ")
 	fmt.Println(string(out))
 	if !r.Ok {
+		if !r.Assessed {
+			os.Exit(77) // NOT ASSESSED: the verifier itself failed (verifier-exception), as the Python reference
+		}
 		os.Exit(1)
 	}
 }

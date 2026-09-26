@@ -174,7 +174,10 @@ def main(argv: List[str] = None) -> int:
             except (OSError, ValueError) as e:
                 print(f"trust store unreadable: {e}", file=sys.stderr); return 2
         r = verify_pack(a.pack, a.ledger, ts, a.log_pubkey, require_sources=a.require_sources); _p(r)
-        return 0 if r["ok"] else 1
+        # 0 = verified; 77 = NOT ASSESSED (assessed=false: this host or the verifier itself could not judge, and no layer
+        # judged against the pack); 1 = a finding against the pack. Since 27/09/2026, as omega-evidence: before, both
+        # "the pack is bad" and "the tool is broken" exited 1 (B3 choice 1).
+        return 0 if r["ok"] else (77 if r.get("assessed") is False else 1)
     if a.cmd == "feeds":
         from .feeds import cisa_kev_ids, euvd_kev_ids, exploitation_signal, osv_positive_control
         pc = osv_positive_control(); kev = cisa_kev_ids(); eu = euvd_kev_ids()

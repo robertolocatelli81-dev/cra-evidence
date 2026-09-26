@@ -55,12 +55,14 @@ signature, trust store) and one
 authenticity verdict: `trusted-signed` > `signed` > `anchored` > `FAIL`. Without the trusted log key the tip is not
 checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
 
-Every result also carries `assessed`. It is false only when the run ended in the verifier's own exception rather than
-in a judgment about the pack: `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller can tell "this
-verifier broke" from "this pack is bad". Measured 24/09/2026: with an internal error injected, a genuinely signed pack
+Every result also carries `assessed`. It is false when the verifier could not judge and no layer judged against the
+pack: the run ended in the verifier's own exception, or (Python) this host lacks `cryptography` to check a producer
+signature. `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller can tell "this verifier could not
+judge" from "this pack is bad", and since 27/09/2026 (Unreleased) so can the exit code: 0 verified, 1 a finding
+against the pack, 77 not assessed, 2 unusable input or arguments — the same in the four verifiers, as in omega-evidence. Measured 24/09/2026: with an internal error injected, a genuinely signed pack
 that verifies as `authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. The field is present
-on every return, so its absence means an older build rather than "assessed". The verdict tuple and the exit codes are
-deliberately unchanged, because those are what the Go, JS and Rust verifiers are compared against. Since 25/09/2026
+on every return, so its absence means an older build rather than "assessed". Until 0.3.2 the exit code stayed 1 in
+that case, the same as for a bad pack. Since 25/09/2026
 (Unreleased) the Go, JS and Rust verifiers carry the same field and the same `verifier-exception` layer on their own
 internal errors, and the differential oracle compares `assessed` too.
 

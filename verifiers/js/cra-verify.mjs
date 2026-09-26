@@ -428,6 +428,6 @@ function main(argv) {
   if (!pack) return usage();
   const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key, requireSources });
   console.log(JSON.stringify(r, null, 1));
-  return r.ok ? 0 : 1;
+  return r.ok ? 0 : (r.assessed === false ? 77 : 1);   // 77 = NOT ASSESSED (the verifier could not judge), as the Python reference
 }
 if (process.argv[1] && /cra-verify\.mjs$/.test(process.argv[1])) process.exit(main(process.argv));
