@@ -11,7 +11,7 @@
   without `cryptography`, the Python CLI exits 77 on a signed intact pack and 1 on the same pack with a ledger line
   edited (the ledger layer judged it). The differential oracle now compares the exit code exactly (before, only "0 if
   and only if ok"): 169 cases, 0 disagreements over Python, JS, Go and Rust; with the JS verifier put back to exit 1 it
-  reports the one case that changes. A new test covers the host without `cryptography`; both "always 1" and "always 77
+  reports the two cases that change (the injected error on the intact and on the tampered pack). A new test covers the host without `cryptography`; both "always 1" and "always 77
   when not ok" make it fail. A caller that checks for a non-zero exit sees no change.
 
 ## Corrections (2026-09-26)

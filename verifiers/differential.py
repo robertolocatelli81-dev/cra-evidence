@@ -570,7 +570,8 @@ def cases(base):
         build(d, sign=True)  # judged and the result is still "not assessed" — the exit code must be 77 in the four, never 0
         led = os.path.join(d, "l.jsonl"); lines = open(led, encoding="utf-8").read().splitlines()
         rec = json.loads(lines[0]); rec["ts"] = rec["ts"] + "x"; lines[0] = json.dumps(rec, separators=(",", ":"))
-        open(led, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+        with open(led, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
         return {"env": {FAULT_ENV: "1"}, "expect": {"ok": False, "assessed": False, "authenticity": "FAIL", "fails": ["verifier-exception"]}}
     case("internal_error_injected_on_tampered_pack", fault_tampered)
     def lf_nul(d):   # a NUL can never name a file: a malformed ledger_file in the four (found by the 25/09 re-run: lstat raised in the reference)

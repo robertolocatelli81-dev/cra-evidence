@@ -61,8 +61,8 @@ signature. `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller
 judge" from "this pack is bad". The field is present on every return, so its absence means an older build rather than
 "assessed". Measured 24/09/2026: with an internal error injected, a genuinely signed pack that verifies as
 `authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. Since 0.3.2 the Go, JS and Rust
-verifiers carry the same field and the same `verifier-exception` layer on their own internal errors, and the
-differential oracle compares `assessed` too.
+verifiers carry the same field on their own internal errors (the Go and JS `verifier-exception` layer already existed
+in 0.3.1, without the field; Rust gained both in 0.3.2), and the differential oracle compares `assessed` too.
 
 Exit codes of `cra verify` and of the three other verifiers, since 27/09/2026 (Unreleased): 0 verified, 1 a finding
 against the pack, 77 not assessed, 2 unusable input or arguments. Until 0.3.2 a run that could not judge exited 1, the
