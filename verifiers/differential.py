@@ -566,8 +566,8 @@ def cases(base):
         build(d, sign=True)
         return {"env": {FAULT_ENV: "1"}, "expect": {"ok": False, "assessed": False, "authenticity": "FAIL", "fails": ["verifier-exception"]}}
     case("internal_error_injected_on_intact_pack", fault)
-    def fault_tampered(d):   # the same injected error on a TAMPERED pack: the fault replaces the whole verification, so no layer
-        build(d, sign=True)  # judged and the result is still "not assessed" — the exit code must be 77 in the four, never 0
+    def fault_tampered(d):   # the same injected error on a TAMPERED pack: the fault stops the run before any layer, so the
+        build(d, sign=True)  # tampering is never reached and the result is still "not assessed": exit 77 in the four, never 0
         led = os.path.join(d, "l.jsonl"); lines = open(led, encoding="utf-8").read().splitlines()
         rec = json.loads(lines[0]); rec["ts"] = rec["ts"] + "x"; lines[0] = json.dumps(rec, separators=(",", ":"))
         with open(led, "w", encoding="utf-8") as f:
