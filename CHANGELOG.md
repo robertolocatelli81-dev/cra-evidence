@@ -1,26 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 — 2026-09-26
 
 - An instant must exist (26/09/2026). `signed_utc` in the signature sidecar and `ts` in the signed tip were checked by a
-  regular expression only: a sidecar signed by the key holder with `signed_utc` 2026-02-30, 25:61:61 or month 13 was
-  PASS in all four verifiers (measured). The four now require a month 01–12, a day that exists in that month and year,
-  hour 00–23, minute and second 00–59 (a leap second is refused: the signer never writes one) and an offset of at most
-  ±23:59. Oracle: 5 new cases (4 impossible instants, 2024-02-29 as the positive control), 168 cases, 0 divergences
-  with Go, JS and Rust required.
+  regular expression only. Measured on `cfd9f11`: a sidecar re-signed by the key holder with `signed_utc`
+  2026-02-30T10:00:00+00:00, 2026-09-26T25:61:61+00:00 (hour, minute and second out of range) or 2026-13-01 was PASS in
+  all four verifiers; on this release the three are FAIL in the four. The four now require a month 01–12, a day that
+  exists in that month and year, hour 00–23, minute and second 00–59 (a leap second is refused: the signer never writes
+  one) and an offset of at most ±23:59. The same rule applies to the tip's `ts`: declared, not measured separately; the
+  minute/second bounds are measured only in the Python unit test (`tests/test_instants_20260926.py`: 10:60:00 and 10:00:60 refused). Oracle: 5 new cases (4 impossible instants, including
+  an offset of +24:00, and 2024-02-29 as the positive control, accepted), 168 cases in all, 0 divergences with Go, JS
+  and Rust required. Tests: 134 (4 skipped).
 - The JS verifier reads the ledger one line at a time (26/09/2026). `readLinesOrFail` wrapped the streaming reader in
-  `Array.from()`, so every line was materialized first: a 64 MiB ledger of empty lines aborted Node (SIGABRT, 2.4 GB)
-  where Python, Go and Rust answered at 22–32 MiB. Now 65 MiB and the same `empty_ledger` failure as the other three.
+  `Array.from()`, so every line was materialized first: on the code just before this change (`cfd9f11`), a 64 MiB ledger
+  of empty lines aborted Node (SIGABRT, peak 2424 MiB) where Python, Go and Rust answered at 22–32 MiB. Now Node answers
+  at 65 MiB with `ledger-chain` FAIL `empty_ledger`, the reason measured in Python, Go and Rust too; a real ledger still
+  verifies (positive control).
 
-- Small-order Ed25519 keys refused (25/09/2026). A public key that is a point of small order (the identity and the other torsion points) or a non-canonical encoding (y >= p) makes R=identity, S=0 a valid signature on EVERY message, and OpenSSL accepts it — measured through Python `cryptography` and Node (a forged sidecar was trusted-signed with such a key pinned by the relying party verified); the Go, Java and Rust ports received the same guard without a measurement of their behaviour without it. Every verifier now refuses those keys with the same list (8 small-order encodings, 2 with the sign bit on x = 0, every y >= p; checked against curve arithmetic: 0 disagreements on 48 special and 200 000 random keys).
+- Small-order Ed25519 keys refused (25/09/2026). With the identity key as public key, R=identity, S=0 is a valid signature on every message; the other small-order points admit such forgeries on a share of messages (the hash depends on R, so not on every one; not measured here); a non-canonical encoding (y >= p) is refused because the key has no unique encoding. Measured with the identity key (`01` followed by 31 zero bytes) through Python `cryptography` and Node: a forged sidecar signed that way, with that key pinned by the relying party, was trusted-signed; the Go and Rust ports received the same guard without a measurement of their behaviour without it. The four verifiers now refuse those keys with the same list (8 small-order encodings, 2 with the sign bit on x = 0, every y >= p; checked against curve arithmetic: 0 disagreements on 48 special and 200 000 random keys). After the change, three new oracle cases (the identity, an order-8 point, a non-canonical encoding, each pinned) are FAIL in Python, JS, Go and Rust.
 
 Files a verifier must not read, a present-and-null fingerprint, and the verifier's own errors — found by the 25/09/2026
-malformed-input review (four minds) and re-measured here on HEAD `51ecbb3` before any change.
+malformed-input review (four minds) and re-measured on HEAD `51ecbb3` before any change. The 25/09 numbers below come
+from the author's measurement records, which are not part of this repository, and were not re-measured for 0.3.2; the
+oracle cases and tests that exercise each rule are in the repository and run with it.
 
 **Files that are not regular files.** A FIFO in place of the pack, the signature sidecar, the signed tip or the trust
 store blocked every verifier — the Python library and CLI, JS, Go and Rust (Go and Rust answered the tip case, with the
-wrong reason "no tip file"); a symlink to `/dev/zero` in those places was read until memory ran out (under a 1.5 GB
-RLIMIT_DATA: Python `MemoryError` reported as `verifier-exception`, JS abort, Go runtime exit 2, Rust "out of memory").
+wrong reason "no tip file"); a symlink to `/dev/zero` in those places was read until memory ran out (under an RLIMIT_DATA
+of 1500 MiB: Python `MemoryError` reported as `verifier-exception`, JS abort, Go runtime exit 2, Rust "out of memory").
 The comment next to `MAX_SOURCE_BYTES` promised that "a symlink to /dev/zero must not hang a verifier": the guard
 covered only `<ledger>.sources/`. Now every file the four verifiers read — pack, sidecar, ledger, tip, trust store,
 stored source document — is opened without blocking (`O_NONBLOCK | O_NOCTTY`) and read only if the OPEN descriptor is a
@@ -38,7 +45,7 @@ bound can be read — with the reason `larger than 67108864 bytes`. Stored sourc
 hashed, never parsed). The ledger as a whole is bounded per line, not in total.
 
 **Memory under the bound is NOT bounded — measured, not fixed.** A 64 MiB document made of tiny values stays within the
-bound and is parsed: on `[{},{},…]`, `[[],…]`, `[0,…]` and `["",…]` it reaches a peak resident memory, measured on 25/09/2026 on HEAD `51ecbb3` with no effective limit (the parse path is unchanged by this change), of 1.8 GB in Python (`[{},…]`), 2.6 GB in Node (`[{},…]` ends in a V8 heap abort), 2.9 GB in Go (`[{},…]`) and 4.0 GB in Rust (`[0,…]`); one 64 MiB string costs 0.2–0.4 GB. Under RLIMIT_DATA 1.5 GB, after the change, `[{},…]` ends in a Python `MemoryError` (a `verifier-exception`, `assessed: false`), a Node abort, a Go runtime exit 2 and a Rust allocation abort — a crash, not a verdict, and not the same outcome in the four. The same document fits in a ledger line. Closing this needs a
+bound and is parsed: on `[{},{},…]`, `[[],…]`, `[0,…]` and `["",…]` it reaches a peak resident memory, measured on 25/09/2026 on HEAD `51ecbb3` with no effective limit (the parse path is unchanged by this change), of 1.8 GB in Python (as recorded) (`[{},…]`), 2.6 GB in Node (`[{},…]` ends in a V8 heap abort), 2.9 GB in Go (`[{},…]`) and 4.0 GB in Rust (`[0,…]`); one 64 MiB string costs 0.2–0.4 GB. Under an RLIMIT_DATA of 1500 MiB, after the change, `[{},…]` ends in a Python `MemoryError` (a `verifier-exception`, `assessed: false`), a Node abort, a Go runtime exit 2 and a Rust allocation abort — a crash, not a verdict, and not the same outcome in the four. The same document fits in a ledger line. Closing this needs a
 lower bound or a bound on the number of values — a change to the acceptance profile shared with cryptovalid, left to the
 author.
 
@@ -60,19 +67,18 @@ test hook that raises inside the guarded verification, in the four alike; it can
 Exit codes are unchanged (1).
 
 **Oracle.** `verifiers/differential.py` gains 21 cases that carry a DECLARED outcome, checked on every row — the Python
-CLI is a row, and a row that merely agrees with the reference but misses the declared reason is red — so a rule is red even when all five verifiers are wrong the same way (they were): FIFO and `/dev/zero` in
+CLI is a row, and a row that merely agrees with the reference but misses the declared reason is red — so a rule is red even when all five rows are wrong the same way (they were): FIFO and `/dev/zero` in
 place of pack, sidecar, ledger (with a log key and implicit), tip and trust store, a stored source document on
 `/dev/zero`, one byte over the bound for pack / sidecar / tip / trust store, `fingerprint: null` and absent, an
-injected internal error on an intact pack, and a `ledger_file` containing a NUL. Hazard rows run with a 20 s timeout and RLIMIT_DATA 1.5 GB per child, so a
+injected internal error on an intact pack, and a `ledger_file` containing a NUL. Hazard rows run with a 20 s timeout and an RLIMIT_DATA of 1500 MiB per child, so a
 regression is a red row, never a hung oracle or a host out of memory. `CRA_ORACLE_BIG=1` adds pack / sidecar / tip /
-trust store at exactly the bound (accepted). Measured 25/09/2026: the 139-case oracle of HEAD gives 0 divergences on HEAD; the 160-case oracle gives 0 divergences after the change and, on HEAD, red rows on 20 of the 21 new cases (the twenty-first, the absent-fingerprint positive control, is red on HEAD only in the three ports and only for the missing `assessed`), plus 124 of the 139 old cases red only because the three ports carried no `assessed`. Tests: 121 → 130 (`tests/test_file_objects.py`: 8 of 9 red on HEAD, the ninth is the at-the-bound positive control). Ablation, one control removed at a time in each of the four verifiers: the regular-file check (a `stat` before `open` AND an `fstat` on the descriptor — they back each other up, removing only one turns nothing red) → 13 cases red; `O_NONBLOCK` together with the pre-open `stat` → the 6 FIFO cases (`O_NONBLOCK` alone is covered by the `stat`: it guards the swap between the two); the size bound → the 4 over-the-bound cases; the lstat presence rule → the 6 ledger/tip cases; the fingerprint rule → 1; `assessed` on the exception → 1; the NUL rule → 1. The read cap of `bound + 1` bytes is covered by the `fstat` size check and guards only a file that grows while it is read: no case exercises that race.
+trust store at exactly the bound (accepted). Measured 25/09/2026: the 139-case oracle of HEAD gives 0 divergences on HEAD; the 160-case oracle, with Go, JS and Rust required, gives 0 divergences after the change and, on HEAD, red rows on 20 of the 21 new cases (the twenty-first, the absent-fingerprint positive control, is red on HEAD only in the three ports and only for the missing `assessed`), plus 124 of the 139 old cases red only because the three ports carried no `assessed`. Tests: 121 → 130 (`tests/test_file_objects.py`: 8 of 9 red on HEAD, the ninth is the at-the-bound positive control). Ablation, one control removed at a time in each of the four verifiers: the regular-file check (a `stat` before `open` AND an `fstat` on the descriptor — they back each other up, removing only one turns nothing red) → 13 cases red; `O_NONBLOCK` together with the pre-open `stat` → the 6 FIFO cases (`O_NONBLOCK` alone is covered by the `stat`: it guards the swap between the two); the size bound → the 4 over-the-bound cases; the lstat presence rule → the 6 ledger/tip cases; the fingerprint rule → 1; `assessed` on the exception → 1; the NUL rule → 1. The read cap of `bound + 1` bytes is covered by the `fstat` size check and guards only a file that grows while it is read: no case exercises that race.
 
 `systemd-run --user --scope -p MemoryMax=…` does NOT bound memory on a cgroup-v1 host without a delegated memory
-controller: measured today, 400 MB allocated under `MemoryMax=100M`. The measurements above use RLIMIT_DATA (`prlimit
+controller: measured on 25/09/2026, 400 MB allocated under `MemoryMax=100M` (the cause is our reading; the effect is what was measured). The measurements above use RLIMIT_DATA (`prlimit
 --data`), which is inherited through the scope and was measured to stop Python, Node, Go and Rust.
 
-Not changed: the version (`pyproject.toml` says 0.3.1, `cra_evidence/__init__.py` still says 0.3.0 — a mismatch recorded
-here, not fixed in this change).
+Version: 0.3.2 in both `pyproject.toml` and `cra_evidence/__init__.py` (0.3.1 had left `__init__` at 0.3.0).
 
 ## 0.3.1 — 2026-09-24
 A check this host could not run is not a finding about the pack. Two branches, both measured.
