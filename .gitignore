@@ -10,3 +10,8 @@ build/
 exports/
 verifiers/rust/target/
 verifiers/rust/Cargo.lock
+
+# build outputs of the ports (26/09/2026: a Go binary was committed by `go build ./...` inside verifiers/go)
+verifiers/go/go
+verifiers/go/cra-verify*
+verifiers/rust/target/
