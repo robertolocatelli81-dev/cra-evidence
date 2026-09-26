@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- An instant must exist (26/09/2026). `signed_utc` in the signature sidecar and `ts` in the signed tip were checked by a
+  regular expression only: a sidecar signed by the key holder with `signed_utc` 2026-02-30, 25:61:61 or month 13 was
+  PASS in all four verifiers (measured). The four now require a month 01–12, a day that exists in that month and year,
+  hour 00–23, minute and second 00–59 (a leap second is refused: the signer never writes one) and an offset of at most
+  ±23:59. Oracle: 5 new cases (4 impossible instants, 2024-02-29 as the positive control), 168 cases, 0 divergences
+  with Go, JS and Rust required.
+- The JS verifier reads the ledger one line at a time (26/09/2026). `readLinesOrFail` wrapped the streaming reader in
+  `Array.from()`, so every line was materialized first: a 64 MiB ledger of empty lines aborted Node (SIGABRT, 2.4 GB)
+  where Python, Go and Rust answered at 22–32 MiB. Now 65 MiB and the same `empty_ledger` failure as the other three.
+
 - Small-order Ed25519 keys refused (25/09/2026). A public key that is a point of small order (the identity and the other torsion points) or a non-canonical encoding (y >= p) makes R=identity, S=0 a valid signature on EVERY message, and OpenSSL accepts it — measured through Python `cryptography` and Node (a forged sidecar was trusted-signed with such a key pinned by the relying party verified); the Go, Java and Rust ports received the same guard without a measurement of their behaviour without it. Every verifier now refuses those keys with the same list (8 small-order encodings, 2 with the sign bit on x = 0, every y >= p; checked against curve arithmetic: 0 disagreements on 48 special and 200 000 random keys).
 
 Files a verifier must not read, a present-and-null fingerprint, and the verifier's own errors — found by the 25/09/2026

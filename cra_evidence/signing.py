@@ -50,6 +50,21 @@ def _hex_ok(v: Any, n: int) -> bool:
     take spaces, JS `Buffer.from` would truncate at the first non-hex, Rust `from_str_radix` would take '+': one rule."""
     return isinstance(v, str) and (HEX64_RE if n == 64 else HEX128_RE).fullmatch(v) is not None
 INSTANT_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})")
+
+
+def is_instant(s: Any) -> bool:
+    """RFC 3339 shape AND an instant that exists: month 01-12, a day of that month and year (proleptic Gregorian),
+    hour 00-23, minute and second 00-59, offset at most ±23:59. The shape alone let a signature dated 2026-02-30 or
+    25:61:61 verify in all four verifiers (measured 26/09/2026). A leap second (:60) is refused: the signer never
+    writes one."""
+    if not isinstance(s, str) or INSTANT_RE.fullmatch(s) is None:
+        return False
+    y, mo, d, h, mi, se = int(s[0:4]), int(s[5:7]), int(s[8:10]), int(s[11:13]), int(s[14:16]), int(s[17:19])
+    leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+    if not (1 <= mo <= 12 and 1 <= d <= (31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)[mo - 1]
+            and h <= 23 and mi <= 59 and se <= 59):
+        return False
+    return s.endswith("Z") or (int(s[-5:-3]) <= 23 and int(s[-2:]) <= 59)
 from .canonical import canonical_bytes, sha3_hex
 
 TIP_KIND = "cryptovalid_tip/1"
@@ -115,7 +130,7 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
     n = tip.get("entries")
     if isinstance(n, bool) or not isinstance(n, int) or n < 0 or not all(isinstance(tip.get(k), str) for k in ("ledger_id", "tip_sha256", "ts", "signature_hex")):
         return {"ok": False, "error": "tip_invalid: bad field types"}
-    if not (HEX64_RE.fullmatch(tip["ledger_id"]) and HEX64_RE.fullmatch(tip["tip_sha256"]) and INSTANT_RE.fullmatch(tip["ts"])
+    if not (HEX64_RE.fullmatch(tip["ledger_id"]) and HEX64_RE.fullmatch(tip["tip_sha256"]) and is_instant(tip["ts"])
             and _hex_ok(tip["signature_hex"], 128) and _hex_ok(trusted_pubkey_hex, 64)):
         return {"ok": False, "error": "tip_invalid: bad fields"}
     lk = tip.get("log_pubkey_hex")
@@ -153,7 +168,7 @@ SIG_KIND = "cra_pack_sig/1"
 
 def sidecar_fields_ok(side: Dict[str, Any]) -> bool:
     return (all(isinstance(side.get(k), str) and side.get(k) for k in ("signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"))
-            and INSTANT_RE.fullmatch(side["signed_utc"]) is not None and ("alg" not in side or isinstance(side["alg"], str)))
+            and is_instant(side["signed_utc"]) and ("alg" not in side or isinstance(side["alg"], str)))
 
 
 def signed_payload(side: Dict[str, Any]) -> bytes:

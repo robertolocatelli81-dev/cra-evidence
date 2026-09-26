@@ -15,6 +15,16 @@ import { basename, dirname, join } from "node:path";
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
 const RECORD_KINDS = new Set(["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"]);
 const INSTANT_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$/;
+// shape AND an instant that exists (month, day of that month and year, hour, minute, second, offset): the shape
+// alone let a signature dated 2026-02-30 or 25:61:61 verify in all four verifiers (measured 26/09/2026)
+const isInstant = (s) => {
+  if (typeof s !== "string" || !INSTANT_RE.test(s)) return false;
+  const n = (a, b) => parseInt(s.slice(a, b), 10), y = n(0, 4), mo = n(5, 7), d = n(8, 10);
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const dim = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= dim[mo - 1] && n(11, 13) <= 23 && n(14, 16) <= 59 && n(17, 19) <= 59)) return false;
+  return s.endsWith("Z") || (parseInt(s.slice(-5, -3), 10) <= 23 && parseInt(s.slice(-2), 10) <= 59);
+};
 const ledgerFileNameOk = (v) => typeof v === "string" && v !== "" && v !== "." && v !== ".." && !v.includes("/") && !v.includes("\\") && !v.includes("\u0000");   // NUL: never a file name
 const TIP_KIND = "cryptovalid_tip/1", SPKI = Buffer.from("302a300506032b6570032100", "hex"), HEX64 = /^[0-9a-f]{64}$/;
 
@@ -294,7 +304,7 @@ function checkTip(count, first, last, tipPath, pubHex) {
   if (!isObj(tip) || tip.kind !== TIP_KIND) return { ok: false, error: "tip_invalid: not a cryptovalid_tip/1 document" };
   for (const k of ["entries", "ledger_id", "tip_sha256", "ts", "signature_hex"]) if (!(k in tip)) return { ok: false, error: `tip_invalid: tip missing field ${k}` };
   if (!Number.isInteger(tip.entries) || tip.entries < 0 || !["ledger_id", "tip_sha256", "ts", "signature_hex"].every((k) => typeof tip[k] === "string")) return { ok: false, error: "tip_invalid: bad field types" };
-  if (!HEX64.test(tip.ledger_id) || !HEX64.test(tip.tip_sha256) || !INSTANT_RE.test(tip.ts)) return { ok: false, error: "tip_invalid: not a cryptovalid_tip/1 document" };   // shape, as the other three (values are the writer's)
+  if (!HEX64.test(tip.ledger_id) || !HEX64.test(tip.tip_sha256) || !isInstant(tip.ts)) return { ok: false, error: "tip_invalid: not a cryptovalid_tip/1 document" };   // shape, as the other three (values are the writer's)
   if (tip.log_pubkey_hex !== undefined && tip.log_pubkey_hex !== null && tip.log_pubkey_hex !== "" && tip.log_pubkey_hex !== pubHex) return { ok: false, error: "tip_invalid: tip log key differs from the trusted log key" };   // "" = absent (cryptovalid profile); a non-string never equals the key
   if (!edOk(pubHex, tipPayload(tip.entries, tip.ledger_id, tip.tip_sha256, tip.ts), tip.signature_hex)) return { ok: false, error: "tip_invalid: tip signature invalid" };
   if (tip.ledger_id !== first) return { ok: false, error: "tip_of_another_ledger" };
@@ -312,7 +322,7 @@ function verifySidecar(packPath, pack, trustStore) {
   let digest; try { digest = sha3(Buffer.from(canon(without(pack, "pack_sha3")), "utf-8")); } catch (e) { return { status: "FAIL", detail: "pack not canonicalisable" }; }
   if (pack.pack_sha3 !== digest) return { status: "FAIL", detail: "content does not match pack_sha3 (modified after signing)" };
   if (side.signed_pack_sha3 !== digest) return { status: "FAIL", detail: "pack changed after signature (digest differs from the signed one)" };
-  if (!["signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"].every((k) => typeof side[k] === "string" && side[k] !== "") || !INSTANT_RE.test(side.signed_utc) || ("alg" in side && typeof side.alg !== "string"))
+  if (!["signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"].every((k) => typeof side[k] === "string" && side[k] !== "") || !isInstant(side.signed_utc) || ("alg" in side && typeof side.alg !== "string"))
     return { status: "FAIL", detail: "sidecar field missing or not a string (a missing field is never signed as null)" };
   let sigOk = false;
   try { sigOk = typeof side.public_key_hex === "string" && typeof side.signature_hex === "string" && edOk(side.public_key_hex, signedPayload(side), side.signature_hex); } catch { sigOk = false; }   // a payload that cannot be canonicalised (missing/odd fields) is an invalid signature, never an exception
@@ -326,8 +336,16 @@ function verifySidecar(packPath, pack, trustStore) {
   return out;
 }
 
-function readLinesOrFail(path, failures) {   // the open failure (EACCES, not a regular file…) is a ledger-chain failure, never an exception
-  try { return Array.from(boundedLinesOpen(path)); } catch (e) { failures.push("ledger unreadable: " + (e.code || e.message)); return []; }
+function* readLinesOrFail(path, failures) {   // the open or read failure (EACCES, not a regular file, EIO…) is a ledger-chain failure, never an exception
+  // LAZY: one line at a time. Array.from() here materialized every line first, so 64 MiB of empty lines became 64 M
+  // Buffers and V8 aborted (measured 26/09/2026: exit 134/SIGABRT at 2.4 GB; the other three verifiers stream)
+  const it = boundedLinesOpen(path);
+  for (;;) {
+    let r;
+    try { r = it.next(); } catch (e) { failures.push("ledger unreadable: " + (e.code || e.message)); return; }
+    if (r.done) return;
+    yield r.value;
+  }
 }
 function* boundedLinesOpen(path) {   // one line's CONTENT (terminator \n or \r\n excluded) as a Buffer; null = a line above the bound (read stops there)
   const fd = openRegular(path); const chunk = Buffer.allocUnsafe(1 << 20); let pending = [], pendingLen = 0;

@@ -262,6 +262,16 @@ def cases(base):
         side["signature_hex"] = sk.sign(signed_payload(side)).hex(); json.dump(side, open(sidecar_path(pack), "w"))
         json.dump({"5": pk}, open(os.path.join(d, "trust.json"), "w")); return {"trust": os.path.join(d, "trust.json")}
     case("sidecar_signer_id_not_string", signer_id_int)
+    def signed_on(d, utc):   # 26/09/2026: a signature dated on an instant that does not exist, signed by the key holder
+        from cra_evidence.signing import signed_payload, pack_digest
+        keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key")); sk, pk = key
+        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
+        pj = json.load(open(pack)); side = {"signer_id": "acme-ci", "public_key_hex": pk, "alg": "Ed25519", "signed_pack_sha3": pack_digest(pj), "signed_utc": utc}
+        side["signature_hex"] = sk.sign(signed_payload(side)).hex(); json.dump(side, open(sidecar_path(pack), "w"))
+    for tag, utc in (("feb30", "2026-02-30T10:00:00+00:00"), ("hour24", "2026-09-26T24:00:00Z"), ("month13", "2026-13-01T00:00:00Z"),
+                     ("offset_24h", "2026-09-26T10:00:00+24:00"), ("leap_day_2024", "2024-02-29T10:00:00Z")):
+        case(f"sidecar_signed_utc_{tag}", lambda d, u=utc: signed_on(d, u))
     def no_pack_sha3(d):   # pack without pack_sha3 next to an anchor record without anchored_pack_sha3: nothing may match "nothing"
         from cra_evidence.locker import _bind
         lk, key, pack, pk = build(d); lk.ledger.append(_bind({"kind": "cra_pack_anchor", "pack_file": "p.json"}))

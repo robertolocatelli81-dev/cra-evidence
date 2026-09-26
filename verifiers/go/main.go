@@ -36,6 +36,31 @@ var recordKinds = map[string]bool{"cra_sbom": true, "cra_vuln": true, "cra_srp_n
 var hex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var instantRe = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$`)
 
+// isInstant: shape AND an instant that exists (month, day of that month and year, hour, minute, second, offset); the
+// shape alone let a signature dated 2026-02-30 or 25:61:61 verify in all four verifiers (measured 26/09/2026)
+func isInstant(s string) bool {
+	if !instantRe.MatchString(s) {
+		return false
+	}
+	n := func(a, b int) int {
+		v := 0
+		for _, c := range s[a:b] {
+			v = v*10 + int(c-'0')
+		}
+		return v
+	}
+	y, mo, d := n(0, 4), n(5, 7), n(8, 10)
+	leap := (y%4 == 0 && y%100 != 0) || y%400 == 0
+	dim := []int{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+	if leap {
+		dim[1] = 29
+	}
+	if mo < 1 || mo > 12 || d < 1 || d > dim[mo-1] || n(11, 13) > 23 || n(14, 16) > 59 || n(17, 19) > 59 {
+		return false
+	}
+	return s[len(s)-1] == 'Z' || (n(len(s)-5, len(s)-3) <= 23 && n(len(s)-2, len(s)) <= 59)
+}
+
 type layer struct {
 	Layer, Status, Detail string
 }
@@ -365,7 +390,7 @@ func checkTip(count int, first, last, tipPath, pubHex string) (bool, string) {
 	th, ok2 := getS(tip, "tip_sha256")
 	ts, ok3 := getS(tip, "ts")
 	sig, ok4 := getS(tip, "signature_hex")
-	if !okN || n < 0 || !ok1 || !ok2 || !ok3 || !ok4 || !hex64.MatchString(lid) || !hex64.MatchString(th) || !instantRe.MatchString(ts) {
+	if !okN || n < 0 || !ok1 || !ok2 || !ok3 || !ok4 || !hex64.MatchString(lid) || !hex64.MatchString(th) || !isInstant(ts) {
 		return false, "tip_invalid: bad fields"
 	}
 	if v, has := tip.Vals["log_pubkey_hex"]; has && v != nil { // "" = absent (cryptovalid profile); a non-string never equals the key
@@ -423,7 +448,7 @@ func verifySidecar(packPath string, pack *Object, declared string, trust map[str
 			return "FAIL", "sidecar field missing or not a string: " + k, false
 		}
 	}
-	if su, _ := getS(side, "signed_utc"); !instantRe.MatchString(su) {
+	if su, _ := getS(side, "signed_utc"); !isInstant(su) {
 		return "FAIL", "sidecar signed_utc is not an instant", false
 	}
 	pub, _ := getS(side, "public_key_hex")

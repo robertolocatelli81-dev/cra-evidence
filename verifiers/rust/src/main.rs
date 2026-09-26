@@ -180,7 +180,19 @@ fn is_instant(s: &str) -> bool {
         if n == 0 || n > 9 { return false; }
         &r[n..]
     } else { rest };
-    rest == "Z" || (rest.len() == 6 && (rest.starts_with('+') || rest.starts_with('-')) && rest[1..3].bytes().all(|c| c.is_ascii_digit()) && &rest[3..4] == ":" && rest[4..6].bytes().all(|c| c.is_ascii_digit()))
+    let shape = rest == "Z" || (rest.len() == 6 && (rest.starts_with('+') || rest.starts_with('-')) && rest[1..3].bytes().all(|c| c.is_ascii_digit()) && &rest[3..4] == ":" && rest[4..6].bytes().all(|c| c.is_ascii_digit()));
+    if !shape { return false; }
+    // an instant that EXISTS (26/09/2026: the shape alone let a signature dated 2026-02-30 or 25:61:61 verify in all
+    // four verifiers): month, day of that month and year, hour, minute, second, offset
+    let n = |r: std::ops::Range<usize>| b[r].iter().fold(0u32, |v, c| v * 10 + (c - b'0') as u32);
+    let (y, mo, d) = (n(0..4), n(5..7), n(8..10));
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if !(1..=12).contains(&mo) || d < 1 || d > dim[(mo - 1) as usize] || n(11..13) > 23 || n(14..16) > 59 || n(17..19) > 59 {
+        return false;
+    }
+    let rb = rest.as_bytes();
+    rest == "Z" || (rb[1..3].iter().fold(0u32, |v, c| v * 10 + (c - b'0') as u32) <= 23 && rb[4..6].iter().fold(0u32, |v, c| v * 10 + (c - b'0') as u32) <= 59)
 }
 
 struct Out { ok: bool, assessed: bool, auth: String, anchored: bool, layers: Vec<Layer>, pack_sha3: Option<String> }
