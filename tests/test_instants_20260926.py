@@ -4,6 +4,12 @@ import json, os, shutil, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cra_evidence import signing as S
 
+try:
+    import cryptography  # noqa: F401
+    HAVE_CRYPTO = True
+except ImportError:
+    HAVE_CRYPTO = False
+
 PACK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "self_evidence", "cra_pack.json")
 
 
@@ -16,6 +22,7 @@ class Instants(unittest.TestCase):
                   "2026-09-26T10:00:00+05:60", "2026-09-00T10:00:00Z", "2026-9-26T10:00:00Z", 5, None):
             self.assertFalse(S.is_instant(s), s)
 
+    @unittest.skipUnless(HAVE_CRYPTO, "cryptography needed to sign")
     def test_a_signature_dated_on_a_day_that_does_not_exist_fails(self):
         with tempfile.TemporaryDirectory() as d:
             S.keygen(os.path.join(d, "k.json")); key = S.load_key(os.path.join(d, "k.json"))

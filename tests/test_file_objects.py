@@ -164,8 +164,10 @@ class TestFileObjects(unittest.TestCase):
 
 
 class WeakEd25519Keys20260925(unittest.TestCase):
-    """A forged sidecar carrying a small-order key, pinned in the trust store, was trusted-signed (R=identity, S=0
-    verifies on every message under OpenSSL). Also the long-term seal primitive."""
+    """A forged sidecar carrying a small-order key, pinned in the trust store, was trusted-signed (with the identity
+    key, R=identity, S=0 verifies on every message under OpenSSL; other small-order points on a share of messages).
+    Also the long-term seal primitive."""
+    @unittest.skipUnless(HAVE_CRYPTO, "cryptography needed to sign the forged sidecar")
     def test_forged_sidecar_with_pinned_small_order_key_is_refused(self):
         import json as _json, tempfile as _tf
         from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path, weak_ed25519_key

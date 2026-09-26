@@ -24,7 +24,7 @@ HEX128_RE = re.compile(r"[0-9a-f]{128}")
 
 
 
-# small-order / non-canonical Ed25519 keys: R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026); same list in the JS/Go/Rust verifiers
+# small-order / non-canonical Ed25519 keys: with the identity key R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026; other small-order points: a share of messages); same list in the JS/Go/Rust verifiers
 WEAK_ED25519_KEYS = frozenset((
     "0100000000000000000000000000000000000000000000000000000000000000",
     "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",

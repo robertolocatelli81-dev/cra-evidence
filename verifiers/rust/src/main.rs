@@ -152,7 +152,7 @@ fn ed_ok(pub_hex: &str, msg: &[u8], sig_hex: &str) -> bool {
     let Ok(vk) = VerifyingKey::from_bytes(&pb) else { return false };
     vk.verify(msg, &Signature::from_bytes(&sb)).is_ok()
 }
-// small-order / non-canonical Ed25519 keys: R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026); same list in the JS/Go/Rust verifiers
+// small-order / non-canonical Ed25519 keys: with the identity key R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026; other small-order points: a share of messages); same list in the JS/Go/Rust verifiers
 const WEAK_ED25519: [&str; 10] = ["0100000000000000000000000000000000000000000000000000000000000000", "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000080", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa", "0100000000000000000000000000000000000000000000000000000000000080", "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"];
 fn weak_ed25519(pk: &[u8; 32]) -> bool {
     let h: String = pk.iter().map(|b| format!("{:02x}", b)).collect();

@@ -608,7 +608,7 @@ def cases(base):
             build_with_source(d); sd = os.path.join(d, "l.jsonl.sources")
             for f in os.listdir(sd): os.chmod(os.path.join(sd, f), 0)
         case("sbom_source_unreadable", unreadable)
-    # 25/09 (4-mind round 2, A1): a small-order key makes R=identity, S=0 verify on every message under OpenSSL —
+    # 25/09 (4-mind round 2, A1): the identity key makes R=identity, S=0 verify on every message under OpenSSL (other small-order points: a share of messages) —
     # a forged sidecar with that key PINNED in the trust store was trusted-signed; every verifier must refuse it
     for nm, keyhex in (("weak_key_identity_pinned", "01" + "00" * 31),
                        ("weak_key_order8_pinned", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"),

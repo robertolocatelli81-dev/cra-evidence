@@ -138,7 +138,7 @@ func edOK(pubHex string, msg []byte, sigHex string) bool {
 	return ed25519.Verify(ed25519.PublicKey(pub), msg, sig)
 }
 
-// small-order / non-canonical Ed25519 keys: R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026); same list in the JS/Go/Rust verifiers
+// small-order / non-canonical Ed25519 keys: with the identity key R=identity, S=0 verifies on every message and OpenSSL accepts it (measured 25/09/2026; other small-order points: a share of messages); same list in the JS/Go/Rust verifiers
 var weakEd25519Keys = map[string]bool{"0100000000000000000000000000000000000000000000000000000000000000": true, "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f": true, "0000000000000000000000000000000000000000000000000000000000000000": true, "0000000000000000000000000000000000000000000000000000000000000080": true, "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05": true, "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a": true, "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85": true, "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa": true, "0100000000000000000000000000000000000000000000000000000000000080": true, "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff": true}
 
 func weakEd25519(pk []byte) bool {
