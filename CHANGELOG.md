@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.3 — 2026-09-27
 
 - **Exit code 77 when the verifier could not judge.** `cra verify` and the JS, Go and Rust verifiers now exit 77 when
   `assessed` is false — the verifier's own exception, or (Python) no `cryptography` to check a producer signature — and

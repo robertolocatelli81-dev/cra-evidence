@@ -64,7 +64,7 @@ judge" from "this pack is bad". The field is present on every return, so its abs
 verifiers carry the same field on their own internal errors (the Go and JS `verifier-exception` layer already existed
 in 0.3.1, without the field; Rust gained both in 0.3.2), and the differential oracle compares `assessed` too.
 
-Exit codes of `cra verify` and of the three other verifiers, since 27/09/2026 (Unreleased): 0 verified, 1 a finding
+Exit codes of `cra verify` and of the three other verifiers, since 0.3.3 (27/09/2026): 0 verified, 1 a finding
 against the pack, 77 not assessed, 2 unusable input or arguments. Until 0.3.2 a run that could not judge exited 1, the
 same as a bad pack. 77 is the value omega-evidence already uses for the same case (`omega_evidence/verifier.py`); it is
 not meant in its sysexits sense.
