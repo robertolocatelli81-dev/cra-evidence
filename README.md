@@ -121,8 +121,9 @@ The bound limits what is read, not what parsing a document within it costs (meas
   the CHANGELOG, each re-measured and turned into an oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
   cryptography only, none); the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.
-- The SRP schema is the 39-field ENISA glossary (44 table rows in the vendored snapshot: 3 section headers, 2 unnumbered
-  continuation rows, 39 numbered fields), stage by stage, derived by a test from the dated snapshot vendored in
+- The SRP schema is the 40-field ENISA glossary (45 table rows in the vendored snapshot of 29/09/2026: 3 section headers,
+  2 unnumbered continuation rows, 40 numbered fields; the page dated 25/09/2026 added one row, v26a, to the 39 fields of
+  15/09/2026 — measured row by row, nothing else changed), stage by stage, derived by a test from the dated snapshot vendored in
   `spec/sources/` (`spec/SRP_FIELDS.md`); "complete" is never declared by silence — the payload lists what is
   missing; a notice cannot carry an awareness instant different from the recorded vulnerability event without a
   declared reason.
@@ -150,7 +151,8 @@ Next decade, as far as the sources go: CycloneDX 1.7 (ECMA-424, released 2025-10
 Syft 1.52.0, Trivy 0.74.0 and cdxgen 12.8.4 emit it by default (measured 20/09/2026) — and this tool ingests it and
 exports 1.6 or 1.7, both validated; the SRP has no machine interface today (ENISA's FAQ, re-read 20/09/2026: "no Application Programming Interface (API)
 will be provided at the initial release of the SRP … API functionality may be considered in a future phase"; the
-39-field glossary re-downloaded the same day is identical to the vendored snapshot) and this tool will adopt one if it
+39-field glossary re-downloaded the same day was identical to the snapshot of 15/09/2026; re-read on 29/09/2026, the page
+dated 25/09/2026 adds one field, v26a, adopted in the schema — see the CHANGELOG) and this tool will adopt one if it
 appears — the Digital Omnibus proposal (COM, 19/11/2025, procedure 2025/0360(COD), not adopted) would build a single
 entry point for incident reporting on the CRA platform; NIST IR 8547 — an initial public draft, not a final standard —
 proposes deprecating the quantum-vulnerable signatures (Ed25519 included) after 2030 and disallowing them after

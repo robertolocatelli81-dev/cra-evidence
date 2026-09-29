@@ -1,11 +1,12 @@
-# Legal basis — as read from primary sources on 15/09/2026, re-checked on 20/09/2026
+# Legal basis — as read from primary sources on 15/09/2026, re-checked on 20/09/2026 and 29/09/2026
 
 Regulation (EU) 2024/2847 (Cyber Resilience Act). Sources consulted on 15/09/2026:
 - European Commission, "Cyber Resilience Act — Reporting obligations": https://digital-strategy.ec.europa.eu/en/policies/cra-reporting
 - ENISA, Single Reporting Platform: https://www.enisa.europa.eu/topics/product-security/single-reporting-platform-srp
-  (portal https://portal.cra-srp.enisa.europa.eu/, "operational as of 11 September 2026"), CRA SRP Glossary (39 fields; the
-  vendored table has 44 rows — 3 section headers, 2 unnumbered continuation rows, 39 numbered fields — dated snapshot in
-  `spec/sources/enisa_srp_glossary_20260915.json`), AR User Manual, PEC guidance.
+  (portal https://portal.cra-srp.enisa.europa.eu/, "operational as of 11 September 2026"), CRA SRP Glossary (39 fields on
+  15/09/2026; the vendored table had 44 rows — 3 section headers, 2 unnumbered continuation rows, 39 numbered fields — dated
+  snapshot in `spec/sources/enisa_srp_glossary_20260915.json`, kept for history; the reference since 29/09/2026 is
+  `spec/sources/enisa_srp_glossary_20260929.json`, 45 rows, 40 numbered fields — see the re-check below), AR User Manual, PEC guidance.
 - EUR-Lex, Regulation (EU) 2024/2847, OJ L 2024/2847: https://eur-lex.europa.eu/eli/reg/2024/2847/oj (Art. 13(13), 14, 16, 24, 71 re-read).
 - CycloneDX specification overview (1.7 current, ECMA-424): https://cyclonedx.org/specification/overview/; JSON schemas 1.6 and 1.7 vendored in `spec/schemas/` (Apache-2.0, OWASP CycloneDX).
 - ENISA, "The CRA Single Reporting Platform is launched" (news, September 2026).
@@ -22,6 +23,17 @@ Re-check of 20/09/2026 (what changed: nothing in the obligations):
   the CRA reporting platform; a PROPOSAL, not adopted — the Art. 14 deadlines and the SRP as the channel are unchanged.
 - The Commission's cybersecurity package of 20/01/2026 (Cybersecurity Act revision, NIS2 amendments) does not amend
   Regulation (EU) 2024/2847.
+
+Re-check of 29/09/2026 (what changed: one glossary field; nothing in the obligations):
+- CRA SRP Glossary, page "Version 1.3. Last update: 25 September 2026", extracted from the raw HTML with the same method as
+  the 15/09/2026 snapshot (the method reproduces the 15/09/2026 file byte-exact) and diffed row by row: header identical; the
+  44 rows of 15/09/2026 all present, unchanged and in the same order; one row inserted between v26 and v27 — **v26a, "Date and
+  time when the Actively Exploited Vulnerability occurred (UTC time)"** (AEV; Optional at the early warning, Required at the
+  72 h notification, copied forward at the final report). New snapshot `spec/sources/enisa_srp_glossary_20260929.json` (45
+  rows, 40 numbered fields: 18 common, 13 AEV, 9 SI); schema field `vulnerability_occurred_datetime_utc`. The page's footnotes
+  outside the table ([1] on v26: "This field will be available in the next release of the Platform"; [2] on i37: "In the
+  current release this field is named: Date and time when the incident was detected (UTC time)") are not part of either
+  snapshot; whether they changed between 15/09 and 25/09 is not measured. The Art. 14 deadlines are unchanged.
 
 | Obligation | What this tool does | Reference |
 |---|---|---|

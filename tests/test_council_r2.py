@@ -38,9 +38,12 @@ class TestCouncilR2(unittest.TestCase):
 
     # Opus B10 — the per-stage rules are DERIVED from the vendored ENISA snapshot, not asserted
     def test_srp_schema_matches_the_vendored_enisa_snapshot(self):
-        snap = json.load(open(os.path.join(ROOT, "spec", "sources", "enisa_srp_glossary_20260915.json")))
-        rows = [r for r in snap["rows"] if len(r) >= 10 and re.match(r"[vi]?\d+\.", r[0])]
-        self.assertEqual(len(rows), 39)
+        # 29/09/2026: snapshot of the page dated 25/09/2026 (row v26a added); a row number may carry a letter suffix —
+        # the previous pattern `[vi]?\d+\.` skipped "v26a." and still counted 39 (measured; see tests/test_enisa_v26a_20260929.py)
+        with open(os.path.join(ROOT, "spec", "sources", "enisa_srp_glossary_20260929.json"), encoding="utf-8") as f:
+            snap = json.load(f)
+        rows = [r for r in snap["rows"] if len(r) >= 10 and re.match(r"[vi]?\d+[a-z]?\.", r[0])]
+        self.assertEqual(len(rows), 40)
         code = {"Required": "R", "Optional": "O", "N/A": "-", "By default copied from previous step, or updated": "C",
                 "Required if such information available": "A"}
         ours = list(COMMON_FIELDS.values()) + list(VULN_FIELDS.values()) + list(INCIDENT_FIELDS.values())

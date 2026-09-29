@@ -72,13 +72,14 @@ class TestSRPNotice(unittest.TestCase):
             "product_name": "P", "product_version": "1", "awareness_datetime_utc": AW}
 
     def test_schema_counts_match_glossary(self):
-        self.assertEqual(len(schema("vulnerability")), 18 + 12); self.assertEqual(len(schema("incident")), 18 + 9)
+        self.assertEqual(len(schema("vulnerability")), 18 + 13); self.assertEqual(len(schema("incident")), 18 + 9)   # 13 AEV since v26a (25/09/2026)
 
     def test_required_by_stage_from_glossary(self):
         ew = SRPNotice("vulnerability", "early_warning", dict(self.BASE)); self.assertTrue(ew.complete(), ew.missing())
         n72 = SRPNotice("vulnerability", "notification", dict(self.BASE))
-        # ENISA glossary rows v28/v29: PEC fields are OPTIONAL at the 72 h notification (corrected 15/09 from the snapshot)
-        self.assertEqual(set(n72.missing()), {"general_information"})
+        # ENISA glossary rows v28/v29: PEC fields are OPTIONAL at the 72 h notification (corrected 15/09 from the snapshot);
+        # row v26a (glossary dated 25/09/2026): the occurrence instant is REQUIRED at the 72 h notification
+        self.assertEqual(set(n72.missing()), {"general_information", "vulnerability_occurred_datetime_utc"})
         fr = SRPNotice("vulnerability", "final_report", dict(self.BASE))
         self.assertIn("corrective_available_date", fr.missing()); self.assertIn("severity_description", fr.missing())
         self.assertIn("corrective_measures_taken", fr.missing()); self.assertNotIn("attack_vector", fr.missing())

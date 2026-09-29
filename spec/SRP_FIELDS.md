@@ -1,6 +1,6 @@
 # SRP field schema (Art. 14 notifications)
 
-Source: ENISA CRA SRP Glossary (39 fields), read 2026-09-15 — snapshot vendored in spec/sources/enisa_srp_glossary_20260915.json; per-stage codes derived from it by tests/test_council_r2.py
+Source: ENISA CRA SRP Glossary (40 fields; page dated 25 September 2026), read 2026-09-29 — snapshot vendored in spec/sources/enisa_srp_glossary_20260929.json; per-stage codes derived from it by tests/test_council_r2.py
 (https://www.enisa.europa.eu/topics/product-security/single-reporting-platform-srp/cra-srp-glossary2). The per-stage
 codes below are DERIVED from the vendored snapshot by `tests/test_council_r2.py` (the test fails if this module and
 the snapshot disagree). Legend: **R** = required at this stage; **O** = optional; **A** = required if such information is available; **C** = carried forward from the previous stage (copied by default, may be updated); **-** = not at this stage. `manufacturer_name` is system-generated in the portal; here it is a plain
@@ -40,7 +40,7 @@ PEC options (rows v28/v29, Art. 16(2) third subparagraph): `no_other_member_stat
 | 17 | `user_measures` | O | O | R | text (max 4000) |
 | 18 | `attack_vector` | - | O | O | text (max 255) |
 
-## Actively exploited vulnerability (12)
+## Actively exploited vulnerability (13)
 
 | row | field | EW 24h | N 72h | FR | format |
 |---|---|---|---|---|---|
@@ -52,6 +52,7 @@ PEC options (rows v28/v29, Art. 16(2) third subparagraph): `no_other_member_stat
 | v24 | `severity_description` | O | O | R | text (max 4000) |
 | v25 | `impact_description` | O | O | R | text (max 4000) |
 | v26 | `awareness_datetime_utc` | R | C | C | datetime-utc |
+| v26a | `vulnerability_occurred_datetime_utc` | O | R | C | datetime-utc |
 | v27 | `malicious_actor` | O | O | A | text (max 100) |
 | v28 | `particular_exceptional_circumstances` | - | O | - | enum-list ['no_other_member_state', 'contrary_to_essential_interests', 'imminent_high_risk'] |
 | v29 | `pec_delay_reason` | - | O | - | enum-list ['no_other_member_state', 'contrary_to_essential_interests', 'imminent_high_risk'] |

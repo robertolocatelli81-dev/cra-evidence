@@ -111,7 +111,12 @@ class TestCouncilR3(unittest.TestCase):
         self.assertIn("title", alone.missing()); self.assertFalse(alone.complete())
         prev = dict(BASE)
         n = SRPNotice("vulnerability", "notification", {"general_information": "x"}, previous_fields=prev)
-        self.assertEqual(n.fields["title"], "t"); self.assertEqual(n.fields["awareness_datetime_utc"], AW); self.assertTrue(n.complete(), n.missing())
+        self.assertEqual(n.fields["title"], "t"); self.assertEqual(n.fields["awareness_datetime_utc"], AW)
+        # glossary dated 25/09/2026 (row v26a): the occurrence instant is required at 72 h and is not carried from an early
+        # warning that did not give it — until 0.3.3 this payload was complete
+        self.assertEqual(n.missing(), ["vulnerability_occurred_datetime_utc"])
+        n = SRPNotice("vulnerability", "notification", {"general_information": "x", "vulnerability_occurred_datetime_utc": "2026-08-30T00:00:00Z"}, previous_fields=prev)
+        self.assertTrue(n.complete(), n.missing())
         self.assertEqual(n.deadline_utc(), "2026-09-04T00:00:00+00:00")
 
     # C2 — aliases resolved per id (querybatch is condensed); positive control demands a CVE alias

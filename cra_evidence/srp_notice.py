@@ -2,9 +2,10 @@
 """Art. 14 notifications aligned with the ENISA Single Reporting Platform (SRP) data model.
 
 Source of the field inventory: ENISA, "CRA SRP Glossary" (enisa.europa.eu/topics/product-security/
-single-reporting-platform-srp/cra-srp-glossary2), read 15/09/2026: 39 fields — 18 common, 12 for an actively
-exploited vulnerability (AEV), 9 for a severe incident — each with its stage (EW = early warning 24 h, N72 =
-notification 72 h, FR = final report) and whether it is required, optional or required-if-available at that stage.
+single-reporting-platform-srp/cra-srp-glossary2), read 15/09/2026 and again 29/09/2026 (page "Last update: 25 September
+2026", one row added: v26a): 40 fields — 18 common, 13 for an actively exploited vulnerability (AEV), 9 for a severe
+incident — each with its stage (EW = early warning 24 h, N72 = notification 72 h, FR = final report) and whether it is
+required, optional or required-if-available at that stage.
 
 What this module does: builds a stage payload in the SRP vocabulary, lists the fields still MISSING for that
 stage (never "complete" by silence), computes the legal deadline, hashes the payload canonically, and writes a
@@ -60,6 +61,9 @@ VULN_FIELDS: Dict[str, Dict[str, Any]] = {
     "severity_description": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "v24"},
     "impact_description": {"stages": {"early_warning": "O", "notification": "O", "final_report": "R"}, "format": "text", "max": 4000, "glossary_row": "v25"},
     "awareness_datetime_utc": {"stages": {"early_warning": "R", "notification": "C", "final_report": "C"}, "format": "datetime-utc", "glossary_row": "v26"},
+    # v26a added by ENISA in the glossary dated 25/09/2026 ("Date and time when the Actively Exploited Vulnerability occurred"):
+    # optional at the early warning, REQUIRED at the 72 h notification, carried forward at the final report
+    "vulnerability_occurred_datetime_utc": {"stages": {"early_warning": "O", "notification": "R", "final_report": "C"}, "format": "datetime-utc", "glossary_row": "v26a"},
     "malicious_actor": {"stages": {"early_warning": "O", "notification": "O", "final_report": "A"}, "format": "text", "max": 100, "glossary_row": "v27"},
     "particular_exceptional_circumstances": {"stages": {"early_warning": "-", "notification": "O", "final_report": "-"}, "format": "enum-list", "glossary_row": "v28", "enum": ["no_other_member_state", "contrary_to_essential_interests", "imminent_high_risk"]},
     "pec_delay_reason": {"stages": {"early_warning": "-", "notification": "O", "final_report": "-"}, "format": "enum-list", "glossary_row": "v29", "enum": ["no_other_member_state", "contrary_to_essential_interests", "imminent_high_risk"]},
@@ -83,7 +87,7 @@ PEC_OPTIONS = {   # Art. 16(2) third subparagraph, as listed in the glossary row
 }
 STAGE_CODES = {"R": "required at this stage", "O": "optional", "A": "required if such information is available",
                "C": "carried forward from the previous stage (copied by default, may be updated)", "-": "not at this stage"}
-SRP_GLOSSARY_SOURCE = "ENISA CRA SRP Glossary (39 fields), read 2026-09-15 — snapshot vendored in spec/sources/enisa_srp_glossary_20260915.json; per-stage codes derived from it by tests/test_council_r2.py"
+SRP_GLOSSARY_SOURCE = "ENISA CRA SRP Glossary (40 fields; page dated 25 September 2026), read 2026-09-29 — snapshot vendored in spec/sources/enisa_srp_glossary_20260929.json; per-stage codes derived from it by tests/test_council_r2.py"
 
 
 def schema(stream: str) -> Dict[str, Dict[str, Any]]:

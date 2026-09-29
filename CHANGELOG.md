@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.4 — unreleased
+
+- **ENISA glossary dated 25/09/2026: one field added, v26a.** The CRA SRP Glossary page ("Version 1.3. Last update: 25
+  September 2026", read 29/09/2026) carries a new row **v26a, "Date and time when the Actively Exploited Vulnerability
+  occurred (UTC time)"**: optional at the early warning, required at the 72 h notification, copied forward at the final
+  report. Measured 29/09/2026 against the vendored snapshot of 15/09/2026, extracted from the raw HTML with the same method
+  (the method reproduces the 15/09 file byte-exact): header identical; the 44 rows of 15/09 all present, unchanged and in
+  the same order; one row inserted between v26 and v27; 45 rows, 40 numbered fields (18 common, 13 AEV, 9 SI). New
+  snapshot `spec/sources/enisa_srp_glossary_20260929.json` is the reference; the 15/09 one stays for history. The
+  vulnerability schema gains `vulnerability_occurred_datetime_utc` (row v26a, `spec/SRP_FIELDS.md` regenerated from the
+  module); `cra schema --template notification` lists it; a 72 h AEV notification without it is now incomplete and
+  `cra notice` exits 1 — **a payload complete under 0.3.3 may be incomplete under 0.3.4**; the final report reports it
+  missing unless carried with `--previous`. The snapshot test now matches row numbers with a letter suffix: the pattern
+  used until 0.3.3 skipped `v26a.` and, measured on the 25/09 snapshot with the 0.3.3 schema, still counted 39 rows and
+  stayed green; the new bench fails with the 15/09 snapshot and fails with the 0.3.3 schema (both ablations are tests in
+  `tests/test_enisa_v26a_20260929.py`). The footnotes outside the table ([1] on v26, [2] on i37) are not in either
+  snapshot; whether they changed is not measured. The Art. 14 deadlines are unchanged. The committed example in
+  `examples/self_evidence/` (early warning, generated 21/09/2026) is unchanged: v26a is optional at that stage. Tests:
+  143 (4 skipped with `cryptography`, on 3.11; 17 skipped without it, on 3.9, 3.11 and 3.13); differential oracle 169
+  cases, 0 divergences over Python, JS, Go and Rust; gitleaks on the whole history: no leaks.
+
 ## 0.3.3 — 2026-09-27
 
 - **Exit code 77 when the verifier could not judge.** `cra verify` and the JS, Go and Rust verifiers now exit 77 when
