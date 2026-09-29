@@ -17,4 +17,4 @@ parties is included in this repository.
 
 No AWS SDK is vendored: the KMS client is HTTP + SigV4 written here. No keys, credentials or personal data other than
 the author's contact are in the repository or its history (checked with gitleaks on every push).
-| Generator outputs used as fixtures (`tests/fixtures/real_tools/`): Syft 1.52.0 (Anchore, Apache-2.0), Trivy 0.74.0 (Aqua Security, Apache-2.0), cdxgen 12.8.4 (CycloneDX/AppThreat, Apache-2.0) run on 20/09/2026 on a one-dependency npm project | `tests/fixtures/real_tools/` | the documents are the tools' unmodified output (data, not code); base64-js 1.5.1 is MIT |
+| Generator outputs used as fixtures (`tests/fixtures/real_tools/`): Syft 1.52.0 (Anchore, Apache-2.0), Trivy 0.74.0 (Aqua Security, Apache-2.0), cdxgen 12.8.4 (CycloneDX/AppThreat, Apache-2.0) run on a one-dependency npm project (Trivy on 20/09/2026; Syft and cdxgen re-run on 29/09/2026 on the byte-identical lockfile from a neutral directory) | `tests/fixtures/real_tools/` | the documents are the tools' unmodified output (data, not code); base64-js 1.5.1 is MIT |

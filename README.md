@@ -92,7 +92,8 @@ The bound limits what is read, not what parsing a document within it costs (meas
   (Syft 5.3 → 4.2, cdxgen 6.6 → 4.4, Trivy 4.8 → 3.7 out of 10), which is why the original is kept; the 0.3.0 index
   export scores 5.3 / 5.5 / 4.8 (re-measured on the final code, interpreter cache cleared) on the same inputs (bom-ref, serialNumber, tools, component type, CPE, licence
   expressions, and a dependency graph only from edges the producer knows: the installed floor's Requires-Dist graph with PEP 508 markers evaluated for this interpreter — a `dependsOn` list is a positive statement, so it is emitted only for a component whose metadata was actually read AND whose every declared child is a component of the product (a declared-but-not-installed name is recorded in a property, never as a component, and its parent's composition is declared `unknown` instead — `incomplete` would assert that more exist); never re-invented for an ingested document).
-  Six unmodified generator documents are vendored as fixtures (`tests/fixtures/real_tools/`): the tests read the
+  Six unmodified generator documents are vendored as fixtures (`tests/fixtures/real_tools/`; the Syft and cdxgen ones
+  re-run on 29/09/2026 with the same tool versions on the same lockfile from a neutral directory, see the CHANGELOG): the tests read the
   same dependency with the same purl, version and licence from every one of them and validate the exports with
   jsonschema; CI validates the four CycloneDX fixtures and every export with the official CycloneDX CLI 0.33.1, and the two SPDX
   fixtures with the official `pyspdxtools` 0.8.5, each with a positive control.
@@ -117,7 +118,7 @@ The bound limits what is read, not what parsing a document within it costs (meas
   is due.
 - Pre-publication review: for 0.1.0, five models (two providers) in three rounds, plus the author — 44 findings turned
   into tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; for 0.3.0, further rounds on 20–21/09/2026
-  (Opus, Sonnet, Haiku; Fable 5.1 in rounds 6–9 until its use was revoked; Gemini Pro out of credits) — every finding of every round is listed in
+  (independent AI reviewers 1, 2 and 3; reviewer 4 in rounds 6–9 until its use was revoked; reviewer 5 out of credits — numbered as in the CHANGELOG) — every finding of every round is listed in
   the CHANGELOG, each re-measured and turned into an oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
   cryptography only, none); the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.

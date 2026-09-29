@@ -32,7 +32,7 @@ class TestCouncilR3(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
 
-    # Fable/Opus/Gemini/Sonnet A1 — the outer seal's own fields are signed: any mutation breaks it
+    # reviewers 1, 2, 4 and 5, A1 — the outer seal's own fields are signed: any mutation breaks it
     def test_outer_seal_fields_are_signed(self):
         lte = LongTermEvidence("ab" * 32); lte.seal(Signer("test-plain3"), t=1.0)
         self.assertTrue(lte.verify(now=2.0, policy=AlgorithmPolicy())["ok"])
@@ -164,7 +164,7 @@ class TestCouncilR3(unittest.TestCase):
             feeds._get_json = old
         self.assertIsNone(r["error"]); self.assertIn("CVE-2026-9", r["ids"])
 
-    # Opus/Sonnet C — a feed-confirmed exploitation sets the clock; C8 — schema template feeds `cra notice`
+    # reviewers 1 and 2, C — a feed-confirmed exploitation sets the clock; C8 — schema template feeds `cra notice`
     def test_cli_feed_confirmation_sets_exploited_and_template(self):
         from cra_evidence.cli import main
         oldk = feeds.cisa_kev_ids

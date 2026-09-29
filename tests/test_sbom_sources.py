@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """0.3.0 — the generator's document is the evidence, the record is its index.
 
-Fixtures in tests/fixtures/real_tools/ are the UNMODIFIED output of the real generators run on 20/09/2026 on a
-one-dependency npm project (`tiny-cra-sample` → base64-js 1.5.1): Syft 1.52.0 (CycloneDX 1.7, SPDX 2.3),
-Trivy 0.74.0 (CycloneDX 1.7, SPDX 2.3), cdxgen 12.8.4 (CycloneDX 1.6 and 1.7). Every test on them is a
-cross-generator measurement, not an assumption about a format.
+Fixtures in tests/fixtures/real_tools/ are the UNMODIFIED output of the real generators run on a one-dependency npm
+project (`tiny-cra-sample` → base64-js 1.5.1; package-lock.json SHA-256 eae8eaf4…6fea3c1): Trivy 0.74.0 (CycloneDX
+1.7, SPDX 2.3) on 20/09/2026; Syft 1.52.0 (CycloneDX 1.7, SPDX 2.3) and cdxgen 12.8.4 (CycloneDX 1.6 and 1.7) re-run
+on 29/09/2026 on the same lockfile from the neutral directory /tmp/tiny-cra-sample, because the 20/09 documents
+carried the generating machine's working path (see the 0.4.0 CHANGELOG entry for the leaf-by-leaf differences).
+Every test on them is a cross-generator measurement, not an assumption about a format.
 """
 import glob
 import hashlib
@@ -201,7 +203,7 @@ class TestSourceStore(unittest.TestCase):
         self.assertEqual(layer(r, "source-documents")["status"], "FAIL")
 
     def test_a_directory_at_the_stored_path_is_a_fail_not_absence(self):
-        """round 10 (Sonnet): "something is there but it is not the document" was reported as honest absence"""
+        """round 10 (reviewer 2): "something is there but it is not the document" was reported as honest absence"""
         rec, pack = self._record_and_pack()
         fp = source_file(self.led, rec["data"]["source"]["sha256"]); os.remove(fp); os.makedirs(fp)
         r = verify_pack(pack)
@@ -223,7 +225,7 @@ class TestSourceStore(unittest.TestCase):
         self.assertIn("changed since it was ingested", str(cm.exception))
 
     def test_a_document_cannot_be_bound_to_an_index_not_read_from_it(self):
-        """found by Opus in round 1: an installed-floor (or hand-built) record accepted ANY source_path and verified PASS"""
+        """found by reviewer 1 in round 1: an installed-floor (or hand-built) record accepted ANY source_path and verified PASS"""
         for sb in (sbom_from_installed("tiny-cra-sample", "1.0.0", ["cryptography"]), SBOMRecord("tiny-cra-sample", "1.0.0", [SBOMComponent("left-pad", "9.9.9")])):
             with self.assertRaises(ValueError) as cm:
                 self.lk.record_sbom(sb, source_path=self.src)
@@ -231,7 +233,7 @@ class TestSourceStore(unittest.TestCase):
         self.assertFalse(os.path.exists(sources_dir(self.led)))
 
     def test_an_ingested_sbom_without_source_path_is_refused(self):
-        """found by Sonnet in round 1: the record carried the ingest-time hash with nothing re-verified or stored"""
+        """found by reviewer 2 in round 1: the record carried the ingest-time hash with nothing re-verified or stored"""
         with self.assertRaises(ValueError) as cm:
             self.lk.record_sbom(sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0"))
         self.assertIn("pass source_path", str(cm.exception))
@@ -318,13 +320,13 @@ class TestSourceStore(unittest.TestCase):
             sbom_from_cyclonedx(sur, "p", "1")
 
     def test_a_mutated_index_is_refused_even_with_the_right_document(self):
-        """found by Sonnet in round 2: the index was only co-located with the bytes, not a function of them"""
+        """found by reviewer 2 in round 2: the index was only co-located with the bytes, not a function of them"""
         from dataclasses import replace
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         for bad in (replace(sb, components=[SBOMComponent("left-pad", "9.9.9")]),
                     replace(sb, components=sb.components[:-1]),
                     replace(sb, source={**sb.source, "generator": "forged"}),
-                    replace(sb, edges=[["", "base64-js"]]),                                          # round 3 (Opus/Sonnet): a forged graph rode through
+                    replace(sb, edges=[["", "base64-js"]]),                                          # round 3 (reviewers 1/2): a forged graph rode through
                     replace(sb, depth="external:cyclonedx:trusted-tool")):
             with self.assertRaises(ValueError) as cm:
                 self.lk.record_sbom(bad, source_path=self.src)
@@ -334,7 +336,7 @@ class TestSourceStore(unittest.TestCase):
         self.assertEqual(self.lk.verify()["entries"], 0)
 
     def test_ingest_reads_the_file_once(self):
-        """found by Sonnet in round 2: two reads of a file still being written = index of A, hash of B"""
+        """found by reviewer 2 in round 2: two reads of a file still being written = index of A, hash of B"""
         import cra_evidence.sbom as m
         opened = []
         real_open = open
@@ -350,7 +352,7 @@ class TestSourceStore(unittest.TestCase):
         self.assertEqual(opened, ["rb"])
 
     def test_spdx_type_confusion_never_crashes(self):
-        """round 5 (Sonnet/Opus): a list where a string id is expected raised TypeError instead of being ignored"""
+        """round 5 (reviewers 2/1): a list where a string id is expected raised TypeError instead of being ignored"""
         docs = [{"spdxVersion": "SPDX-2.3", "documentDescribes": [["x"]], "packages": [{"name": "a", "SPDXID": "S-a", "versionInfo": "1"}],
                  "relationships": [{"spdxElementId": ["S-a"], "relatedSpdxElement": {"x": 1}, "relationshipType": "DESCRIBES"}]},
                 {"spdxVersion": "SPDX-2.3", "packages": 5, "relationships": "x", "documentDescribes": [{"a": 1}]},
@@ -472,8 +474,8 @@ class TestExport(unittest.TestCase):
         except ImportError:
             self.skipTest("cryptography not installed (the installed-floor part of this test needs it)")
         inst = sbom_from_installed("p", "1", ["cryptography", "no-such-dist-xyz"]).to_cyclonedx_min()   # top-level floor with an absent name…
-        # a declared-but-NOT-INSTALLED name is NOT a component of the product (round 9, Sonnet: it was exported with a fabricated version),
-        # and the product's own list is then INCOMPLETE: no positive dependsOn for it, it goes to the unknown composition (round 10, Opus)
+        # a declared-but-NOT-INSTALLED name is NOT a component of the product (round 9, reviewer 2: it was exported with a fabricated version),
+        # and the product's own list is then INCOMPLETE: no positive dependsOn for it, it goes to the unknown composition (round 10, reviewer 1)
         self.assertNotIn("no-such-dist-xyz", json.dumps(inst["components"]) + json.dumps(inst.get("dependencies", [])))
         self.assertIn({"name": "cra-evidence:declared_not_installed", "value": "no-such-dist-xyz"}, inst["metadata"]["properties"])
         self.assertNotIn("dependencies", inst)

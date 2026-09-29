@@ -1,4 +1,5 @@
-"""Findings of the pre-publication council (15/09/2026, Haiku 4.5 + Gemini 3.1 Pro; Fable/Opus/Sonnet in round 2).
+"""Findings of the pre-publication council (15/09/2026, independent AI reviewers 3 and 5; reviewers 1, 2 and 4 in round 2;
+the reviewers are numbered 1–5 as in the CHANGELOG: 1–4 from one provider, 5 from another).
 Each test was RED on the code as reviewed and is GREEN after the fix named in the test."""
 import json, os, shutil, sys, tempfile, unittest, uuid
 from datetime import datetime, timezone
@@ -29,14 +30,14 @@ class TestCouncilR1(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
 
-    # Gemini A.3 — {"1": "a", 1: "b"} silently collapsed in floatfree / TypeError in json.dumps
+    # reviewer 5 A.3 — {"1": "a", 1: "b"} silently collapsed in floatfree / TypeError in json.dumps
     def test_non_string_keys_refused_not_collapsed(self):
         with self.assertRaises(TypeError):
             floatfree({"1": "a", 1: "b"})
         with self.assertRaises(TypeError):
             canonical_bytes({1: "b"})
 
-    # Gemini A.2 — a JSON line that is a list/str crashed verify() with AttributeError instead of a FAIL verdict
+    # reviewer 5 A.2 — a JSON line that is a list/str crashed verify() with AttributeError instead of a FAIL verdict
     def test_non_dict_line_is_a_verdict_not_a_crash(self):
         p = os.path.join(self.d, "l.jsonl")
         Ledger(p).append({"k": 1})
@@ -45,20 +46,20 @@ class TestCouncilR1(unittest.TestCase):
         v = Ledger(p).verify()
         self.assertFalse(v["chain_ok"]); self.assertTrue(any("not an object" in x for x in v["failures"]))
 
-    # Haiku A.2 — keygen O_TRUNC destroyed an existing key
+    # reviewer 3 A.2 — keygen O_TRUNC destroyed an existing key
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_keygen_refuses_to_overwrite(self):
         k = os.path.join(self.d, "a.key"); keygen(k)
         with self.assertRaises(FileExistsError):
             keygen(k)
 
-    # Haiku A.3 — a pack over an empty ledger "proved" nothing but was produced
+    # reviewer 3 A.3 — a pack over an empty ledger "proved" nothing but was produced
     def test_pack_refused_on_empty_ledger(self):
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         with self.assertRaises(ValueError):
             lk.evidence_pack(os.path.join(self.d, "p.json"))
 
-    # Gemini A.1 — ledger_file "../../x" resolved outside the pack directory; Haiku A.5 — anchoring not reported
+    # reviewer 5 A.1 — ledger_file "../../x" resolved outside the pack directory; reviewer 3 A.5 — anchoring not reported
     def test_ledger_file_confined_to_pack_dir_and_anchored_flag(self):
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, "2026-09-01T00:00:00Z"))
@@ -69,7 +70,7 @@ class TestCouncilR1(unittest.TestCase):
         r = verify_pack(pack_path); self.assertFalse(r["ok"])
         self.assertTrue(all(".." not in (l.get("detail") or "") for l in r["layers"]))
 
-    # Gemini A.5 — hash hard-coded in the seal chain: every record now names its hash and verify uses it
+    # reviewer 5 A.5 — hash hard-coded in the seal chain: every record now names its hash and verify uses it
     def test_seal_records_name_their_hash_and_a_deprecated_hash_is_flagged(self):
         register_algorithm("test-plain", gen=lambda: ("sk", "pk"), sign=lambda sk, m: m.hex(), verify=lambda pub, sig, m: sig == m.hex())
         lte = LongTermEvidence("ab" * 32)
@@ -81,7 +82,7 @@ class TestCouncilR1(unittest.TestCase):
         lte.records[0]["hash"] = "sha3-256-unknown"
         self.assertFalse(lte.verify(now=2.0, policy=AlgorithmPolicy())["ok"])
 
-    # Gemini B.1 — incident final_report rejected because awareness is "-" at that stage in the ENISA schema
+    # reviewer 5 B.1 — incident final_report rejected because awareness is "-" at that stage in the ENISA schema
     def test_incident_final_report_without_awareness_is_valid(self):
         n = SRPNotice("incident", "final_report", {"notification_type": "Incident", "title": "t", "summary": "s",
                                                     "manufacturer_name": "m", "member_states_available": ["IT"],
@@ -92,7 +93,7 @@ class TestCouncilR1(unittest.TestCase):
         with self.assertRaises(ValueError):     # but awareness stays REQUIRED where the schema says R
             SRPNotice("incident", "early_warning", {"title": "t"})
 
-    # Gemini B.4 / Haiku — notice_id / record_id are file-name material: must be UUIDs, never paths
+    # reviewer 5 B.4 / reviewer 3 — notice_id / record_id are file-name material: must be UUIDs, never paths
     def test_ids_must_be_uuids(self):
         base = {"notification_type": "Vulnerability", "awareness_datetime_utc": "2026-09-01T00:00:00Z"}
         with self.assertRaises(ValueError):
@@ -100,7 +101,7 @@ class TestCouncilR1(unittest.TestCase):
         with self.assertRaises(ValueError):
             VulnerabilityRecord("p", "CVE-1", False, "2026-09-01T00:00:00Z", record_id="../x")
 
-    # Gemini B.2 — severe incident could not be modelled in the vulnerability clock (README promised it)
+    # reviewer 5 B.2 — severe incident could not be modelled in the vulnerability clock (README promised it)
     def test_incident_clock_one_month_after_notification(self):
         r = VulnerabilityRecord("p", "INC-1", True, "2026-09-01T00:00:00Z", kind="incident")
         self.assertIsNone(r.deadlines()["final_report_due_utc"])   # Art. 14(4)(c): anchored to the SUBMISSION, unknown until recorded
@@ -111,7 +112,7 @@ class TestCouncilR1(unittest.TestCase):
         with self.assertRaises(ValueError):
             VulnerabilityRecord("p", "x", True, "2026-09-01T00:00:00Z", kind="rumour")
 
-    # Gemini B.3 — OSV pagination token ignored → truncated results reported as complete; batches now chunked
+    # reviewer 5 B.3 — OSV pagination token ignored → truncated results reported as complete; batches now chunked
     def test_osv_pagination_followed_and_chunked(self):
         calls = []
         def fake_post(url, body, timeout):
@@ -131,20 +132,20 @@ class TestCouncilR1(unittest.TestCase):
         self.assertEqual(sum(1 for u, _ in calls if u.endswith("querybatch")), 2)     # 1000 + 200
         self.assertIn("V0-page2", r["results"][0])
 
-    # Haiku B.8 — component order followed dependency traversal: same environment, different SBOM bytes
+    # reviewer 3 B.8 — component order followed dependency traversal: same environment, different SBOM bytes
     def test_sbom_components_deterministically_ordered(self):
         a = SBOMComponent("zeta", "1"); b = SBOMComponent("alpha", "2")
         s1 = SBOMRecord("p", "1", [a, b]); s2 = SBOMRecord("p", "1", [b, a], record_id=s1.record_id, generated_utc=s1.generated_utc)
         self.assertEqual(s1.canonical_hash(), s2.canonical_hash())
 
-    # Gemini B.5 — "extra==" / "extra  ==" markers slipped into the SBOM as runtime deps
+    # reviewer 5 B.5 — "extra==" / "extra  ==" markers slipped into the SBOM as runtime deps
     def test_extra_marker_regex(self):
         from cra_evidence.sbom import _is_extra_requirement
         self.assertTrue(_is_extra_requirement("pytest; extra == 'test'"))
         self.assertTrue(_is_extra_requirement("pytest ; extra=='test'"))
         self.assertFalse(_is_extra_requirement("cryptography>=41"))
 
-    # Haiku B.7 — an EUVD payload of unknown shape produced count 0 with error None
+    # reviewer 3 B.7 — an EUVD payload of unknown shape produced count 0 with error None
     def test_euvd_unknown_shape_is_an_error(self):
         old = feeds._get_json; feeds._get_json = lambda url, timeout: {"unexpected": {"deep": 1}}
         try:
@@ -153,7 +154,7 @@ class TestCouncilR1(unittest.TestCase):
             feeds._get_json = old
         self.assertIsNotNone(r["error"]); self.assertEqual(r["count"], 0)
 
-    # Gemini A.6 — standard VEX/CSAF documents can be embedded (content-bound) in the vulnerability record
+    # reviewer 5 A.6 — standard VEX/CSAF documents can be embedded (content-bound) in the vulnerability record
     def test_vex_attachment_is_content_bound(self):
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         vex = {"bomFormat": "CycloneDX", "specVersion": "1.6", "vulnerabilities": [{"id": "CVE-1", "analysis": {"state": "not_affected"}}]}

@@ -1,4 +1,4 @@
-"""Second council round (15/09/2026, all five minds: Fable 5.1, Opus 4.8, Sonnet 5, Haiku 4.5, Gemini 3.1 Pro).
+"""Second council round (15/09/2026, all five independent AI reviewers, numbered 1–5 as in the CHANGELOG).
 Each test was RED on the reviewed code and is GREEN after the named fix; sources re-read for the legal points:
 Reg. (EU) 2024/2847 Art. 13(13) and Art. 14(4)(c) (EUR-Lex), ENISA SRP glossary (snapshot in spec/sources)."""
 import json, os, re, shutil, sys, tempfile, unittest
@@ -36,7 +36,7 @@ class TestCouncilR2(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
 
-    # Opus B10 — the per-stage rules are DERIVED from the vendored ENISA snapshot, not asserted
+    # reviewer 1 B10 — the per-stage rules are DERIVED from the vendored ENISA snapshot, not asserted
     def test_srp_schema_matches_the_vendored_enisa_snapshot(self):
         # 29/09/2026: snapshot of the page dated 25/09/2026 (row v26a added); a row number may carry a letter suffix —
         # the previous pattern `[vi]?\d+\.` skipped "v26a." and still counted 39 (measured; see tests/test_enisa_v26a_20260929.py)
@@ -54,7 +54,7 @@ class TestCouncilR2(unittest.TestCase):
             SRPNotice("vulnerability", "notification", {**BASE, "pec_delay_reason": ["pippo"]})
         SRPNotice("vulnerability", "notification", {**BASE, "pec_delay_reason": ["imminent_high_risk"]})
 
-    # Fable A3 — sidecar signer_id / signed_utc were not covered by the signature
+    # reviewer 4 A3 — sidecar signer_id / signed_utc were not covered by the signature
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_sidecar_identity_is_signed(self):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
@@ -65,7 +65,7 @@ class TestCouncilR2(unittest.TestCase):
         side = json.load(open(sidecar_path(pack))); side["signer_id"] = "TUV Notified Body"; json.dump(side, open(sidecar_path(pack), "w"))
         r = verify_pack(pack); self.assertEqual(r["authenticity"], "FAIL")
 
-    # Fable A2 / Opus A4 — seal chain renewable, key pinned (the log key), identity declared
+    # reviewer 4 A2 / reviewer 1 A4 — seal chain renewable, key pinned (the log key), identity declared
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_seal_renewal_chain_with_pinned_key(self):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
@@ -84,7 +84,7 @@ class TestCouncilR2(unittest.TestCase):
         with self.assertRaises(ValueError):                                     # label without token
             lk.seal_longterm("ab" * 32, ts_source="rfc3161", external_digest=True)
 
-    # Sonnet A5 — default policy is NIST IR 8547, never "valid forever"
+    # reviewer 2 A5 — default policy is NIST IR 8547, never "valid forever"
     def test_default_policy_is_time_bounded(self):
         register_algorithm("test-plain2", gen=lambda: ("sk", "pk"), sign=lambda sk, m: m.hex(), verify=lambda pub, sig, m: sig == m.hex())
         lte = LongTermEvidence("ab" * 32); lte.seal(Signer("test-plain2"), t=1.0)
@@ -92,7 +92,7 @@ class TestCouncilR2(unittest.TestCase):
         self.assertIn("NOT bounded", v["policy_note"])
         self.assertTrue(AlgorithmPolicy.nist_ir_8547().broken_after["ed25519"] > 2_000_000_000)
 
-    # Fable A6 / Opus A2 / Sonnet A3 — no lock → refuse to append (fail-closed), unless declared
+    # reviewer 4 A6 / reviewer 1 A2 / reviewer 2 A3 — no lock → refuse to append (fail-closed), unless declared
     def test_append_without_lock_is_refused(self):
         p = os.path.join(self.d, "l.jsonl"); old = ledger_mod._lock; ledger_mod._lock = lambda f: False
         try:
@@ -102,7 +102,7 @@ class TestCouncilR2(unittest.TestCase):
         finally:
             ledger_mod._lock = old
 
-    # Fable A5 — hostile input is a verdict, never a crash
+    # reviewer 4 A5 — hostile input is a verdict, never a crash
     def test_hostile_inputs_are_verdicts(self):
         p = os.path.join(self.d, "l.jsonl"); Ledger(p).append({"k": 1})
         with open(p, "a") as f:
@@ -117,7 +117,7 @@ class TestCouncilR2(unittest.TestCase):
         with self.assertRaises(TypeError):
             canonical_bytes({"s": "\ud800"})
 
-    # Fable A1 / Sonnet A2 — a pack over a broken chain is refused; and a shipped pack's own snapshot is checked
+    # reviewer 4 A1 / reviewer 2 A2 — a pack over a broken chain is refused; and a shipped pack's own snapshot is checked
     def test_pack_refused_on_broken_chain_and_self_snapshot_checked(self):
         p = os.path.join(self.d, "l.jsonl"); lk = CRAEvidenceLocker(p, "p", "1")
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
@@ -132,7 +132,7 @@ class TestCouncilR2(unittest.TestCase):
         alone = os.path.join(self.d, "alone", "p2.json"); os.makedirs(os.path.dirname(alone)); json.dump(pk, open(alone, "w"))
         r = verify_pack(alone); self.assertFalse(r["ok"]); self.assertIn("pack-self-verification", [l["layer"] for l in r["layers"] if l["status"] == "FAIL"])
 
-    # Fable A7 — declared ledger state is checked against the ledger
+    # reviewer 4 A7 — declared ledger state is checked against the ledger
     def test_pack_ledger_state_is_checked(self):
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); pk = lk.evidence_pack(pack); self.assertTrue(verify_pack(pack)["ok"])
@@ -141,7 +141,7 @@ class TestCouncilR2(unittest.TestCase):
         r = verify_pack(pack)     # anchor no longer matches this digest either: FAIL, and the state layer names it
         self.assertFalse(r["ok"])
 
-    # Fable A4 — a truncated tail AFTER the anchor is seen through the signed tip when the log key is trusted
+    # reviewer 4 A4 — a truncated tail AFTER the anchor is seen through the signed tip when the log key is trusted
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_truncated_tail_seen_through_signed_tip(self):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
@@ -156,7 +156,7 @@ class TestCouncilR2(unittest.TestCase):
         r = verify_pack(pack, log_pubkey_hex=key[1]); self.assertFalse(r["ok"])
         self.assertIn("signed-tip", [l["layer"] for l in r["layers"] if l["status"] == "FAIL"])
 
-    # Fable A9 — a trust store demanded and no signature → FAIL; explicit ledger path honoured
+    # reviewer 4 A9 — a trust store demanded and no signature → FAIL; explicit ledger path honoured
     def test_trust_store_requires_a_signature(self):
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); lk.evidence_pack(pack)
@@ -164,7 +164,7 @@ class TestCouncilR2(unittest.TestCase):
         moved = os.path.join(self.d, "elsewhere", "p.json"); os.makedirs(os.path.dirname(moved)); shutil.copy(pack, moved)
         self.assertFalse(verify_pack(moved)["anchored"]); self.assertTrue(verify_pack(moved, ledger_path=os.path.join(self.d, "l.jsonl"))["anchored"])
 
-    # Sonnet B2 — the notice cannot carry a different awareness than the vulnerability record it refers to
+    # reviewer 2 B2 — the notice cannot carry a different awareness than the vulnerability record it refers to
     def test_notice_awareness_bound_to_vuln_record(self):
         lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2026-1", True, AW))
@@ -175,7 +175,7 @@ class TestCouncilR2(unittest.TestCase):
         lk.record_notice(SRPNotice("vulnerability", "early_warning", {**BASE, "awareness_datetime_utc": "2026-09-14T00:00:00Z"}),
                          divergence_reason="awareness corrected after forensic review; see ticket 42")
 
-    # Fable B5 / Opus B5 — calendar month, anchored to the submission; Fable B7 — naive instants refused
+    # reviewer 4 B5 / reviewer 1 B5 — calendar month, anchored to the submission; reviewer 4 B7 — naive instants refused
     def test_calendar_month_and_strict_timezone(self):
         self.assertEqual(add_months(parse_utc("2026-01-31T10:00:00Z"), 1).isoformat(), "2026-02-28T10:00:00+00:00")
         self.assertEqual(add_months(parse_utc("2028-01-31T10:00:00Z"), 1).isoformat(), "2028-02-29T10:00:00+00:00")
@@ -185,7 +185,7 @@ class TestCouncilR2(unittest.TestCase):
         with self.assertRaises(ValueError):
             VulnerabilityRecord("p", "x", True, AW, status="aare")
 
-    # Fable B3 / Opus B3 — the CycloneDX export validates against the official 1.6 schema (root is strict)
+    # reviewer 4 B3 / reviewer 1 B3 — the CycloneDX export validates against the official 1.6 schema (root is strict)
     def test_cyclonedx_export_is_schema_valid(self):
         try:
             import jsonschema
@@ -201,7 +201,7 @@ class TestCouncilR2(unittest.TestCase):
         self.assertEqual(doc["components"][0]["purl"], "pkg:pypi/a-b-c@1")
         self.assertNotIn("sbom_sha3", doc); self.assertTrue(any(p["name"] == "cra-evidence:sbom_sha3" for p in doc["metadata"]["properties"]))
 
-    # Fable B2 / Opus B4 — OSV results aligned with the INPUT list, aliases included; ecosystems mapped from purls
+    # reviewer 4 B2 / reviewer 1 B4 — OSV results aligned with the INPUT list, aliases included; ecosystems mapped from purls
     def test_osv_alignment_aliases_and_ecosystem_mapping(self):
         def fake_post(url, body, timeout):
             return {"results": [{"vulns": [{"id": "GHSA-x", "aliases": ["CVE-2020-25659"]}]} for _ in body["queries"]]}
@@ -215,7 +215,7 @@ class TestCouncilR2(unittest.TestCase):
         eco = {c["name"]: c["ecosystem"] for c in components_for_osv(rec)}
         self.assertEqual(eco["left-pad"], "npm"); self.assertEqual(eco["x"], "")
 
-    # Sonnet B3 / B5 — KEV/EUVD positive control, case-insensitive signal
+    # reviewer 2 B3 / B5 — KEV/EUVD positive control, case-insensitive signal
     def test_kev_positive_control_and_case(self):
         old = feeds._get_json; feeds._get_json = lambda url, timeout: {"catalogVersion": "x", "vulnerabilities": [{"cveID": "CVE-1"}]}
         try:
@@ -233,7 +233,7 @@ class TestCouncilR2(unittest.TestCase):
         self.assertEqual(e["data"]["kind"], "cra_vuln"); self.assertEqual(e["data"]["event_kind"], "incident")
         self.assertEqual(lk.verify()["records_checked"], 1)
 
-    # Fable B6 — exit codes: overdue → 1
+    # reviewer 4 B6 — exit codes: overdue → 1
     def test_cli_vuln_exit_code_on_overdue(self):
         from cra_evidence.cli import main
         led = os.path.join(self.d, "l.jsonl")

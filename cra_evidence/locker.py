@@ -145,7 +145,7 @@ class CRAEvidenceLocker:
                              # dependencies (state that in the SBOM's note instead)
                              "sbom_floor_met": resolved > 0})
         except Exception:
-            if created:                          # undo this call's copy — unless a concurrent record already relies on it (round 11, Sonnet)
+            if created:                          # undo this call's copy — unless a concurrent record already relies on it (round 11, reviewer 2)
                 with self._lock:
                     referenced = any(isinstance(e.get("data"), dict) and isinstance(e["data"].get("source"), dict)
                                      and e["data"]["source"].get("sha256") == fp["sha256"] for e in self.ledger.entries())

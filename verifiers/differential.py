@@ -169,7 +169,7 @@ def cases(base):
     case("sbom_source_absent", lambda d: build_with_source(d, "absent"))
     case("sbom_source_absent_required", lambda d: build_with_source(d, "absent"), require_sources=True)
     case("sbom_source_intact_required", lambda d: build_with_source(d), require_sources=True)
-    def source_replaced_by_dir(d):   # something is there but it is not the document: FAIL, never "absent" (round 10, Sonnet)
+    def source_replaced_by_dir(d):   # something is there but it is not the document: FAIL, never "absent" (round 10, reviewer 2)
         build_with_source(d); sd = os.path.join(d, "l.jsonl.sources"); f = os.listdir(sd)[0]; os.remove(os.path.join(sd, f)); os.makedirs(os.path.join(sd, f))
     case("sbom_source_replaced_by_directory", source_replaced_by_dir)
     def source_symlink_to_dir(d):
