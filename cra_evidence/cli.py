@@ -26,6 +26,11 @@ def _p(obj: Any) -> None:
     print(json.dumps(obj, indent=1, ensure_ascii=False, sort_keys=True, default=str))
 
 
+def _load_json(path: str) -> Any:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _locker(a) -> CRAEvidenceLocker:
     key = load_key(a.tip_key) if getattr(a, "tip_key", None) else None
     return CRAEvidenceLocker(a.ledger, a.product, a.version, tip_key=key, support_period_end=getattr(a, "support_period_end", None))
@@ -132,7 +137,7 @@ def main(argv: List[str] = None) -> int:
         lk = _locker(a)
         with open(a.fields, encoding="utf-8") as f:
             fields = json.load(f)
-        prev = json.load(open(a.previous, encoding="utf-8")) if a.previous else None
+        prev = _load_json(a.previous) if a.previous else None
         n = SRPNotice(stream=a.stream, stage=a.stage, fields=fields, previous_fields=prev)
         r = DryRunDrop(a.drop).prepare(n); lk.record_notice(n, r, divergence_reason=a.divergence_reason); _p(r)
         return 0 if r["complete"] else 1
@@ -152,7 +157,7 @@ def main(argv: List[str] = None) -> int:
         _p(sign_pack(a.pack, load_key(a.key), a.signer_id)); return 0
     if a.cmd == "seal":
         lk = _locker(a)
-        prev = json.load(open(a.renew, encoding="utf-8")) if a.renew else None
+        prev = _load_json(a.renew) if a.renew else None
         d = lk.seal_longterm(a.pack_sha3, ts_source=a.ts_source, previous=prev, token_b64=a.token_b64)
         v = LongTermEvidence.from_dict(d).verify(now=datetime.now(timezone.utc).timestamp())
         _p({"seal": d, "verify": v})

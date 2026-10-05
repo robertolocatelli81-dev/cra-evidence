@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `cra notice --previous` and `cra seal --renew` read their JSON through an `open()` they did not close; both now
+  use a `with` block. `tests/test_open_handles.py` holds every `open()`/`urlopen()` in `cra_evidence/` to a `with` item and
+  was red on the previous code.
+
 ## 0.4.0 — 2026-09-29
 
 - **Why 0.4.0 and not 0.3.4.** The glossary change below alters a verdict on the same input: a 72 h AEV
