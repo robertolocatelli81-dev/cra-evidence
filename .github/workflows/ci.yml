@@ -7,8 +7,8 @@ jobs:
       matrix:
         python-version: ["3.9", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install (with signing extra) + the INDEPENDENT cryptovalid verifier for the interop test
@@ -52,8 +52,8 @@ jobs:
     # cryptography present, no jsonschema and no cryptovalid wheel: the schema/interop tests skip, everything else runs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: "3.11"}
       - name: Unit tests with cryptography only
         run: |
@@ -65,8 +65,8 @@ jobs:
     # no jsonschema, no cryptovalid wheel — a regression in the fallback code or in the skip detection goes red here
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - name: Unit tests with NO optional dependency installed
         run: |
@@ -76,7 +76,7 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {fetch-depth: 0}
       - name: gitleaks (whole history, pinned binary — the action fails on a root commit's parent)
         run: |
@@ -85,12 +85,12 @@ jobs:
   verifiers:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: {node-version: "22"}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: {go-version: "1.24"}
       - uses: dtolnay/rust-toolchain@stable
       - name: Build the independent verifiers (Go std-only; Rust with ed25519-dalek)
@@ -137,8 +137,8 @@ jobs:
     # index, so a cryptovalid release that stops accepting our ledgers turns this repository red, not a user's run.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: "This package + the newest cryptovalid-opencore from the index (no pin)"
