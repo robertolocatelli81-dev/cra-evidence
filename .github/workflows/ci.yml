@@ -149,6 +149,14 @@ jobs:
       - name: "Interop suite against the newest verifier (the test must run, not skip)"
         run: |
           set -e
-          python -m unittest -v tests.test_feeds_and_interop 2>&1 | tee /tmp/interop.log
-          test "${PIPESTATUS[0]}" -eq 0
-          grep -q "test_cryptovalid_verifies_our_ledger_and_tip .* ok" /tmp/interop.log || { echo "::error::the interop test did not run"; exit 1; }
+          python -m unittest -v tests.test_feeds_and_interop
+          # the interop test itself must have RUN and PASSED (a skip — cryptovalid missing — is a red): read from the
+          # unittest result, not from the printed lines (warnings on stderr split them)
+          python - <<'PY'
+          import sys, unittest
+          name = "tests.test_feeds_and_interop.TestInteropCryptovalid.test_cryptovalid_verifies_our_ledger_and_tip"
+          r = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromName(name))
+          ok = r.testsRun == 1 and not r.skipped and r.wasSuccessful()
+          print("interop test ran and passed" if ok else f"::error::the interop test did not run and pass (run={r.testsRun}, skipped={len(r.skipped)})")
+          sys.exit(0 if ok else 1)
+          PY
