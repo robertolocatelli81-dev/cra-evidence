@@ -130,3 +130,25 @@ jobs:
           echo '{"spdxVersion":"SPDX-2.3"}' > /tmp/bad.spdx.json
           if [ -z "$(pyspdxtools -i /tmp/bad.spdx.json 2>&1)" ]; then echo "positive control: pyspdxtools printed nothing on an invalid document"; exit 1; fi
           echo "pyspdxtools: fixtures clean, positive control reported"
+
+  interop-newest-cryptovalid:
+    # README: "a ledger written here verifies unchanged with cryptovalid v0.15.0's reference verifier". The pinned wheel
+    # keeps that sentence measurable; this job measures the same ledger against the NEWEST cryptovalid-opencore on the
+    # index, so a cryptovalid release that stops accepting our ledgers turns this repository red, not a user's run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "This package + the newest cryptovalid-opencore from the index (no pin)"
+        run: |
+          pip install ".[sign]" jsonschema referencing
+          pip install --extra-index-url https://robertolocatelli81-dev.github.io/pypi/ cryptovalid-opencore
+          python -c "import importlib.metadata as m; print('cryptovalid-opencore', m.version('cryptovalid-opencore'))"
+      - name: "Interop suite against the newest verifier (the test must run, not skip)"
+        run: |
+          set -e
+          python -m unittest -v tests.test_feeds_and_interop 2>&1 | tee /tmp/interop.log
+          test "${PIPESTATUS[0]}" -eq 0
+          grep -q "test_cryptovalid_verifies_our_ledger_and_tip .* ok" /tmp/interop.log || { echo "::error::the interop test did not run"; exit 1; }
