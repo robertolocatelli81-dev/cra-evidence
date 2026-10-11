@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-10-11
 
 - `cra notice --previous` and `cra seal --renew` read their JSON through an `open()` they did not close; both now
   use a `with` block. `tests/test_open_handles.py` holds every `open()`/`urlopen()` in `cra_evidence/` to a `with` item and
