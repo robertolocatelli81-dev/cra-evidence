@@ -18,6 +18,12 @@ from .signing import verify_pack_signature, verify_tip
 
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
+# Closed schema (2026-10-10): exactly what the locker writes (locker.build_pack) and what Ledger.append writes. Measured on
+# 0.4.0: a sidecar with a key nobody defined verified trusted-signed with no trace in the receipt (it lies outside every
+# digest); a pack or an entry written with an extra key is caught only indirectly (signature / pack-ledger-state), never named.
+PACK_KEYS = frozenset({"kind", "generated_utc", "legal_basis", "honest_scope", "product_id", "product_version", "retention", "retention_years",
+                       "ledger_file", "ledger_entries", "ledger_last_self_hash", "record_counts", "verification", "pack_sha3"})
+ENTRY_KEYS = frozenset({"idx", "ts", "data", "prev_hash", "self_hash"})
 EXTERNAL_FORMATS = ("cyclonedx-json", "spdx-json", "spdx-jsonld")
 from .sbom import MAX_SOURCE_BYTES   # noqa: E402 — a stored generator document above this is refused unread
 # Every file a verifier reads (pack, sidecar, ledger, tip, trust store, stored source document) is opened without
@@ -144,6 +150,10 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     if not isinstance(pack, dict):
         return {"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", "pack is not a JSON object")], "pack_sha3": None}
     layers.append(_layer("pack-kind", "PASS" if pack.get("kind") == PACK_KIND else "FAIL", str(pack.get("kind"))))
+    # closed schema (2026-10-10): the pack's top level is exactly what the locker writes; a key nobody defined is a FAIL that
+    # names it — the pack is sealed by pack_sha3 and signed, so a pack WRITTEN with an extra key verified trusted-signed
+    unknown_top = sorted(k for k in pack if k not in PACK_KEYS)
+    layers.append(_layer("pack-schema", "FAIL" if unknown_top else "PASS", ("unknown top-level field(s): " + ", ".join(unknown_top))[:160] if unknown_top else "top-level fields in the closed schema"))
     scope = pack.get("honest_scope")
     scope_ok = isinstance(scope, str) and HONEST_SCOPE_MARK in scope      # a string, not a list that happens to contain the mark
     layers.append(_layer("honest-scope", "PASS" if scope_ok else "FAIL",
@@ -185,6 +195,9 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                     lv = led.verify(entries)
                 except (ValueError, TypeError, RecursionError, OSError) as ex:
                     entries, lv = [], {"chain_ok": False, "failures": [f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}"], "entries": 0}
+        unknown_entry = [(e.get("idx"), sorted(k for k in e if k not in ENTRY_KEYS)) for e in entries if isinstance(e, dict) and any(k not in ENTRY_KEYS for k in e)]
+        if unknown_entry:   # closed entry schema (2026-10-10): idx, ts, data, prev_hash, self_hash — nothing else at the top level
+            layers.append(_layer("ledger-schema", "FAIL", f"{len(unknown_entry)} entry(ies) with a top-level field outside the closed schema, first at idx {unknown_entry[0][0]}: {', '.join(unknown_entry[0][1])}"[:200]))
         if not lv["chain_ok"]:
             layers.append(_layer("ledger-chain", "FAIL", "; ".join(lv["failures"][:3])))
         else:

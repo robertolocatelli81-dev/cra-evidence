@@ -166,6 +166,15 @@ def pack_digest(pack: Dict[str, Any]) -> str:
 SIG_KIND = "cra_pack_sig/1"
 
 
+SIDECAR_KEYS = frozenset({"signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex", "alg", "fingerprint"})   # closed (2026-10-10)
+
+
+def sidecar_unknown_fields(side: Dict[str, Any]) -> list:
+    """Closed schema (2026-10-10): the sidecar is exactly the fields `sign_pack` writes. Measured on 0.4.0: a sidecar with a
+    key nobody defined verified `trusted-signed` with no trace in the receipt (the sidecar is outside every digest)."""
+    return sorted(k for k in side if k not in SIDECAR_KEYS)
+
+
 def sidecar_fields_ok(side: Dict[str, Any]) -> bool:
     return (all(isinstance(side.get(k), str) and side.get(k) for k in ("signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex"))
             and is_instant(side["signed_utc"]) and ("alg" not in side or isinstance(side["alg"], str)))
@@ -214,6 +223,9 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         return {"status": "FAIL", "detail": f"unreadable: {str(e)[:120]}"}
     if not isinstance(side, dict) or not isinstance(pack, dict):
         return {"status": "FAIL", "detail": "sidecar or pack is not a JSON object"}
+    unknown = sidecar_unknown_fields(side)
+    if unknown:
+        return {"status": "FAIL", "detail": "sidecar field not in the closed schema: " + ", ".join(unknown)[:120]}
     try:
         digest = pack_digest(pack)
     except TypeError as e:

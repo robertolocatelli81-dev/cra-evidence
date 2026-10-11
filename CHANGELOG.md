@@ -6,6 +6,21 @@
   use a `with` block. `tests/test_open_handles.py` holds every `open()`/`urlopen()` in `cra_evidence/` to a `with` item and
   was red on the previous code.
 
+### Closed schema (2026-10-10): a field nobody defined is never silent
+
+- Measured on 0.4.0 (2026-10-10, `examples/self_evidence`): a `.sig.json` sidecar carrying a key nobody defined
+  (`x_unknown_2026`) verified `ok: true, authenticity: trusted-signed` with no trace in the receipt — the sidecar
+  lies outside every digest, so nothing ever read that key. A pack or a ledger entry written with an extra top-level
+  key was caught only indirectly (the signature over the old `pack_sha3`, the `pack-ledger-state` binding), never by
+  name.
+- Now: the sidecar is a closed object (`signing.SIDECAR_KEYS`: `signed_pack_sha3`, `signer_id`, `signed_utc`,
+  `public_key_hex`, `signature_hex`, `alg`, `fingerprint`) — any other key is `producer-signature FAIL` naming it;
+  the pack's top level is a closed object (`verify_pack.PACK_KEYS`, the 14 keys `locker.build_pack` writes) checked by
+  the new `pack-schema` layer; every ledger entry's top level is `idx, ts, data, prev_hash, self_hash` (`ENTRY_KEYS`),
+  checked by the new `ledger-schema` layer. Record payloads (`data.*`) keep their own rules (`SRP_FIELDS.md`).
+- Declared: the Go/JS/Rust verifiers do not apply the three closures yet — the reference refuses what they still
+  accept (`verifiers/differential.py` will report the divergence until they do).
+
 ## 0.4.0 — 2026-09-29
 
 - **Why 0.4.0 and not 0.3.4.** The glossary change below alters a verdict on the same input: a 72 h AEV
