@@ -93,6 +93,31 @@ fn bounded_line<R: std::io::BufRead>(r: &mut R) -> Result<Option<Vec<u8>>, Strin
 fn ledger_file_name_ok(v: &str) -> bool { !v.is_empty() && v != "." && v != ".." && !v.contains('/') && !v.contains('\\') && !v.contains('\0') }   // NUL: never a file name   // a stored generator document above this is refused unread   // cryptovalid profile: a longer JSONL line is a failure, never a silent truncation
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
+// Closed schema (2026-10-10, CHANGELOG «closed schema: a field nobody defined is never silent»): the same lists as
+// cra_evidence/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL (pack-schema
+// layer, ledger-schema layer, producer-signature detail), never a silent pass — measured 2026-10-11 on this verifier: a sidecar with
+// an extra key verified trusted-signed with no trace. Record payloads (data.*) keep their own rules (SRP_FIELDS.md).
+const PACK_KEYS: [&str; 14] = ["kind", "generated_utc", "legal_basis", "honest_scope", "product_id", "product_version", "retention", "retention_years",
+    "ledger_file", "ledger_entries", "ledger_last_self_hash", "record_counts", "verification", "pack_sha3"];
+const ENTRY_KEYS: [&str; 5] = ["idx", "ts", "data", "prev_hash", "self_hash"];
+const SIDECAR_KEYS: [&str; 7] = ["signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex", "alg", "fingerprint"];
+/// The object's keys outside `allowed`, in code-point order (BTreeMap order = Python sorted()).
+fn unknown_keys<'a>(o: &'a BTreeMap<String, Json>, allowed: &[&str]) -> Vec<&'a str> {
+    o.keys().filter(|k| !allowed.contains(&k.as_str())).map(|k| k.as_str()).collect()
+}
+/// At most n code points, as the reference's `[:n]` on a Python str.
+fn cut(s: String, n: usize) -> String { s.chars().take(n).collect() }
+/// The reference's ledger-schema detail over the parsed entries, or None when every entry is in the schema.
+fn ledger_schema_detail(entries: &[BTreeMap<String, Json>]) -> Option<String> {
+    let mut n = 0usize; let mut first = String::new(); let mut keys: Vec<&str> = Vec::new();
+    for e in entries {
+        let u = unknown_keys(e, &ENTRY_KEYS);
+        if u.is_empty() { continue; }
+        if n == 0 { first = match e.get("idx") { Some(Json::Int(i)) => i.to_string(), _ => "None".to_string() }; keys = u; }   // the reference prints e.get("idx") → None when absent
+        n += 1;
+    }
+    if n == 0 { None } else { Some(cut(format!("{n} entry(ies) with a top-level field outside the closed schema, first at idx {first}: {}", keys.join(", ")), 200)) }
+}
 
 struct Layer(String, String, String);
 static PANIC_MSG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
@@ -254,6 +279,10 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
     let l = |layers: &mut Vec<Layer>, name: &str, ok: bool, detail: String| layers.push(Layer(name.into(), if ok { "PASS" } else { "FAIL" }.into(), detail));
     let kind = gs(&pack, "kind").unwrap_or("");
     l(&mut layers, "pack-kind", kind == PACK_KIND, kind.into());
+    // closed schema (2026-10-10): the pack's top level is exactly what the locker writes; a key nobody defined is a FAIL that names it
+    let unknown_top = unknown_keys(&pack, &PACK_KEYS);
+    l(&mut layers, "pack-schema", unknown_top.is_empty(),
+      if unknown_top.is_empty() { "top-level fields in the closed schema".to_string() } else { cut(format!("unknown top-level field(s): {}", unknown_top.join(", ")), 160) });
     let scope = gs(&pack, "honest_scope").unwrap_or("");
     l(&mut layers, "honest-scope", scope.contains(SCOPE_MARK), if scope.contains(SCOPE_MARK) { "declared limits present" } else { "missing the declared limit" }.into());
     let declared = gs(&pack, "pack_sha3").unwrap_or("").to_string();
@@ -284,12 +313,13 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
         let mut entries: Vec<BTreeMap<String, Json>> = vec![];
         let (mut prev, mut n) = (GENESIS.to_string(), 0i64);
         let mut reader = match open_regular(&lp) { Ok((f, _)) => Some(std::io::BufReader::with_capacity(1 << 20, f)), Err(e) => { failures.push(format!("ledger unreadable: {e}")); None } };   // something is there: it must open as a regular file
+        let mut stopped = false;   // the read ended on a line that could not be taken: the reference then has no entries to judge
         loop {   // streamed, bounded: a hostile line is never buffered whole (a line above the content bound stops the read)
             let Some(r) = reader.as_mut() else { break };
-            let raw = match bounded_line(r) { Ok(Some(b)) => b, Ok(None) => break, Err(msg) => { failures.push(format!("entry {n}: {msg}")); break; } };
-            let line = match std::str::from_utf8(&raw) { Ok(t) => t, Err(_) => { failures.push(format!("entry {n}: not UTF-8")); break; } };
+            let raw = match bounded_line(r) { Ok(Some(b)) => b, Ok(None) => break, Err(msg) => { failures.push(format!("entry {n}: {msg}")); stopped = true; break; } };
+            let line = match std::str::from_utf8(&raw) { Ok(t) => t, Err(_) => { failures.push(format!("entry {n}: not UTF-8")); stopped = true; break; } };
             if line.trim_matches(|c| c == ' ' || c == '\t').is_empty() { continue; }   // blank = ASCII space/tab only (the bound was applied before)
-            let e = match parse_obj(line) { Ok(o) => o, Err(err) => { failures.push(format!("entry {n}: unparsable: {err}")); break; } };
+            let e = match parse_obj(line) { Ok(o) => o, Err(err) => { failures.push(format!("entry {n}: unparsable: {err}")); stopped = true; break; } };
             if gi(&e, "idx") != Some(n) { failures.push(format!("entry {n}: idx not sequential")); }
             if gs(&e, "prev_hash") != Some(prev.as_str()) { failures.push(format!("entry {n}: prev_hash does not link")); }
             let sh = gs(&e, "self_hash").unwrap_or("").to_string();
@@ -299,6 +329,9 @@ fn verify(pack_path: &str, ledger_path: Option<&str>, trust: Option<&BTreeMap<St
             n += 1;
         }
         if n == 0 && reader.is_some() { failures.push("empty_ledger: zero entries, nothing to verify".into()); }
+        // closed entry schema (2026-10-10): idx, ts, data, prev_hash, self_hash — nothing else at the top level; judged on the entries
+        // that were read (the reference reads them all first and has none when a line cannot be taken), before the chain layer
+        if let (Some(d), false) = (ledger_schema_detail(&entries), stopped) { layers.push(Layer("ledger-schema".into(), "FAIL".into(), d)); }
         if !failures.is_empty() {
             failures.truncate(3);
             layers.push(Layer("ledger-chain".into(), "FAIL".into(), failures.join("; ")));
@@ -381,6 +414,8 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
     }
     let raw = match read_text(&sp) { Ok(r) => r, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
     let side = match parse_obj(&raw) { Ok(o) => o, Err(e) => return ("FAIL".into(), format!("unreadable: {e}"), false) };
+    let unknown_side = unknown_keys(&side, &SIDECAR_KEYS);   // closed sidecar schema (2026-10-10): before any field is read
+    if !unknown_side.is_empty() { return ("FAIL".into(), format!("sidecar field not in the closed schema: {}", cut(unknown_side.join(", "), 120)), false); }
     let dg = sha3_of(pack, "pack_sha3");
     if declared != dg { return ("FAIL".into(), "content does not match pack_sha3 (modified after signing)".into(), false); }
     if gs(&side, "signed_pack_sha3") != Some(dg.as_str()) { return ("FAIL".into(), "pack changed after signature (digest differs from the signed one)".into(), false); }

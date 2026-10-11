@@ -626,6 +626,38 @@ def cases(base):
             sd["public_key_hex"] = keyhex; sd["signature_hex"] = "01" + "00" * 63; sd.pop("fingerprint", None); json.dump(sd, open(sp, "w"))
             json.dump({"acme-ci": keyhex}, open(os.path.join(d, "trust.json"), "w")); return {"trust": os.path.join(d, "trust.json")}
         case(nm, weak)
+    # ── 11/10/2026: the closed schema of 2026-10-10 (CHANGELOG «closed schema: a field nobody defined is never silent») in the four.
+    # Each case carries its DECLARED outcome with the reason: a key nobody defined is a NAMED FAIL of the layer that reads the object
+    # (producer-signature detail, pack-schema, ledger-schema); the positive controls keep their verdict. Measured on 0b83a3f (reference
+    # closed, ports not): the sidecar and the pack-alone cases verified `signed` in JS/Go/Rust, the appended entry `anchored`.
+    KEY = "x_unknown_2026"
+    from cra_evidence.ledger import entry_hash as _eh
+    from cra_evidence.locker import _bind as _bd
+    def closed_sidecar(d, key):
+        lk, k, pack, pk = build(d, sign=True); sp = sidecar_path(pack); sd = json.load(open(sp)); sd[key] = "x"; json.dump(sd, open(sp, "w", encoding="utf-8"), ensure_ascii=False)
+        return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails_include": ["producer-signature"], "detail": ("producer-signature", "sidecar field not in the closed schema: " + key)}}
+    case("closed_sidecar_unknown_key", lambda d: closed_sidecar(d, KEY))
+    case("closed_sidecar_unknown_key_empty_name", lambda d: closed_sidecar(d, ""))
+    case("closed_sidecar_unknown_key_unicode", lambda d: closed_sidecar(d, "clé"))
+    def closed_pack_resigned(d, extra):   # a pack WRITTEN with an extra key, re-hashed and re-signed by the key holder, verified alone (no ledger)
+        lk, k, pack, pk = build(d, sign=True); os.remove(os.path.join(d, "l.jsonl")); j = json.load(open(pack)); j.update(extra); json.dump(j, open(pack, "w", encoding="utf-8"), ensure_ascii=False); rehash(pack); sign_pack(pack, k, "acme-ci")
+        if extra:
+            return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails_include": ["pack-schema"], "detail": ("pack-schema", "unknown top-level field(s): " + ", ".join(sorted(extra)))}}
+        return {"expect": {"ok": True, "assessed": True, "authenticity": "signed"}}   # positive control: the same pack, every key in the closed list
+    case("closed_pack_unknown_key_resigned", lambda d: closed_pack_resigned(d, {KEY: 1}))
+    case("closed_pack_two_unknown_keys_resigned", lambda d: closed_pack_resigned(d, {"zz_b": [1], "aa_a": None}))
+    case("closed_pack_known_keys_resigned", lambda d: closed_pack_resigned(d, {}))
+    def appended(d, top_extra, data_extra):   # an entry appended after the anchor, chained correctly: the schema rule is the ONLY thing that can see a top-level key
+        lk, k, pack, pk = build(d); lp = os.path.join(d, "l.jsonl"); last = json.loads(open(lp).read().splitlines()[-1])
+        e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": _bd({"kind": "note", **data_extra})}; e.update(top_extra); e["self_hash"] = _eh(e)
+        open(lp, "a").write(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
+        if top_extra:
+            return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails": ["ledger-schema"],
+                               "detail": ("ledger-schema", f"1 entry(ies) with a top-level field outside the closed schema, first at idx {e['idx']}: " + ", ".join(sorted(top_extra)))}}
+        return {"expect": {"ok": True, "assessed": True, "authenticity": "anchored"}}   # positive control: the key inside data (SRP_FIELDS rules, not this one)
+    case("closed_ledger_entry_unknown_key_appended", lambda d: appended(d, {KEY: True}, {}))
+    case("closed_ledger_entry_two_unknown_keys_appended", lambda d: appended(d, {"zz_b": 1, "aa_a": 2}, {}))
+    case("closed_ledger_entry_unknown_key_in_data_appended", lambda d: appended(d, {}, {KEY: "payload"}))
     return out
 
 
@@ -683,8 +715,8 @@ def _exit_for(ref):
 def main():
     require = set((sys.argv[sys.argv.index("--require") + 1] if "--require" in sys.argv else "").split(",")) - {""}
     vs = {}
-    if shutil.which("node"):
-        vs["js"] = ["node", os.path.join(ROOT, "verifiers", "js", "cra-verify.mjs")]
+    if shutil.which("node"):   # CRA_VERIFY_JS: another tree's Node verifier (the positive control against a pre-alignment copy, 11/10/2026), like CRA_VERIFY_GO / CRA_VERIFY_RUST
+        vs["js"] = ["node", os.environ.get("CRA_VERIFY_JS") or os.path.join(ROOT, "verifiers", "js", "cra-verify.mjs")]
     gob = os.environ.get("CRA_VERIFY_GO") or shutil.which("cra-verify-go")
     if gob:
         src_mtime = max(os.path.getmtime(os.path.join(ROOT, "verifiers", "go", f)) for f in os.listdir(os.path.join(ROOT, "verifiers", "go")) if f.endswith(".go"))

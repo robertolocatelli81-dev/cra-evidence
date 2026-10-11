@@ -33,6 +33,60 @@ const (
 )
 
 var recordKinds = map[string]bool{"cra_sbom": true, "cra_vuln": true, "cra_srp_notice": true, "cra_longterm_seal": true, "cra_pack_anchor": true}
+
+// Closed schema (2026-10-10, CHANGELOG «closed schema: a field nobody defined is never silent»): the same lists as
+// cra_evidence/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL
+// (pack-schema layer, ledger-schema layer, producer-signature detail), never a silent pass — measured 2026-10-11 on this
+// verifier: a sidecar with an extra key verified trusted-signed with no trace in the receipt. Record payloads (data.*)
+// keep their own rules (SRP_FIELDS.md).
+var packKeys = map[string]bool{"kind": true, "generated_utc": true, "legal_basis": true, "honest_scope": true, "product_id": true, "product_version": true,
+	"retention": true, "retention_years": true, "ledger_file": true, "ledger_entries": true, "ledger_last_self_hash": true, "record_counts": true,
+	"verification": true, "pack_sha3": true}
+var entryKeys = map[string]bool{"idx": true, "ts": true, "data": true, "prev_hash": true, "self_hash": true}
+var sidecarKeys = map[string]bool{"signed_pack_sha3": true, "signer_id": true, "signed_utc": true, "public_key_hex": true, "signature_hex": true, "alg": true, "fingerprint": true}
+
+// unknownKeys: the object's keys outside `allowed`, sorted by code point (UTF-8 byte order = Python sorted()).
+func unknownKeys(o *Object, allowed map[string]bool) []string {
+	var out []string
+	for _, k := range o.Keys {
+		if !allowed[k] {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// cutRunes: at most n code points, as the reference's `[:n]` on a Python str.
+func cutRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
+// ledgerSchemaDetail: the reference's ledger-schema detail over the parsed entries, or "" when every entry is in the schema.
+func ledgerSchemaDetail(entries []*Object) string {
+	n, first, keys := 0, "", []string(nil)
+	for _, e := range entries {
+		if unk := unknownKeys(e, entryKeys); len(unk) != 0 {
+			if n == 0 {
+				if idx, ok := e.Vals["idx"].(json.Number); ok {
+					first = idx.String()
+				} else {
+					first = "None" // the reference prints e.get("idx") → None when absent
+				}
+				keys = unk
+			}
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	return cutRunes(fmt.Sprintf("%d entry(ies) with a top-level field outside the closed schema, first at idx %s: %s", n, first, strings.Join(keys, ", ")), 200)
+}
+
 var hex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var instantRe = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$`)
 
@@ -188,6 +242,12 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 	layers = append(layers, layer{"pack-json", "PASS", ""})
 	kind, _ := getS(pack, "kind")
 	layers = append(layers, layer{"pack-kind", ifs(kind == packKind, "PASS", "FAIL"), kind})
+	// closed schema (2026-10-10): the pack's top level is exactly what the locker writes; a key nobody defined is a FAIL that names it
+	if unk := unknownKeys(pack, packKeys); len(unk) != 0 {
+		layers = append(layers, layer{"pack-schema", "FAIL", cutRunes("unknown top-level field(s): "+strings.Join(unk, ", "), 160)})
+	} else {
+		layers = append(layers, layer{"pack-schema", "PASS", "top-level fields in the closed schema"})
+	}
 	scope, _ := getS(pack, "honest_scope") // getS: a non-string honest_scope is "" → FAIL (a list containing the mark is not a declaration)
 	layers = append(layers, layer{"honest-scope", ifs(strings.Contains(scope, scopeMark), "PASS", "FAIL"), ifs(strings.Contains(scope, scopeMark), "declared limits present", "missing the declared limit")})
 	declared, _ := getS(pack, "pack_sha3")
@@ -236,11 +296,13 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 		}
 		sc := bufio.NewScanner(src)
 		sc.Buffer(make([]byte, 1<<20), maxLineBytes+2) // content up to the bound plus "\r\n": exactly 64 MiB of content is accepted
+		stopped := false                               // the read ended on a line that could not be taken: the reference then has no entries to judge
 		for sc.Scan() {
 			line := sc.Bytes()
 			// bufio.ScanLines already drops exactly one trailing \r (dropCR): no second strip here — a run of \r is content
 			if len(line) > maxLineBytes { // bound BEFORE the blank test
 				failures = append(failures, fmt.Sprintf("entry %d: line exceeds %d bytes", n, maxLineBytes))
+				stopped = true
 				break
 			}
 			if len(strings.Trim(string(line), " \t")) == 0 { // blank = ASCII space/tab only (Unicode spaces are an unparsable line)
@@ -249,6 +311,7 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 			e, err := parseObject(line)
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("entry %d: unparsable: %v", n, err))
+				stopped = true
 				break
 			}
 			if idx, ok := getInt(e, "idx"); !ok || idx != n {
@@ -269,12 +332,18 @@ func verifyPack(packPath, ledgerPath string, trust map[string]string, haveTrust 
 		}
 		if err := sc.Err(); err != nil { // a line above 64 MiB (cryptovalid MaxLineBytes) or an I/O error ends the scan: the prefix is NOT the ledger
 			failures = append(failures, fmt.Sprintf("entry %d: line exceeds 64 MiB or unreadable: %v", n, err))
+			stopped = true
 		}
 		if f != nil {
 			f.Close()
 		}
 		if n == 0 && oerr == nil {
 			failures = append(failures, "empty_ledger: zero entries, nothing to verify")
+		}
+		// closed entry schema (2026-10-10): idx, ts, data, prev_hash, self_hash — nothing else at the top level; judged on the
+		// entries that were read (the reference reads them all first and has none when a line cannot be taken), before the chain layer
+		if d := ledgerSchemaDetail(entries); d != "" && !stopped && oerr == nil {
+			layers = append(layers, layer{"ledger-schema", "FAIL", d})
 		}
 		if len(failures) > 0 {
 			if len(failures) > 3 {
@@ -432,6 +501,9 @@ func verifySidecar(packPath string, pack *Object, declared string, trust map[str
 	side, err := parseObject(raw)
 	if err != nil {
 		return "FAIL", "unreadable: " + err.Error(), false
+	}
+	if unk := unknownKeys(side, sidecarKeys); len(unk) != 0 { // closed sidecar schema (2026-10-10): before any field is read
+		return "FAIL", "sidecar field not in the closed schema: " + cutRunes(strings.Join(unk, ", "), 120), false
 	}
 	dg, err := digest("sha3_256", pack, "pack_sha3")
 	if err != nil {

@@ -18,8 +18,26 @@
   the pack's top level is a closed object (`verify_pack.PACK_KEYS`, the 14 keys `locker.build_pack` writes) checked by
   the new `pack-schema` layer; every ledger entry's top level is `idx, ts, data, prev_hash, self_hash` (`ENTRY_KEYS`),
   checked by the new `ledger-schema` layer. Record payloads (`data.*`) keep their own rules (`SRP_FIELDS.md`).
-- Declared: the Go/JS/Rust verifiers do not apply the three closures yet — the reference refuses what they still
-  accept (`verifiers/differential.py` will report the divergence until they do).
+- **Go, JS and Rust aligned (2026-10-11).** `verifiers/go/main.go`, `verifiers/js/cra-verify.mjs` and
+  `verifiers/rust/src/main.rs` apply the three closures with the same lists and the same words: the `pack-schema` layer
+  after `pack-kind` (`unknown top-level field(s): <keys>` / `top-level fields in the closed schema`), the `ledger-schema`
+  FAIL before `ledger-chain` when an entry carries a top-level key nobody defined (`N entry(ies) with a top-level field
+  outside the closed schema, first at idx I: <keys>`, judged on the entries read, none when a line could not be taken —
+  as the reference), the sidecar refused before any field is read (`sidecar field not in the closed schema: <keys>`);
+  keys in code-point order, cut as the reference cuts them. Measured on 0b83a3f before the alignment with the oracle
+  below: 39/178 divergences (the 6 the previous entry announced — `pack_depth_512`, `pack_key_named___proto__`, the two
+  `*_digest_untouched`, the two `*_hash_untouched`, where the reference now also names `pack-schema` / `ledger-schema` —
+  plus the nine `closed_*` cases on which the three ports said `signed` / `anchored`). After: 178 cases, 0 divergences
+  (JS, Go, Rust). `verifiers/differential.py` carries the nine `closed_*` cases with a DECLARED outcome each (verdict,
+  failing layers and the detail that names the key; `CRA_VERIFY_JS` points its Node column at another tree, like
+  `CRA_VERIFY_GO` / `CRA_VERIFY_RUST`). `verifiers/closed_schema_mutants.py` is a generative, differential bench over the
+  same rule (random keys in the sidecar, at the pack's top level — re-hashed and re-signed —, in an entry appended after
+  the anchor; duplicates; the controls that must stay PASS: a legacy sidecar without `fingerprint`, a key inside a
+  record's `data`): 90 mutations GREEN over Python, JS, Go and Rust (seed 20261011), 31 silent passes in each of the three
+  ports of 0b83a3f; `tests/test_closed_schema_mutants.py` runs it in CI and proves it can go red (a JS copy without the
+  sidecar rule). Not changed: `cargo clippy -D warnings` with clippy 1.98.1 reports four lints on lines older than this
+  change (`json.rs` `Float` never constructed, `unhex` `% 2`, a `&` in the `pack-sha3` `format!`, the ledger `loop`);
+  identical on 0b83a3f.
 
 ## 0.4.0 — 2026-09-29
 

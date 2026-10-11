@@ -14,6 +14,23 @@ import { basename, dirname, join } from "node:path";
 
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
 const RECORD_KINDS = new Set(["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"]);
+// Closed schema (2026-10-10, CHANGELOG «closed schema: a field nobody defined is never silent»): the same lists as
+// cra_evidence/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL (pack-schema
+// layer, ledger-schema layer, producer-signature detail), never a silent pass — measured 2026-10-11 on this verifier: a sidecar with
+// an extra key verified trusted-signed with no trace. Record payloads (data.*) keep their own rules (SRP_FIELDS.md).
+const PACK_KEYS = new Set(["kind", "generated_utc", "legal_basis", "honest_scope", "product_id", "product_version", "retention", "retention_years",
+  "ledger_file", "ledger_entries", "ledger_last_self_hash", "record_counts", "verification", "pack_sha3"]);
+const ENTRY_KEYS = new Set(["idx", "ts", "data", "prev_hash", "self_hash"]);
+const SIDECAR_KEYS = new Set(["signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex", "alg", "fingerprint"]);
+const cut = (s, n) => [...s].slice(0, n).join("");   // at most n code points, as the reference's `[:n]` on a Python str
+// the object's keys outside `allowed`, sorted by code point (Python sorted()); a LIST, so the empty key "" counts as unknown too
+const unknownKeys = (o, allowed) => Object.keys(o).filter((k) => !allowed.has(k)).sort(cmpCP);
+// the reference's ledger-schema detail over the parsed entries, or null when every entry is in the schema
+function ledgerSchemaDetail(entries) {
+  let n = 0, first = null, keys = null;
+  for (const e of entries) { const u = unknownKeys(e, ENTRY_KEYS); if (!u.length) continue; if (n === 0) { first = "idx" in e ? String(e.idx) : "None"; keys = u; } n++; }
+  return n === 0 ? null : cut(`${n} entry(ies) with a top-level field outside the closed schema, first at idx ${first}: ${keys.join(", ")}`, 200);
+}
 const INSTANT_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$/;
 // shape AND an instant that exists (month, day of that month and year, hour, minute, second, offset): the shape
 // alone let a signature dated 2026-02-30 or 25:61:61 verify in all four verifiers (measured 26/09/2026)
@@ -77,6 +94,7 @@ function pyEscape(s) {
   return out + '"';
 }
 const cmp = (a, b) => { const A = [...a], B = [...b]; for (let i = 0; i < Math.min(A.length, B.length); i++) { const d = A[i].codePointAt(0) - B[i].codePointAt(0); if (d) return d; } return A.length - B.length; };
+const cmpCP = cmp;   // the same code-point order, named for the closed-schema lists above (hoisted use)
 function canon(v) {
   if (v === null) return "null";
   if (v === true) return "true";
@@ -220,6 +238,9 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
   catch (e) { return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("pack-json", "FAIL", String(e.message))], pack_sha3: null }; }
   if (!isObj(pack)) return { ok: false, authenticity: "FAIL", anchored: false, layers: [L("pack-json", "FAIL", "pack is not a JSON object")], pack_sha3: null };
   layers.push(L("pack-kind", pack.kind === PACK_KIND ? "PASS" : "FAIL", String(pack.kind)));
+  // closed schema (2026-10-10): the pack's top level is exactly what the locker writes; a key nobody defined is a FAIL that names it
+  const unknownTop = unknownKeys(pack, PACK_KEYS);
+  layers.push(L("pack-schema", unknownTop.length ? "FAIL" : "PASS", unknownTop.length ? cut("unknown top-level field(s): " + unknownTop.join(", "), 160) : "top-level fields in the closed schema"));
   const scopeOk = typeof pack.honest_scope === "string" && pack.honest_scope.includes(SCOPE_MARK);   // a string, not a list that contains the mark
   layers.push(L("honest-scope", scopeOk ? "PASS" : "FAIL", scopeOk ? "declared limits present" : `missing the declared limit '${SCOPE_MARK}' (honest_scope must be a string containing it)`));
   let computed = null;
@@ -239,15 +260,15 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
     layers.push(L("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"));
   } else if (lp && present(lp)) {
     const entries = [], failures = [];
-    let prev = GENESIS, n = 0;
+    let prev = GENESIS, n = 0, stopped = false;   // stopped: the read ended on a line that could not be taken (the reference then has no entries to judge)
     for (const rawLine of readLinesOrFail(lp, failures)) {   // streamed: a hostile line is never buffered whole (like the Python reference)
-      if (rawLine === null) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); break; }   // the bound comes BEFORE the blank test
+      if (rawLine === null) { failures.push(`entry ${n}: line exceeds ${MAX_LINE_BYTES} bytes`); stopped = true; break; }   // the bound comes BEFORE the blank test
       let line;
-      try { line = UTF8.decode(rawLine); } catch (err) { failures.push(`entry ${n}: not UTF-8`); break; }
+      try { line = UTF8.decode(rawLine); } catch (err) { failures.push(`entry ${n}: not UTF-8`); stopped = true; break; }
       if (/^[ \t]*$/.test(line)) continue;                  // blank = ASCII space/tab only (U+00A0, U+2028, U+0085, U+FEFF are unparsable lines)
       let e;
-      try { e = strictParse(line); } catch (err) { failures.push(`unparsable line: ${err.message}`); break; }
-      if (!isObj(e)) { failures.push(`entry ${n}: not an object`); break; }
+      try { e = strictParse(line); } catch (err) { failures.push(`unparsable line: ${err.message}`); stopped = true; break; }
+      if (!isObj(e)) { failures.push(`entry ${n}: not an object`); stopped = true; break; }
       if (!Number.isInteger(e.idx) || e.idx !== n) failures.push(`entry ${n}: idx not sequential`);
       if (e.prev_hash !== prev) failures.push(`entry ${n}: prev_hash does not link`);
       let h = null; try { h = sha256(Buffer.from(canon(without(e, "self_hash")), "utf-8")); } catch (err) { failures.push(`entry ${n}: ${err.message}`); }
@@ -256,6 +277,10 @@ function verify(packPath, ledgerPath, trustStore, logPubkeyHex, requireSources =
       entries.push(e); n++;
     }
     if (n === 0) failures.push("empty_ledger: zero entries, nothing to verify");
+    // closed entry schema (2026-10-10): idx, ts, data, prev_hash, self_hash — nothing else at the top level; judged on the entries that
+    // were read (the reference reads them all first and has none when a line cannot be taken or the file is unreadable), before the chain layer
+    const schema = ledgerSchemaDetail(entries);
+    if (schema !== null && !stopped) layers.push(L("ledger-schema", "FAIL", schema));
     if (failures.length) layers.push(L("ledger-chain", "FAIL", failures.slice(0, 3).join("; ")));
     else {
       let bound = true, anchorIdx = null;
@@ -319,6 +344,8 @@ function verifySidecar(packPath, pack, trustStore) {
   try { lstatSync(sp); } catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return { status: "SKIP", detail: "pack not signed" }; return { status: "FAIL", detail: `sidecar path unusable (${e.code})` }; }   // one rule in the four
   let side; try { side = strictParse(readText(sp)); } catch (e) { return { status: "FAIL", detail: "unreadable: " + e.message }; }
   if (!isObj(side)) return { status: "FAIL", detail: "sidecar is not a JSON object" };
+  const unknownSide = unknownKeys(side, SIDECAR_KEYS);   // closed sidecar schema (2026-10-10): before any field is read
+  if (unknownSide.length) return { status: "FAIL", detail: "sidecar field not in the closed schema: " + cut(unknownSide.join(", "), 120) };
   let digest; try { digest = sha3(Buffer.from(canon(without(pack, "pack_sha3")), "utf-8")); } catch (e) { return { status: "FAIL", detail: "pack not canonicalisable" }; }
   if (pack.pack_sha3 !== digest) return { status: "FAIL", detail: "content does not match pack_sha3 (modified after signing)" };
   if (side.signed_pack_sha3 !== digest) return { status: "FAIL", detail: "pack changed after signature (digest differs from the signed one)" };
