@@ -28,7 +28,7 @@ const unknownKeys = (o, allowed) => Object.keys(o).filter((k) => !allowed.has(k)
 // the reference's ledger-schema detail over the parsed entries, or null when every entry is in the schema
 function ledgerSchemaDetail(entries) {
   let n = 0, first = null, keys = null;
-  for (const e of entries) { const u = unknownKeys(e, ENTRY_KEYS); if (!u.length) continue; if (n === 0) { first = "idx" in e ? String(e.idx) : "None"; keys = u; } n++; }
+  for (const e of entries) { const u = unknownKeys(e, ENTRY_KEYS); if (!u.length) continue; if (n === 0) { first = Number.isSafeInteger(e.idx) ? String(e.idx) : "None"; keys = u; } n++; }   // idx: the reference's _idx_shown
   return n === 0 ? null : cut(`${n} entry(ies) with a top-level field outside the closed schema, first at idx ${first}: ${keys.join(", ")}`, 200);
 }
 const INSTANT_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$/;

@@ -24,10 +24,10 @@ entry's top level (`ledger-schema` layer) and the signature sidecar (`producer-s
 lists as the reference (`PACK_KEYS`, `ENTRY_KEYS`, `SIDECAR_KEYS` in CHANGELOG), the same words, a key nobody defined NAMED.
 Nine `closed_*` cases in the oracle carry a declared outcome with the detail that names the key; `closed_schema_mutants.py` is
 a generative, differential bench over the rule (`python3 verifiers/closed_schema_mutants.py --quick`; `--tree DIR` measures
-another copy). Measured 2026-10-11: 178 cases, 0 divergences (JS, Go, Rust); the same oracle against the three verifiers of
+another copy). Measured 2026-10-11: 186 cases, 0 divergences (JS, Go, Rust); the same oracle against the three verifiers of
 0b83a3f (before the alignment): 39 divergences; the bench: 90 mutations GREEN, 31 silent passes per verifier on 0b83a3f.
 
-`verifiers/differential.py` builds 178 fixtures (169 until 2026-10-11) with the Python library — intact (unsigned, signed, trusted, with a
+`verifiers/differential.py` builds 186 fixtures (169 until 2026-10-11) with the Python library — intact (unsigned, signed, trusted, with a
 signed tip, ledger elsewhere, an ingested SBOM with its generator document stored) and tampered (pack field, re-hashed
 pack, broken record digest, re-linked chain, sidecar signer/fingerprint rewritten, wrong trust store, truncated /
 unsealed tail under a trusted log key, wrong log key, ledger required but missing, NaN and duplicate-key lines, empty

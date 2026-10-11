@@ -113,7 +113,7 @@ fn ledger_schema_detail(entries: &[BTreeMap<String, Json>]) -> Option<String> {
     for e in entries {
         let u = unknown_keys(e, &ENTRY_KEYS);
         if u.is_empty() { continue; }
-        if n == 0 { first = match e.get("idx") { Some(Json::Int(i)) => i.to_string(), _ => "None".to_string() }; keys = u; }   // the reference prints e.get("idx") → None when absent
+        if n == 0 { first = match e.get("idx") { Some(Json::Int(i)) if i.unsigned_abs() < (1u64 << 53) => i.to_string(), _ => "None".to_string() }; /* the reference's _idx_shown */ keys = u; }   // the reference prints e.get("idx") → None when absent
         n += 1;
     }
     if n == 0 { None } else { Some(cut(format!("{n} entry(ies) with a top-level field outside the closed schema, first at idx {first}: {}", keys.join(", ")), 200)) }

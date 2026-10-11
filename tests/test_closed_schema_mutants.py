@@ -17,6 +17,14 @@ BENCH = os.path.join(ROOT, "verifiers", "closed_schema_mutants.py")
 JS = os.path.join(ROOT, "verifiers", "js", "cra-verify.mjs")
 
 
+try:
+    import cryptography  # noqa: F401 — the bench signs its sources (keygen, sign_pack)
+    HAVE_CRYPTO = True
+except ImportError:
+    HAVE_CRYPTO = False
+
+
+@unittest.skipUnless(HAVE_CRYPTO, "the bench builds signed lockers: needs cryptography (the job without it ran 2 errors, 11/10/2026)")
 class TestClosedSchemaMutants(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="cra-mutants-")

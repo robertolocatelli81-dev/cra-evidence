@@ -40,8 +40,13 @@ class TestClosedSchema(unittest.TestCase):
 
     def test_intact_is_trusted_signed(self):
         r = self.verify()
-        self.assertTrue(r["ok"]); self.assertEqual(r["authenticity"], "trusted-signed")
-        self.assertEqual(self.layers(r)["pack-schema"]["status"], "PASS")
+        try:
+            import cryptography  # noqa: F401
+        except ImportError:   # the no-dependency CI job: the signature cannot be checked, a named FAIL by design (11/10/2026 review)
+            self.assertFalse(r["ok"]); self.assertIn("cryptography not installed", self.layers(r)["producer-signature"]["detail"])
+        else:
+            self.assertTrue(r["ok"]); self.assertEqual(r["authenticity"], "trusted-signed")
+        self.assertEqual(self.layers(r)["pack-schema"]["status"], "PASS"); self.assertNotIn("ledger-schema", self.layers(r))
 
     def test_unknown_sidecar_field_is_named_fail(self):
         with open(self.sig, encoding="utf-8") as f:

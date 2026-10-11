@@ -56,6 +56,12 @@ def _layer(name: str, status: str, detail: str = "") -> Dict[str, str]:
     return {"layer": name, "status": status, "detail": detail}
 
 
+def _idx_shown(v):
+    """The idx the ledger-schema detail prints: a JSON integer within ±(2^53−1) as written, anything else `None` — one
+    rendering in the four verifiers (11/10/2026 review: `true`, `"7"`, `null`, an object printed four different ways)."""
+    return v if type(v) is int and abs(v) <= 2 ** 53 - 1 else None
+
+
 def verify_pack(path: str, ledger_path: Optional[str] = None, trust_store: Optional[Dict[str, str]] = None,
                 log_pubkey_hex: Optional[str] = None, require_sources: bool = False) -> Dict[str, Any]:
     """Offline verification, layer by layer; one authenticity verdict. Any exception inside is a FAIL layer, never a
@@ -195,7 +201,7 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                     lv = led.verify(entries)
                 except (ValueError, TypeError, RecursionError, OSError) as ex:
                     entries, lv = [], {"chain_ok": False, "failures": [f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}"], "entries": 0}
-        unknown_entry = [(e.get("idx"), sorted(k for k in e if k not in ENTRY_KEYS)) for e in entries if isinstance(e, dict) and any(k not in ENTRY_KEYS for k in e)]
+        unknown_entry = [(_idx_shown(e.get("idx")), sorted(k for k in e if k not in ENTRY_KEYS)) for e in entries if isinstance(e, dict) and any(k not in ENTRY_KEYS for k in e)]
         if unknown_entry:   # closed entry schema (2026-10-10): idx, ts, data, prev_hash, self_hash — nothing else at the top level
             layers.append(_layer("ledger-schema", "FAIL", f"{len(unknown_entry)} entry(ies) with a top-level field outside the closed schema, first at idx {unknown_entry[0][0]}: {', '.join(unknown_entry[0][1])}"[:200]))
         if not lv["chain_ok"]:

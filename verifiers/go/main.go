@@ -65,14 +65,21 @@ func cutRunes(s string, n int) string {
 	return s
 }
 
+// isSafeInt: a JSON integer lexeme (no fraction, no exponent) within ±(2^53−1).
+func isSafeInt(s string) bool {
+	v, err := strconv.ParseInt(s, 10, 64)
+	return err == nil && v <= 1<<53-1 && v >= -(1<<53-1)
+}
+
 // ledgerSchemaDetail: the reference's ledger-schema detail over the parsed entries, or "" when every entry is in the schema.
 func ledgerSchemaDetail(entries []*Object) string {
 	n, first, keys := 0, "", []string(nil)
 	for _, e := range entries {
 		if unk := unknownKeys(e, entryKeys); len(unk) != 0 {
 			if n == 0 {
-				if idx, ok := e.Vals["idx"].(json.Number); ok {
-					first = idx.String()
+				if idx, ok := e.Vals["idx"].(json.Number); ok && isSafeInt(idx.String()) {
+					v, _ := strconv.ParseInt(idx.String(), 10, 64)
+					first = strconv.FormatInt(v, 10) // the reference's _idx_shown: a JSON integer within ±(2^53−1), as written
 				} else {
 					first = "None" // the reference prints e.get("idx") → None when absent
 				}

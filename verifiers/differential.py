@@ -658,6 +658,41 @@ def cases(base):
     case("closed_ledger_entry_unknown_key_appended", lambda d: appended(d, {KEY: True}, {}))
     case("closed_ledger_entry_two_unknown_keys_appended", lambda d: appended(d, {"zz_b": 1, "aa_a": 2}, {}))
     case("closed_ledger_entry_unknown_key_in_data_appended", lambda d: appended(d, {}, {KEY: "payload"}))
+    # review 11/10/2026: an appended entry whose idx is not an integer, with a key nobody defined — the ledger-schema detail
+    # printed that idx four ways (True / true / None / None for `true`); one rendering now: `None` unless a portable integer
+    def appended_bad_idx(d, idx):
+        lk, k, pack, pk = build(d); lp = os.path.join(d, "l.jsonl"); last = json.loads(open(lp).read().splitlines()[-1])
+        e = {"idx": idx, "ts": last["ts"], "prev_hash": last["self_hash"], "data": _bd({"kind": "note"}), KEY: 1}; e["self_hash"] = _eh(e)
+        open(lp, "a").write(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
+        return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails_include": ["ledger-schema", "ledger-chain"],
+                           "detail": ("ledger-schema", "1 entry(ies) with a top-level field outside the closed schema, first at idx None: " + KEY)}}
+    for nm, bad in (("true", True), ("string", "7"), ("null", None), ("object", {"a": 1})):
+        case("closed_ledger_entry_unknown_key_idx_" + nm, lambda d, bad=bad: appended_bad_idx(d, bad))
+    # review 11/10/2026: the WHOLE detail text (cut and code-point order), not only a substring — keys past each cut, one of them
+    # outside the BMP (a UTF-16 order or a UTF-16 cut would differ); and an unknown key followed by a line that cannot be read
+    LONG = {"aa_" + "x" * 60: 1, "\U0001F511" + "y" * 60: 2, "\uFF49\uFF44\uFF58" + "z" * 60: 3}
+    LJ = ", ".join(sorted(LONG))
+    def closed_sidecar_long(d):
+        lk, k, pack, pk = build(d, sign=True); sp = sidecar_path(pack); sd = json.load(open(sp)); sd.update(LONG); json.dump(sd, open(sp, "w", encoding="utf-8"), ensure_ascii=False)
+        return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails_include": ["producer-signature"], "detail_exact": ("producer-signature", "sidecar field not in the closed schema: " + LJ[:120])}}
+    case("closed_sidecar_long_keys_cut", closed_sidecar_long)
+    def closed_pack_long(d):
+        lk, k, pack, pk = build(d, sign=True); os.remove(os.path.join(d, "l.jsonl")); j = json.load(open(pack)); j.update(LONG); json.dump(j, open(pack, "w", encoding="utf-8"), ensure_ascii=False); rehash(pack); sign_pack(pack, k, "acme-ci")
+        return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails_include": ["pack-schema"], "detail_exact": ("pack-schema", ("unknown top-level field(s): " + LJ)[:160])}}
+    case("closed_pack_long_keys_cut", closed_pack_long)
+    def appended_long(d):
+        lk, k, pack, pk = build(d); lp = os.path.join(d, "l.jsonl"); last = json.loads(open(lp).read().splitlines()[-1])
+        e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": _bd({"kind": "note"})}; e.update(LONG); e["self_hash"] = _eh(e)
+        open(lp, "a").write(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
+        return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails": ["ledger-schema"],
+                           "detail_exact": ("ledger-schema", (f"1 entry(ies) with a top-level field outside the closed schema, first at idx {e['idx']}: " + LJ)[:200])}}
+    case("closed_ledger_entry_long_keys_cut", appended_long)
+    def appended_then_garbage(d):   # the reference reads no entry when a line cannot be taken: no ledger-schema layer, the chain layer says why
+        lk, k, pack, pk = build(d); lp = os.path.join(d, "l.jsonl"); last = json.loads(open(lp).read().splitlines()[-1])
+        e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": _bd({"kind": "note"}), KEY: 1}; e["self_hash"] = _eh(e)
+        open(lp, "a").write(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n{not json\n")
+        return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails_include": ["ledger-chain"]}}
+    case("closed_ledger_entry_unknown_key_then_unreadable_line", appended_then_garbage)
     return out
 
 
@@ -703,6 +738,8 @@ def meets(r, exp):
     if any(f not in (r.get("fails") or []) for f in exp.get("fails_include", [])):
         return False
     if "detail" in exp and exp["detail"][1] not in (r.get("details") or {}).get(exp["detail"][0], ""):
+        return False
+    if "detail_exact" in exp and (r.get("details") or {}).get(exp["detail_exact"][0]) != exp["detail_exact"][1]:   # the whole text: a cut or an order
         return False
     return (r.get("exit") == 0) == bool(r.get("ok"))
 
