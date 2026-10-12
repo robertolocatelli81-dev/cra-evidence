@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional, Tuple
 import re
 
 from .ledger import parse_line, read_regular
+from .outputs import OutputNotWritten, write_file
 
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
 HEX128_RE = re.compile(r"[0-9a-f]{128}")
@@ -82,9 +83,21 @@ def keygen(path: str) -> Dict[str, str]:
     seed = sk.private_bytes(ser.Encoding.Raw, ser.PrivateFormat.Raw, ser.NoEncryption())
     # O_EXCL: an existing key is never overwritten (a second keygen on the same path would orphan every
     # signature made with the first key — council finding, 15/09/2026)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(seed.hex())
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise                              # the refusal above, not a failed write
+    except OSError as e:
+        raise OutputNotWritten(f"{path}: {e.strerror or e}") from None
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(seed.hex())
+    except OSError as e:                   # a half-written seed would block the next keygen (O_EXCL): remove it
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise OutputNotWritten(f"{path}: {e.strerror or e}") from None
     return {"keyfile": path, "public_key_hex": sk.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw).hex()}
 
 
@@ -200,8 +213,7 @@ def sign_pack(pack_path: str, key: Tuple[Any, str], signer_id: str) -> Dict[str,
             "signed_pack_sha3": digest, "signed_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     # the signature covers WHO signed and WHEN, not only the digest (a sidecar with a rewritten signer_id must fail)
     side["signature_hex"] = sk.sign(signed_payload(side)).hex()
-    with open(sidecar_path(pack_path), "w", encoding="utf-8") as f:
-        f.write(json.dumps(side, indent=1, sort_keys=True))
+    write_file(sidecar_path(pack_path), json.dumps(side, indent=1, sort_keys=True))   # whole or not at all (OutputNotWritten)
     return {"signed": True, "sidecar": str(sidecar_path(pack_path)), "fingerprint": side["fingerprint"]}
 
 

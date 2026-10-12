@@ -71,14 +71,24 @@ not meant in its sysexits sense.
 
 Since 0.5.1 (12/10/2026), every `cra` subcommand and the three other verifiers exit 74 (sysexits `EX_IOERR`) when the
 JSON outcome they computed could not be written whole to stdout — a full disk, a reader that closed the pipe, a closed
-stdout — whatever the outcome was, with a `receipt not written: <reason>` line on stderr. 0, 1, 2 and 77 are unchanged
-when the receipt is written. What `sbom`, `vuln`, `notice`, `pack` and `seal` record in the ledger is recorded before the
-outcome is printed, so after a 74 the record is there and only the printed outcome is lost. Measured on 0.5.0: the
-same runs exited with the outcome's code and nothing on stderr (Python with stdout closed, the JS verifier on a full
-disk or a closed pipe, Go on a full disk), or with 120 (Python), 101 (Rust) or 141 (Go, SIGPIPE), codes that meant
-nothing here; the JS verifier also cut a receipt above 64 KiB at 65 536 bytes on a pipe. One case no program can see:
-started with stdout closed (`>&-`), Node, Go and Rust reopen it on `/dev/null` before the verifier runs, so for them
-that run is the same as `>/dev/null` (the verdict's code, no receipt); the Python CLI sees it and exits 74.
+stdout — whatever the outcome was, with a `receipt not written: <reason>` line on stderr; still 74 when stderr cannot
+take that line either (closed, or a full disk too). 0, 1, 2 and 77 are unchanged when the receipt is written. What
+`sbom`, `vuln`, `notice`, `pack` and `seal` record in the ledger is recorded before the outcome is printed, so after a
+74 the record is there and only the printed outcome is lost. Measured on 0.5.0: the same runs exited with the
+outcome's code and nothing on stderr (Python with stdout closed, the JS verifier on a full disk or a closed pipe, Go on
+a full disk), or with 120 (Python), 101 (Rust) or 141 (Go, SIGPIPE), codes that meant nothing here; the JS verifier
+also cut a receipt above 64 KiB at 65 536 bytes on a pipe. One case no program can see: started with stdout closed
+(`>&-`), Node, Go and Rust reopen it on `/dev/null` before the verifier runs, so for them that run is the same as
+`>/dev/null` (the verdict's code, no receipt); the Python CLI sees it and exits 74.
+
+The files a subcommand promises follow the same rule — the pack of `pack --out`, the sidecar of `sign`, the drop file
+of `notice`, the seed of `keygen`: one that cannot be written exits 74 with the same line, the pack, the sidecar and
+the drop file are renamed into place only once complete (nothing half-written is left at the path), and the ledger is
+unchanged. Measured: a path under a regular file for the pack, the drop file and the seed, a directory in the place
+of the pack and of the sidecar, the pack's bytes on a full disk. On 0.5.0 each of these was a traceback with exit 1, and `pack --out <a
+directory>` had already appended the pack's anchor to the ledger. One exception, not reproduced: if renaming the pack
+failed after its anchor was appended, the ledger would hold the anchor; the line says so and names the `.tmp` file
+that holds the complete pack.
 
 Every file a verifier reads must be a regular file — decided on the opened descriptor, without blocking on a FIFO — of
 at most 64 MiB (67108864 bytes) for a JSON document (pack, sidecar, tip, trust store, one ledger line) and 256 MiB for a

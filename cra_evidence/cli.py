@@ -2,8 +2,9 @@
 """`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
 overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
 is FAIL (77 when it could not judge). Exit 74 when the JSON outcome could not be written whole to stdout (full disk,
-closed pipe, closed stdout), whatever the outcome was, with a `receipt not written: <reason>` line on stderr; what a
-subcommand records in the ledger is recorded before its outcome is printed. Nothing is ever sent anywhere except the
+closed pipe, closed stdout) or a file it promises (`pack --out`, the `sign` sidecar, the `notice` drop file, the
+`keygen` seed) could not be written, whatever the outcome was, with a `receipt not written: <reason>` line on stderr;
+what a subcommand records in the ledger is recorded before its outcome is printed. Nothing is ever sent anywhere except the
 OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source cisa_kev|enisa_euvd` unless --assert-source)."""
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from .srp_notice import DryRunDrop, SRPNotice, schema
 from .verify_pack import verify_pack
 from .vuln import STATUSES, VulnerabilityRecord
 from .longterm import LongTermEvidence
+from .outputs import OutputNotWritten
 from datetime import datetime, timezone
 
 
@@ -62,8 +64,9 @@ def _silence(stream: Any, fd: int) -> None:
         pass
 
 
-def _receipt_lost(reason: str) -> int:
-    _silence(sys.stdout, 1)
+def _receipt_lost(reason: str, stdout_failed: bool = True) -> int:
+    if stdout_failed:
+        _silence(sys.stdout, 1)
     err = sys.stderr
     try:
         if err is None:
@@ -90,6 +93,8 @@ def main(argv: List[str] = None) -> int:
         return _main(argv)
     except ReceiptNotWritten as e:
         return _receipt_lost(str(e))
+    except OutputNotWritten as e:   # a promised file (pack, sidecar, drop file, seed) could not be written whole
+        return _receipt_lost(str(e), stdout_failed=False)
 
 
 def _main(argv: List[str] = None) -> int:

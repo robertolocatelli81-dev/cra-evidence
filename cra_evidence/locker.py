@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .outputs import OutputNotWritten, refuse_directory, write_tmp
+
 from .canonical import deep_recursion, floatfree, sha3_hex
 from .ledger import Ledger
 from .longterm import AlgorithmPolicy, LongTermEvidence, Signer
@@ -239,6 +241,7 @@ class CRAEvidenceLocker:
             return self._evidence_pack_locked(out_path)
 
     def _evidence_pack_locked(self, out_path: str) -> Dict[str, Any]:
+        refuse_directory(out_path)   # 0.5.0 appended the anchor, then failed to rename the pack over a directory
         v = self.verify()
         if v["entries"] == 0:
             raise ValueError("empty ledger: a pack over zero records would prove nothing (record an SBOM or an event first)")
@@ -260,14 +263,17 @@ class CRAEvidenceLocker:
                 "ledger_file": Path(self.ledger.path).name, "ledger_entries": v["entries"], "ledger_last_self_hash": v["last_self_hash"],
                 "record_counts": counts, "verification": {k: v[k] for k in ("chain_ok", "entries", "records_checked", "record_digests_bound")}}
         pack["pack_sha3"] = sha3_hex(pack)
-        tmp = Path(str(out_path) + ".tmp")
-        tmp.write_text(json.dumps(pack, indent=1, sort_keys=True), encoding="utf-8")
+        tmp = Path(write_tmp(out_path, json.dumps(pack, indent=1, sort_keys=True)))   # unwritable: OutputNotWritten, ledger untouched
         try:
             self.ledger.append(_bind({"kind": "cra_pack_anchor", "anchored_pack_sha3": pack["pack_sha3"], "pack_file": Path(out_path).name}))
         except Exception:
             tmp.unlink(missing_ok=True)      # never leave an un-anchored pack on disk
             raise
-        os.replace(tmp, out_path)             # the pack appears only once its anchor is in the chain
+        try:
+            os.replace(tmp, out_path)         # the pack appears only once its anchor is in the chain
+        except OSError as e:                  # the anchor is recorded: keep the complete pack where it is and say both
+            raise OutputNotWritten(f"{out_path}: {e.strerror or e}; the anchor of pack_sha3 {pack['pack_sha3']} is in the ledger and the "
+                                   f"complete pack stays at {tmp.name}") from None
         return pack
 
     def seal_longterm(self, pack_sha3: str, alg: str = "ed25519", ts_source: str = "asserted",

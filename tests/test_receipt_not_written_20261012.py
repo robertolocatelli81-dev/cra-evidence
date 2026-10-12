@@ -42,6 +42,7 @@ MODES = {
     "pipe_closed": '{cmd} 2>"$W/.err"; echo $? >"$W/.rc"',
     "closed": '{cmd} >&- 2>"$W/.err"; echo $? >"$W/.rc"',
     "devfull_noerr": '{cmd} >/dev/full 2>&-; echo $? >"$W/.rc"',                 # stderr closed too: still 74, no traceback
+    "both_full": '{cmd} >/dev/full 2>/dev/full; echo $? >"$W/.rc"',            # stderr full too: Python's flush of stderr at exit must not turn 74 into 120
     "slow": '{cmd} 2>"$W/.err" | (sleep 0.5; cat >"$W/.out"); echo ${{PIPESTATUS[0]}} >"$W/.rc"',
 }
 
@@ -61,6 +62,11 @@ feeds._post_json, feeds._get_json = post, get
 from cra_evidence.cli import main
 sys.exit(main(["feeds", "CVE-2021-44228"]))
 """
+
+
+NOTICE_OK = {"awareness_datetime_utc": "2026-09-15T08:00:00Z", "manufacturer_name": "example manufacturer",
+             "member_states_available": ["IT"], "notification_type": "Vulnerability", "product_name": "cra-evidence",
+             "product_version": "0.4.0", "summary": "illustrative payload; never submitted", "title": "example (not a real report)"}
 
 
 def q(args):
@@ -141,10 +147,11 @@ class ReceiptNotWritten(unittest.TestCase):
             self.assertIn("receipt not written: ", err, f"{label} {mode}")
             self.assertNotIn("Traceback", err, f"{label} {mode}")
             self.assertNotIn("Exception ignored", err, f"{label} {mode}")
-        if setup:
-            setup()
-        rc, _, _ = run(cmd, "devfull_noerr", self.W)
-        self.assertEqual(rc, 74, f"{label}: stdout full AND stderr closed must still exit 74")
+        for mode in ("devfull_noerr", "both_full"):
+            if setup:
+                setup()
+            rc, _, _ = run(cmd, mode, self.W)
+            self.assertEqual(rc, 74, f"{label} {mode}: stdout lost AND stderr unusable must still exit 74")
 
     # ---- the reference CLI: every subcommand that prints an outcome ----
     def py(self, *args):
@@ -193,9 +200,7 @@ class ReceiptNotWritten(unittest.TestCase):
         self.check("vuln bad", self.py("vuln", *self.ledger_args(), "--id", "CVE-2026-0002", "--aware", "2026-01-01T00:00:00Z", "--exploited"), 1, setup=self.fresh_ledger)
 
     def test_notice_valid_and_invalid(self):
-        ok_fields = {"awareness_datetime_utc": "2026-09-15T08:00:00Z", "manufacturer_name": "example manufacturer",
-                     "member_states_available": ["IT"], "notification_type": "Vulnerability", "product_name": "cra-evidence",
-                     "product_version": "0.4.0", "summary": "illustrative payload; never submitted", "title": "example (not a real report)"}
+        ok_fields = NOTICE_OK
         bad_fields = {k: v for k, v in ok_fields.items() if k != "title"}   # a required field missing: exit 1
         ok, bad = os.path.join(self.W, "ok.json"), os.path.join(self.W, "bad.json")
         for path, fields in ((ok, ok_fields), (bad, bad_fields)):
@@ -246,6 +251,68 @@ class ReceiptNotWritten(unittest.TestCase):
 
 
 @unittest.skipUnless(CAN_RUN, "needs bash and /dev/full (POSIX)")
+class OutputFileNotWritten(unittest.TestCase):
+    """the files a subcommand promises — the pack of `pack --out`, the sidecar of `sign`, the drop file of `notice`, the
+    seed of `keygen` — follow the same rule: not writable → exit 74 + `receipt not written:`, no traceback, nothing
+    half-written left behind, the ledger untouched. On 0.5.0 each case was a traceback with exit 1, and `pack --out`
+    naming a directory appended the pack's anchor to the ledger before failing to rename the pack."""
+
+    def setUp(self):
+        self.W = tempfile.mkdtemp(prefix="cra_out_")
+        self.addCleanup(shutil.rmtree, self.W, True)
+        self.ledger = os.path.join(self.W, "l.jsonl")
+        self.args = ["--ledger", self.ledger, "--product", "p", "--version", "1"]
+        open(os.path.join(self.W, "notadir"), "w").close()   # a regular file: any path under it is ENOTDIR (root included)
+        aware = (datetime.now(timezone.utc) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        subprocess.run(PY + ["vuln", *self.args, "--id", "CVE-2026-0001", "--aware", aware], cwd=ROOT, check=True, capture_output=True)
+
+    def lines(self):
+        return read(self.ledger, "r").splitlines()
+
+    def lost(self, *args):
+        before = self.lines()
+        r = subprocess.run(PY + list(args), cwd=ROOT, capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 74, f"{args[0]}: exit {r.returncode}, stderr {r.stderr!r}")
+        self.assertTrue(r.stderr.startswith("receipt not written: "), r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertEqual(self.lines(), before, f"{args[0]}: the ledger changed")
+        return r
+
+    def test_pack_out_unwritable(self):
+        self.lost("pack", *self.args, "--out", os.path.join(self.W, "notadir", "p.json"))
+        os.mkdir(os.path.join(self.W, "adir"))
+        self.lost("pack", *self.args, "--out", os.path.join(self.W, "adir"))
+        self.assertFalse(os.path.exists(os.path.join(self.W, "adir.tmp")))
+        os.symlink("/dev/full", os.path.join(self.W, "q.json.tmp"))   # the bytes themselves cannot be written (ENOSPC)
+        self.lost("pack", *self.args, "--out", os.path.join(self.W, "q.json"))
+        self.assertFalse(os.path.lexists(os.path.join(self.W, "q.json.tmp")), "a half-written pack was left behind")
+        self.assertFalse(os.path.exists(os.path.join(self.W, "q.json")))
+        r = subprocess.run(PY + ["pack", *self.args, "--out", os.path.join(self.W, "ok.json")], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)   # control: the same ledger still packs, and the anchor is appended
+        self.assertEqual(len(self.lines()), 2)
+
+    def test_notice_drop_unwritable(self):
+        fields = os.path.join(self.W, "f.json")
+        with open(fields, "w", encoding="utf-8") as f:
+            json.dump(NOTICE_OK, f)
+        self.lost("notice", *self.args, "--stage", "early_warning", "--fields", fields, "--drop", os.path.join(self.W, "notadir", "drop"))
+
+    @unittest.skipUnless(HAVE_SIGN, "keygen and sign need cryptography")
+    def test_keygen_and_sign_unwritable(self):
+        self.lost("keygen", os.path.join(self.W, "notadir", "k.seed"))
+        key = os.path.join(self.W, "k.seed")
+        subprocess.run(PY + ["keygen", key], cwd=ROOT, check=True, capture_output=True)
+        se = os.path.join(self.W, "se")
+        shutil.copytree(EXAMPLE, se)
+        side = os.path.join(se, "cra_pack.json.sig.json")
+        os.unlink(side)
+        os.mkdir(side)   # the sidecar's path is taken by a directory
+        self.lost("sign", os.path.join(se, "cra_pack.json"), "--key", key, "--signer-id", "me")
+        self.assertFalse(os.path.exists(side + ".tmp"))
+
+
+@unittest.skipUnless(CAN_RUN, "needs bash and /dev/full (POSIX)")
 class VerifiersReceiptNotWritten(unittest.TestCase):
     """the JS, Go and Rust verifiers: same rule; `>&-` is not tested (their runtime reopens fd 1 on /dev/null)"""
 
@@ -277,10 +344,10 @@ class VerifiersReceiptNotWritten(unittest.TestCase):
                     rc, err, out = run(cmd, "file", self.W)
                     self.assertEqual(rc, verdict, f"{name} {label} file: {err}")
                     self.assertTrue(out)
-                    for mode in ("devfull", "pipe_closed", "devfull_noerr"):
+                    for mode in ("devfull", "pipe_closed", "devfull_noerr", "both_full"):
                         rc, err, _ = run(cmd, mode, self.W)
                         self.assertEqual(rc, 74, f"{name} {label} {mode}: exit {rc}, stderr {err!r}")
-                        if mode != "devfull_noerr":
+                        if mode not in ("devfull_noerr", "both_full"):
                             self.assertIn("receipt not written: ", err, f"{name} {label} {mode}")
 
     def test_large_receipt_slow_pipe(self):

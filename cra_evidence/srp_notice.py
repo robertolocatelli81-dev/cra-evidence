@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .canonical import sha3_hex
+from .outputs import OutputNotWritten, write_file
 from .vuln import parse_utc, EARLY_WARNING_HOURS, NOTIFICATION_HOURS, FINAL_REPORT_DAYS_AFTER_FIX, CLOCK_SKEW
 
 STAGES = ("early_warning", "notification", "final_report")
@@ -193,11 +194,14 @@ class DryRunDrop:
     """Writes the payload to a drop folder and returns 'prepared_not_sent'. There is deliberately no other transport."""
     def __init__(self, drop_dir: str):
         self.dir = Path(drop_dir)
-        self.dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:     # a path under a file, a file in its place, no permission: the drop file cannot be written
+            raise OutputNotWritten(f"{drop_dir}: {e.strerror or e}") from None
 
     def prepare(self, notice: SRPNotice) -> Dict[str, Any]:
         p = self.payload_path(notice)
-        p.write_text(json.dumps(notice.payload(), indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        write_file(str(p), json.dumps(notice.payload(), indent=1, ensure_ascii=False, sort_keys=True))   # whole or OutputNotWritten
         # only the file NAME is returned/recorded: an absolute path would leak the operator's directory layout into a
         # ledger meant to be handed to auditors (found by the pre-publication scan, 15/09/2026)
         return {"status": "prepared_not_sent", "drop_file": p.name, "drop_sha3": _sha3_file(p), "complete": notice.complete(),

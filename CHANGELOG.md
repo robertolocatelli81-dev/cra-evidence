@@ -21,6 +21,22 @@
   printed: after a 74 from `sbom`, `vuln`, `notice`, `pack` or `seal` the record is in the ledger. Started with stdout
   closed, Node, Go and Rust reopen it on `/dev/null` before the verifier runs, which the verifier cannot tell from
   `>/dev/null`; the Python CLI exits 74 there.
+- The files a subcommand promises — the pack of `pack --out`, the sidecar of `sign`, the drop file of `notice`, the
+  seed of `keygen` — follow the same rule (new module `cra_evidence/outputs.py`, `OutputNotWritten`): a file that
+  cannot be written exits 74 with the same line, no traceback, and the ledger is unchanged. Measured on 0.5.0: a path
+  under a regular file, a directory in the file's place, or the pack's bytes on a full disk each ended in a traceback
+  with exit 1, and `pack --out <a directory>` appended the pack's anchor to the ledger before failing to rename the pack
+  over the directory (and left `<path>.tmp`). Now the pack, the sidecar and the drop file are written to `<path>.tmp`
+  and renamed only once complete (the temporary file is removed on failure), `pack --out` refuses a directory before
+  reading the ledger, and a seed that failed half-way is removed (`keygen` creates it with `O_EXCL`, so a stub would block
+  the next run; by code reading, not reproduced). If the rename of the pack fails after its anchor was appended — not
+  reproduced: the directory case is refused earlier — the error says the anchor is in the ledger and the complete pack
+  stays at `<path>.tmp`; that is the one case where the ledger changes. An existing
+  seed file is still refused as before (`FileExistsError`, exit 1), not counted as a failed write.
+- Exit 74 also when stderr cannot take the line: measured with stdout and stderr both on `/dev/full`, valid and invalid
+  pack, three runs each (0.5.0: 120 from the Python CLI, the verdict's 0/1 from the JS and Go verifiers, 101 from Rust;
+  now 74 in the four). Python points both descriptors at `/dev/null` after the failure, so its own flush at exit cannot
+  fail again; the JS verifier also listens for `error` on stderr (without that listener, measured on a mutant, it exits 1).
 - The JS verifier set `process.exitCode` instead of calling `process.exit()` right after `console.log` (local commit
   of the same day, made as a precaution after the same defect in ap2-evidence-pack's JS verifier, where it was
   described as not reproduced here). Measured afterwards, it was reproducible: on 0.5.0 a 201 020-byte receipt (a pack
@@ -28,9 +44,13 @@
   as it already did from the Python CLI and the Go and Rust verifiers.
 - `tests/test_receipt_not_written_20261012.py` runs every case as a real process (stdout to a file, to `/dev/full`, to
   a pipe whose reader is already gone, closed, and a receipt above 64 KiB through a slow pipe); Go and Rust run when
-  `CRA_VERIFY_GO` / `CRA_VERIFY_RUST` name a built binary, as in the CI verifiers job. On 0.5.0 it fails 12 of its 13
+  `CRA_VERIFY_GO` / `CRA_VERIFY_RUST` name a built binary, as in the CI verifiers job. On 0.5.0 it fails 15 of its 16
   tests, the JS verifier on the slow pipe included (the one that passes is the Python slow-pipe test, a guard against a
-  regression).
+  regression). The closed pipe is a pipe whose read end is closed before the command starts: with `| head -c 0` the
+  reader races the writer, and a small receipt can land in the pipe buffer first (measured on this code, 50 runs each
+  on an invalid pack: started together, Go and Rust exited 1 once each, the receipt written to the pipe and discarded by
+  `head`; with the producer started 0.2 s after `head`, and with the read end closed first, 74 in all 50 for Python, JS,
+  Go and Rust).
 
 ## 0.5.0 — 2026-10-11
 
