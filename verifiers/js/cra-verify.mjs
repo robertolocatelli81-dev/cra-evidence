@@ -457,4 +457,7 @@ function main(argv) {
   console.log(JSON.stringify(r, null, 1));
   return r.ok ? 0 : (r.assessed === false ? 77 : 1);   // 77 = NOT ASSESSED (the verifier could not judge), as the Python reference
 }
-if (process.argv[1] && /cra-verify\.mjs$/.test(process.argv[1])) process.exit(main(process.argv));
+// exitCode, not process.exit(): exit() right after console.log to a PIPE drops what is past 64 KiB of the receipt (measured
+// 2026-10-12 in ap2-evidence-pack's JS verifier: 65 536 of 100 477 bytes on `| cat`). Not reproduced here (the receipts stayed
+// far below 64 KiB in every attempt); the change is preventive.
+if (process.argv[1] && /cra-verify\.mjs$/.test(process.argv[1])) process.exitCode = main(process.argv);
