@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .outputs import OutputNotWritten, refuse_directory, write_tmp
+from .outputs import OutputNotWritten, TipNotWritten, refuse_directory, write_tmp
 
 from .canonical import deep_recursion, floatfree, sha3_hex
 from .ledger import Ledger
@@ -266,6 +266,13 @@ class CRAEvidenceLocker:
         tmp = Path(write_tmp(out_path, json.dumps(pack, indent=1, sort_keys=True)))   # unwritable: OutputNotWritten, ledger untouched
         try:
             self.ledger.append(_bind({"kind": "cra_pack_anchor", "anchored_pack_sha3": pack["pack_sha3"], "pack_file": Path(out_path).name}))
+        except TipNotWritten as e:            # the anchor IS in the chain: the pack it anchors must not be deleted
+            try:
+                os.replace(tmp, out_path)
+            except OSError as e2:
+                raise OutputNotWritten(f"{e}; {out_path}: {e2.strerror or e2}; the anchor of pack_sha3 {pack['pack_sha3']} is in the "
+                                       f"ledger and the complete pack stays at {tmp.name}") from None
+            raise OutputNotWritten(f"{e}; the anchor of pack_sha3 {pack['pack_sha3']} is in the ledger and the pack is at {out_path}") from None
         except Exception:
             tmp.unlink(missing_ok=True)      # never leave an un-anchored pack on disk
             raise

@@ -243,15 +243,30 @@ class Ledger:
             if nesting_depth(line.decode("utf-8")) > MAX_DEPTH:   # the LINE's depth (entry adds a level over data): what every reader bounds
                 raise ValueError(f"record would nest deeper than {MAX_DEPTH} on its ledger line: the verifiers refuse it, so it is not written")
             f.seek(0, os.SEEK_END)
+            end = f.tell()
             if unterminated:
                 _log.warning("ledger %s ended without newline (crash or truncation): line closed before the new record", self.path)
-                f.write(b"\n")
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
+            data = memoryview((b"\n" if unterminated else b"") + line)
+            fd = f.fileno()
+            try:   # unbuffered and whole, or not at all: a short write (full disk, file size limit) never leaves half a line
+                while data:
+                    data = data[os.write(fd, data):]
+                os.fsync(fd)
+            except BaseException:
+                try:
+                    os.ftruncate(fd, end)   # back to the bytes this call found (it holds the exclusive lock)
+                    os.fsync(fd)
+                except OSError:
+                    pass
+                raise
             if self._tip_key is not None:
                 from .signing import write_tip
-                write_tip(self.path + ".tip.json", self._tip_key, idx + 1, first if idx > 0 else entry["self_hash"], entry["self_hash"])
+                from .outputs import TipNotWritten
+                try:
+                    write_tip(self.path + ".tip.json", self._tip_key, idx + 1, first if idx > 0 else entry["self_hash"], entry["self_hash"])
+                except OSError as e:
+                    raise TipNotWritten(f"{self.path}.tip.json: {e.strerror or e}; record {idx} is in the ledger, the tip still names "
+                                        f"the previous entry") from None
         return entry
 
     # ── read / verify ──────────────────────────────────────────────────────

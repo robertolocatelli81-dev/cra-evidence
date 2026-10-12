@@ -44,6 +44,9 @@ MODES = {
     "devfull_noerr": '{cmd} >/dev/full 2>&-; echo $? >"$W/.rc"',                 # stderr closed too: still 74, no traceback
     "both_full": '{cmd} >/dev/full 2>/dev/full; echo $? >"$W/.rc"',            # stderr full too: Python's flush of stderr at exit must not turn 74 into 120
     "slow": '{cmd} 2>"$W/.err" | (sleep 0.5; cat >"$W/.out"); echo ${{PIPESTATUS[0]}} >"$W/.rc"',
+    # a regular file that stops growing at 4 KiB (file size limit): a short write, then EFBIG. Node's stream wrote once
+    # and dropped the rest (exit = verdict), Rust was killed by SIGXFSZ (153)
+    "fsize": '(ulimit -f 4; {cmd} >"$W/.out" 2>"$W/.err"); echo $? >"$W/.rc"',
 }
 
 # feeds without network: only the two fetch functions are replaced (canned answers / an OSError), the rest is the real code
@@ -138,6 +141,7 @@ class ReceiptNotWritten(unittest.TestCase):
         rc, err, out = run(cmd, "file", self.W)
         self.assertEqual(rc, verdict, f"{label} file: {err}")
         self.assertTrue(out, f"{label}: no receipt in the control")
+        self.assertTrue(out.endswith(b"\n"), f"{label}: the receipt lost its final newline")
         self.assertNotIn("receipt not written", err)
         for mode in modes:
             if setup:
@@ -344,6 +348,7 @@ class VerifiersReceiptNotWritten(unittest.TestCase):
                     rc, err, out = run(cmd, "file", self.W)
                     self.assertEqual(rc, verdict, f"{name} {label} file: {err}")
                     self.assertTrue(out)
+                    self.assertTrue(out.endswith(b"\n"), f"{name} {label}: the receipt lost its final newline")
                     for mode in ("devfull", "pipe_closed", "devfull_noerr", "both_full"):
                         rc, err, _ = run(cmd, mode, self.W)
                         self.assertEqual(rc, 74, f"{name} {label} {mode}: exit {rc}, stderr {err!r}")
@@ -361,6 +366,100 @@ class VerifiersReceiptNotWritten(unittest.TestCase):
                 self.assertEqual(rc, rc0, f"{name} slow pipe: {err}")
                 self.assertEqual(len(got), len(ref), f"{name}: receipt cut on a slow pipe")
                 self.assertEqual(got, ref)
+
+    def test_large_receipt_file_size_limit(self):
+        """stdout a regular file that refuses past 4 KiB: 74 and the line, never the verdict's code with a cut receipt"""
+        cmds = {name: q(base + [self.big]) for name, base in self.verifiers().items()}
+        cmds["python"] = q(PY + ["verify", self.big])
+        for name, cmd in cmds.items():
+            with self.subTest(verifier=name):
+                rc, err, got = run(cmd, "fsize", self.W)
+                self.assertEqual(rc, 74, f"{name}: exit {rc}, {len(got or b'')} bytes, stderr {err!r}")
+                self.assertIn("receipt not written: ", err)
+
+
+@unittest.skipUnless(CAN_RUN, "needs bash and /dev/full (POSIX)")
+class LedgerNeverHalfWritten(unittest.TestCase):
+    """the hash-chained ledger: a line that cannot be written whole is not written at all; a record whose signed tip
+    cannot be replaced is 74 (the record IS in the chain), and the pack it anchors is never deleted"""
+
+    def setUp(self):
+        self.W = tempfile.mkdtemp(prefix="cra_ledger_")
+        self.addCleanup(shutil.rmtree, self.W, True)
+        self.ledger = os.path.join(self.W, "l.jsonl")
+        self.args = ["--ledger", self.ledger, "--product", "p", "--version", "1"]
+        aware = (datetime.now(timezone.utc) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.aware = aware
+
+    def py(self, *args):
+        return q(PY + list(args))
+
+    def test_line_cut_by_file_size_limit_leaves_ledger_unchanged(self):
+        subprocess.run(PY + ["vuln", *self.args, "--id", "CVE-2026-0001", "--aware", self.aware], cwd=ROOT, check=True, capture_output=True)
+        before = read(self.ledger)
+        self.assertLess(len(before), 2048)
+        rc, err, _ = run("(ulimit -f 2; %s)" % self.py("sbom", *self.args, "--from-cyclonedx", SYFT, "--no-store-source"), "file", self.W)
+        self.assertNotEqual(rc, 0, err)
+        self.assertEqual(read(self.ledger), before, "half a record was left in the hash-chained ledger")
+        subprocess.run(PY + ["vuln", *self.args, "--id", "CVE-2026-0002", "--aware", self.aware], cwd=ROOT, check=True, capture_output=True)
+        sys.path.insert(0, ROOT)
+        from cra_evidence.ledger import Ledger
+        self.assertTrue(Ledger(self.ledger).verify()["chain_ok"])
+
+    @unittest.skipUnless(HAVE_SIGN, "the tip is signed: needs cryptography")
+    def test_tip_not_written(self):
+        key = os.path.join(self.W, "k.seed")
+        subprocess.run(PY + ["keygen", key], cwd=ROOT, check=True, capture_output=True)
+        a = self.args + ["--tip-key", key]
+        subprocess.run(PY + ["vuln", *a, "--id", "CVE-2026-0001", "--aware", self.aware], cwd=ROOT, check=True, capture_output=True)
+        tip = self.ledger + ".tip.json"
+        os.unlink(tip)
+        os.mkdir(tip)   # the tip cannot be replaced
+        out = os.path.join(self.W, "p.json")
+        r = subprocess.run(PY + ["pack", *a, "--out", out], cwd=ROOT, capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 74, r.stderr)
+        self.assertTrue(r.stderr.startswith("receipt not written: "), r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        last = json.loads(read(self.ledger, "r").splitlines()[-1])["data"]
+        self.assertEqual(last["kind"], "cra_pack_anchor")
+        with open(out, encoding="utf-8") as f:   # 0.5.1 deleted the pack its anchor names
+            self.assertEqual(json.load(f)["pack_sha3"], last["anchored_pack_sha3"])
+        self.assertFalse(os.path.lexists(out + ".tmp"))
+        self.assertFalse(os.path.lexists(tip + ".tmp"))
+        r = subprocess.run(PY + ["vuln", *a, "--id", "CVE-2026-0002", "--aware", self.aware], cwd=ROOT, capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 74, r.stderr)
+        self.assertEqual(json.loads(read(self.ledger, "r").splitlines()[-1])["data"]["kind"], "cra_vuln")
+
+    def test_stdout_cannot_encode_the_receipt(self):
+        """PYTHONIOENCODING=ascii and a non-ASCII path in the receipt: 74 (0.5.0: traceback, exit 1)"""
+        subprocess.run(PY + ["vuln", *self.args, "--id", "CVE-2026-0001", "--aware", self.aware], cwd=ROOT, check=True, capture_output=True)
+        rc, err, _ = run("PYTHONIOENCODING=ascii " + self.py("pack", *self.args, "--out", os.path.join(self.W, "pacchetto-\u00fc.json")), "file", self.W)
+        self.assertEqual(rc, 74, err)
+        self.assertIn("receipt not written: ", err)
+
+    def test_drop_file_never_half_written(self):
+        """a drop file cut by a file size limit leaves nothing in the drop folder and the ledger unchanged"""
+        subprocess.run(PY + ["vuln", *self.args, "--id", "CVE-2026-0001", "--aware", self.aware], cwd=ROOT, check=True, capture_output=True)
+        before = read(self.ledger)
+        fields = dict(NOTICE_OK, summary="s" * 3990)   # the SRP maximum is 4000: the payload is above 4 KiB
+        fpath = os.path.join(self.W, "f.json")
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump(fields, f)
+        drop = os.path.join(self.W, "drop")
+        os.mkdir(drop)
+        rc, err, _ = run("(ulimit -f 4; %s)" % self.py("notice", *self.args, "--stage", "early_warning", "--fields", fpath, "--drop", drop), "file", self.W)
+        self.assertEqual(rc, 74, err)
+        self.assertEqual(os.listdir(drop), [], "a half-written drop file was left")
+        self.assertEqual(read(self.ledger), before)
+
+    @unittest.skipUnless(HAVE_SIGN, "keygen needs cryptography")
+    def test_keygen_seed_not_written_leaves_no_stub(self):
+        key = os.path.join(self.W, "k.seed")
+        rc, err, _ = run("(ulimit -f 0; %s)" % self.py("keygen", key), "file", self.W)
+        self.assertEqual(rc, 74, err)
+        self.assertFalse(os.path.lexists(key), "an empty seed would block the next keygen (O_EXCL)")
+        rc, err, _ = run(self.py("keygen", key), "file", self.W)
+        self.assertEqual(rc, 0, err)
 
 
 if __name__ == "__main__":

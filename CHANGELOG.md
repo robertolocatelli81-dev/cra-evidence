@@ -31,22 +31,38 @@
   reading the ledger, and a seed that failed half-way is removed (`keygen` creates it with `O_EXCL`, so a stub would block
   the next run; by code reading, not reproduced). If the rename of the pack fails after its anchor was appended — not
   reproduced: the directory case is refused earlier — the error says the anchor is in the ledger and the complete pack
-  stays at `<path>.tmp`; that is the one case where the ledger changes. An existing
-  seed file is still refused as before (`FileExistsError`, exit 1), not counted as a failed write.
+  stays at `<path>.tmp`. An existing seed file is still refused as before (`FileExistsError`, exit 1), not counted as a
+  failed write.
+- The ledger and its signed tip (`--tip-key`). Measured on 0.5.0 and on the first 0.5.1 commits: with the tip's path
+  unwritable (a directory in its place), `pack` appended the anchor, then deleted the pack it names and exited 1 with a
+  traceback (an anchor whose pack exists nowhere); `sbom`, `vuln`, `notice` and `seal` appended the record and exited 1,
+  the code of an overdue deadline or an unmet floor. A ledger line cut by a full disk or a file size limit (`ulimit -f
+  2`, an SBOM record) stayed in the ledger as half a line, and the next append made the chain fail for good. Now a line
+  is written whole or not at all (a failed write truncates the ledger back to the bytes it had, under the same lock), a
+  tip that cannot be replaced exits 74 with the line naming the record that is in the ledger, `pack` then keeps the
+  pack at its path, and no `.tip.json.tmp` is left; after that 74 the record is in the chain and the signed tip still
+  names the previous entry. A record that could not be appended at all still exits 1 with a traceback, as before, and
+  the ledger is left as it was.
+- A regular file that stops taking bytes part-way (a file size limit): measured with `ulimit -f 4` and a 201 502-byte
+  receipt, the JS verifier (Node 22 and 24) wrote 4 096 bytes and exited with the verdict's code and nothing on stderr
+  (Node's stream does one write on a regular file and drops the rest after a short write), and the Rust verifier was
+  killed by `SIGXFSZ` (exit 153). The JS verifier now writes a regular file itself, every byte, and the Rust verifier
+  ignores `SIGXFSZ`: both exit 74, like the Python CLI and the Go verifier already did on this code.
 - Exit 74 also when stderr cannot take the line: measured with stdout and stderr both on `/dev/full`, valid and invalid
   pack, three runs each (0.5.0: 120 from the Python CLI, the verdict's 0/1 from the JS and Go verifiers, 101 from Rust;
   now 74 in the four). Python points both descriptors at `/dev/null` after the failure, so its own flush at exit cannot
   fail again; the JS verifier also listens for `error` on stderr (without that listener, measured on a mutant, it exits 1).
 - The JS verifier set `process.exitCode` instead of calling `process.exit()` right after `console.log` (local commit
   of the same day, made as a precaution after the same defect in ap2-evidence-pack's JS verifier, where it was
-  described as not reproduced here). Measured afterwards, it was reproducible: on 0.5.0 a 201 020-byte receipt (a pack
+  described as not reproduced here). Measured afterwards, it was reproducible: on 0.5.0 a 201 502-byte receipt (a pack
   whose `kind` is 200 000 characters) reached a pipe as 65 536 bytes, exit 1, nothing on stderr; it now arrives whole,
   as it already did from the Python CLI and the Go and Rust verifiers.
 - `tests/test_receipt_not_written_20261012.py` runs every case as a real process (stdout to a file, to `/dev/full`, to
-  a pipe whose reader is already gone, closed, and a receipt above 64 KiB through a slow pipe); Go and Rust run when
-  `CRA_VERIFY_GO` / `CRA_VERIFY_RUST` name a built binary, as in the CI verifiers job. On 0.5.0 it fails 15 of its 16
-  tests, the JS verifier on the slow pipe included (the one that passes is the Python slow-pipe test, a guard against a
-  regression). The closed pipe is a pipe whose read end is closed before the command starts: with `| head -c 0` the
+  a pipe whose reader is already gone, closed, a receipt above 64 KiB through a slow pipe and into a file that stops at
+  4 KiB, the ledger under a file size limit, the tip unwritable, a stdout that cannot encode the receipt); Go and Rust
+  run when `CRA_VERIFY_GO` / `CRA_VERIFY_RUST` name a built binary, as in the CI verifiers job. On 0.5.0 it fails 21 of
+  its 22 tests, the JS verifier on the slow pipe included (the one that passes is the Python slow-pipe test, a guard
+  against a regression). The closed pipe is a pipe whose read end is closed before the command starts: with `| head -c 0` the
   reader races the writer, and a small receipt can land in the pipe buffer first (measured on this code, 50 runs each
   on an invalid pack: started together, Go and Rust exited 1 once each, the receipt written to the pipe and discarded by
   `head`; with the producer started 0.2 s after `head`, and with the read end closed first, 74 in all 50 for Python, JS,

@@ -9,7 +9,7 @@
 // source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
 // hash (SHA-256) to that value when the file is present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
 import { createHash, verify as edVerify, createPublicKey } from "node:crypto";
-import { statSync, lstatSync, realpathSync, openSync, readSync, closeSync, fstatSync, constants as FS } from "node:fs";
+import { statSync, lstatSync, realpathSync, openSync, readSync, closeSync, fstatSync, writeSync, constants as FS } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
@@ -454,22 +454,40 @@ function main(argv) {
   }
   if (!pack) return usage();
   const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key, requireSources });
-  writeReceipt(JSON.stringify(r, null, 1) + "\n");
+  if (!writeReceipt(JSON.stringify(r, null, 1) + "\n")) return EX_IOERR;
   return r.ok ? 0 : (r.assessed === false ? 77 : 1);   // 77 = NOT ASSESSED (the verifier could not judge), as the Python reference
 }
 
 // The exit code is set, never process.exit(): exit() right after console.log to a PIPE drops what is past 64 KiB of
-// the receipt (measured 2026-10-12 on this file at 6113d94: 65 536 of 201 020 bytes on `| cat`, a pack whose `kind` is
+// the receipt (measured 2026-10-12 on this file at 6113d94: 65 536 of 201 502 bytes on `| cat`, a pack whose `kind` is
 // 200 000 characters). And a failed write is never swallowed: console.log ignored ENOSPC and EPIPE (exit 0/1 with the
 // receipt lost). The stream reports a failed write with an 'error' event, emitted on a later tick, so after the
 // verdict's code is set below: the listener turns it into 74 (sysexits EX_IOERR) with one line on stderr.
 const EX_IOERR = 74;
+function receiptLost(err) {
+  process.exitCode = EX_IOERR;           // first: if stderr refuses the line too, the exit code alone says it
+  process.stderr.on("error", () => {});
+  process.stderr.write(`receipt not written: ${err.code || err.message}\n`);
+}
+// Returns false when the receipt is known lost already (regular file). Node's stream does ONE writeSync on a regular
+// file and drops the rest after a short write (measured 12/10/2026 with `ulimit -f 4`: 4 096 bytes of 201 502, the
+// verdict's exit code, nothing on stderr), so a regular file is written here, every byte, and EFBIG/ENOSPC is 74.
 function writeReceipt(text) {
-  process.stdout.on("error", (err) => {   // without a listener the same error would be an uncaught exception (exit 1)
-    process.exitCode = EX_IOERR;         // first: if stderr refuses the line too, the exit code alone says it
-    process.stderr.on("error", () => {});
-    process.stderr.write(`receipt not written: ${err.code || err.message}\n`);
-  });
+  let regular = false;
+  try { regular = fstatSync(1).isFile(); } catch { regular = false; }
+  if (regular) {
+    const buf = Buffer.from(text, "utf8");
+    try {
+      for (let off = 0; off < buf.length;) {
+        const n = writeSync(1, buf, off, buf.length - off);
+        if (n <= 0) throw new Error("short write");
+        off += n;
+      }
+      return true;
+    } catch (err) { receiptLost(err); return false; }
+  }
+  process.stdout.on("error", receiptLost);   // without a listener the same error would be an uncaught exception (exit 1)
   process.stdout.write(text);
+  return true;
 }
 if (process.argv[1] && /cra-verify\.mjs$/.test(process.argv[1])) process.exitCode = main(process.argv);

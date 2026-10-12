@@ -12,6 +12,11 @@ class OutputNotWritten(OSError):
     """an output file the command promises could not be written whole (the command's own refusals stay ValueError)"""
 
 
+class TipNotWritten(OutputNotWritten):
+    """the ledger line IS appended and synced, but the signed tip (`<ledger>.tip.json`) could not be replaced: the
+    record is in the chain and the tip still names the previous entry"""
+
+
 def _unlink_quietly(path: str) -> None:
     try:
         os.unlink(path)

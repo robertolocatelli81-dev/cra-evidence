@@ -3,7 +3,7 @@
 overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
 is FAIL (77 when it could not judge). Exit 74 when the JSON outcome could not be written whole to stdout (full disk,
 closed pipe, closed stdout) or a file it promises (`pack --out`, the `sign` sidecar, the `notice` drop file, the
-`keygen` seed) could not be written, whatever the outcome was, with a `receipt not written: <reason>` line on stderr;
+`keygen` seed, the ledger's signed tip) could not be written, whatever the outcome was, with a `receipt not written: <reason>` line on stderr;
 what a subcommand records in the ledger is recorded before its outcome is printed. Nothing is ever sent anywhere except the
 OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source cisa_kev|enisa_euvd` unless --assert-source)."""
 from __future__ import annotations

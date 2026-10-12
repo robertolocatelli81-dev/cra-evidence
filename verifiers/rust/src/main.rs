@@ -507,6 +507,15 @@ const EX_IOERR: i32 = 74;
 /// runtime ignores SIGPIPE, so a closed reader is an EPIPE error here, not a signal.
 fn write_receipt(text: &str, code: i32) -> i32 {
     use std::io::Write;
+    // SIGXFSZ: past a file size limit (`ulimit -f`) the kernel kills the process (exit 153, measured 12/10/2026) unless
+    // the signal is ignored; ignored, the write returns EFBIG and the receipt is 74 like any other failed write.
+    #[cfg(all(any(target_os = "linux", target_os = "macos"), not(any(target_arch = "mips", target_arch = "mips64", target_arch = "sparc64"))))]
+    {
+        extern "C" { fn signal(signum: i32, handler: usize) -> usize; }
+        const SIGXFSZ: i32 = 25;
+        const SIG_IGN: usize = 1;
+        unsafe { signal(SIGXFSZ, SIG_IGN); }
+    }
     let mut so = std::io::stdout().lock();
     match writeln!(so, "{text}").and_then(|_| so.flush()) {
         Ok(()) => code,
