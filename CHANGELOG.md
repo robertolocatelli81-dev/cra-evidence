@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.1 — 2026-10-12
+
+### A receipt that could not be written exits 74
+
+- Measured on 0.5.0 (2026-10-12, every subcommand that prints an outcome, valid and invalid input where the subcommand
+  has both, two runs each; `feeds` with its two fetch functions replaced, no network): with stdout on `/dev/full`, on
+  a pipe whose reader exits at once, or closed (`>&-`), the outcome was computed and lost. The Python CLI exited 120
+  (the interpreter's own flush at exit, "Exception ignored" on stderr) on the full disk and the closed pipe, and with
+  the outcome's own code (0 or 1) and nothing on stderr with stdout closed. The JS verifier exited 0 or 1 with
+  nothing on stderr on the full disk and the closed pipe; the Go verifier the same on the full disk and 141 (SIGPIPE)
+  on the closed pipe; the Rust verifier 101 with nothing on stderr (`println!` panicked, the panic hook kept the
+  message) on both. None of 120, 101, 141 is an exit code this package documents.
+- Now: `cra` (every subcommand) and the JS, Go and Rust verifiers exit 74 (sysexits `EX_IOERR`) when the receipt was
+  not written whole, whatever the outcome, with a `receipt not written: <reason>` line on stderr (still 74 when stderr
+  is closed too). Python writes and flushes the receipt itself before choosing the exit code; JS listens for the
+  stream's `error` event; Go checks the write's error with SIGPIPE ignored; Rust uses `writeln!` and `flush` with their
+  `Result`. 0, 1, 2 and 77 are unchanged when the receipt is written (receipts byte-identical to 0.5.0's where their
+  content does not depend on the clock, a random id or a key). Ledger records are appended before the outcome is
+  printed: after a 74 from `sbom`, `vuln`, `notice`, `pack` or `seal` the record is in the ledger. Started with stdout
+  closed, Node, Go and Rust reopen it on `/dev/null` before the verifier runs, which the verifier cannot tell from
+  `>/dev/null`; the Python CLI exits 74 there.
+- The JS verifier set `process.exitCode` instead of calling `process.exit()` right after `console.log` (local commit
+  of the same day, made as a precaution after the same defect in ap2-evidence-pack's JS verifier, where it was
+  described as not reproduced here). Measured afterwards, it was reproducible: on 0.5.0 a 201 020-byte receipt (a pack
+  whose `kind` is 200 000 characters) reached a pipe as 65 536 bytes, exit 1, nothing on stderr; it now arrives whole,
+  as it already did from the Python CLI and the Go and Rust verifiers.
+- `tests/test_receipt_not_written_20261012.py` runs every case as a real process (stdout to a file, to `/dev/full`, to
+  a pipe whose reader is already gone, closed, and a receipt above 64 KiB through a slow pipe); Go and Rust run when
+  `CRA_VERIFY_GO` / `CRA_VERIFY_RUST` name a built binary, as in the CI verifiers job. On 0.5.0 it fails 12 of its 13
+  tests, the JS verifier on the slow pipe included (the one that passes is the Python slow-pipe test, a guard against a
+  regression).
+
 ## 0.5.0 — 2026-10-11
 
 - `cra notice --previous` and `cra seal --renew` read their JSON through an `open()` they did not close; both now

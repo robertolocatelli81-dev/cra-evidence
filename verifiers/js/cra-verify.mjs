@@ -454,10 +454,22 @@ function main(argv) {
   }
   if (!pack) return usage();
   const r = verifyPack(pack, { ledgerPath: ledger, trustStore: trust, logPubkeyHex: key, requireSources });
-  console.log(JSON.stringify(r, null, 1));
+  writeReceipt(JSON.stringify(r, null, 1) + "\n");
   return r.ok ? 0 : (r.assessed === false ? 77 : 1);   // 77 = NOT ASSESSED (the verifier could not judge), as the Python reference
 }
-// exitCode, not process.exit(): exit() right after console.log to a PIPE drops what is past 64 KiB of the receipt (measured
-// 2026-10-12 in ap2-evidence-pack's JS verifier: 65 536 of 100 477 bytes on `| cat`). Not reproduced here (the receipts stayed
-// far below 64 KiB in every attempt); the change is preventive.
+
+// The exit code is set, never process.exit(): exit() right after console.log to a PIPE drops what is past 64 KiB of
+// the receipt (measured 2026-10-12 on this file at 6113d94: 65 536 of 201 020 bytes on `| cat`, a pack whose `kind` is
+// 200 000 characters). And a failed write is never swallowed: console.log ignored ENOSPC and EPIPE (exit 0/1 with the
+// receipt lost). The stream reports a failed write with an 'error' event, emitted on a later tick, so after the
+// verdict's code is set below: the listener turns it into 74 (sysexits EX_IOERR) with one line on stderr.
+const EX_IOERR = 74;
+function writeReceipt(text) {
+  process.stdout.on("error", (err) => {   // without a listener the same error would be an uncaught exception (exit 1)
+    process.exitCode = EX_IOERR;         // first: if stderr refuses the line too, the exit code alone says it
+    process.stderr.on("error", () => {});
+    process.stderr.write(`receipt not written: ${err.code || err.message}\n`);
+  });
+  process.stdout.write(text);
+}
 if (process.argv[1] && /cra-verify\.mjs$/.test(process.argv[1])) process.exitCode = main(process.argv);

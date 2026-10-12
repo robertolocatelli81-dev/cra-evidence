@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -802,12 +803,26 @@ func main() {
 	}
 	r := verifyPack(pack, ledger, trust, haveTrust, key, requireSources)
 	out, _ := json.MarshalIndent(r, "", " ")
-	fmt.Println(string(out))
+	code := 1
 	if r.Ok {
-		return
+		code = 0
+	} else if !r.Assessed {
+		code = 77 // NOT ASSESSED: the verifier itself failed (verifier-exception), as the Python reference
 	}
-	if !r.Assessed {
-		os.Exit(77) // NOT ASSESSED: the verifier itself failed (verifier-exception), as the Python reference
+	os.Exit(writeReceipt(append(out, '\n'), code))
+}
+
+// exIOErr (sysexits EX_IOERR): the verdict was computed but the receipt could not be written whole.
+const exIOErr = 74
+
+// writeReceipt writes the receipt and returns the exit code: the verdict's, or 74 when stdout refused the bytes
+// (ENOSPC, EPIPE, EBADF). fmt.Println's error was discarded before (exit 0/1 with the receipt lost on /dev/full), and
+// on a closed pipe the runtime killed the process with SIGPIPE (141); with SIGPIPE ignored the write returns EPIPE.
+func writeReceipt(b []byte, code int) int {
+	signal.Ignore(syscall.SIGPIPE)
+	if _, err := os.Stdout.Write(b); err != nil {
+		fmt.Fprintln(os.Stderr, "receipt not written: "+err.Error()) // its own error is not checked: the exit code says it
+		return exIOErr
 	}
-	os.Exit(1)
+	return code
 }

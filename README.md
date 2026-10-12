@@ -69,6 +69,17 @@ against the pack, 77 not assessed, 2 unusable input or arguments. Until 0.3.2 a 
 same as a bad pack. 77 is the value omega-evidence already uses for the same case (`omega_evidence/verifier.py`); it is
 not meant in its sysexits sense.
 
+Since 0.5.1 (12/10/2026), every `cra` subcommand and the three other verifiers exit 74 (sysexits `EX_IOERR`) when the
+JSON outcome they computed could not be written whole to stdout — a full disk, a reader that closed the pipe, a closed
+stdout — whatever the outcome was, with a `receipt not written: <reason>` line on stderr. 0, 1, 2 and 77 are unchanged
+when the receipt is written. What `sbom`, `vuln`, `notice`, `pack` and `seal` record in the ledger is recorded before the
+outcome is printed, so after a 74 the record is there and only the printed outcome is lost. Measured on 0.5.0: the
+same runs exited with the outcome's code and nothing on stderr (Python with stdout closed, the JS verifier on a full
+disk or a closed pipe, Go on a full disk), or with 120 (Python), 101 (Rust) or 141 (Go, SIGPIPE), codes that meant
+nothing here; the JS verifier also cut a receipt above 64 KiB at 65 536 bytes on a pipe. One case no program can see:
+started with stdout closed (`>&-`), Node, Go and Rust reopen it on `/dev/null` before the verifier runs, so for them
+that run is the same as `>/dev/null` (the verdict's code, no receipt); the Python CLI sees it and exits 74.
+
 Every file a verifier reads must be a regular file — decided on the opened descriptor, without blocking on a FIFO — of
 at most 64 MiB (67108864 bytes) for a JSON document (pack, sidecar, tip, trust store, one ledger line) and 256 MiB for a
 stored generator document; anything else is refused unread, with the outcome of an unreadable file in that position.

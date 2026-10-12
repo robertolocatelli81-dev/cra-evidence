@@ -495,6 +495,24 @@ fn main() {
     let mut m = BTreeMap::new();
     m.insert("ok".into(), Json::Bool(out.ok)); m.insert("assessed".into(), Json::Bool(out.assessed)); m.insert("authenticity".into(), Json::Str(out.auth.clone())); m.insert("anchored".into(), Json::Bool(out.anchored));
     m.insert("layers".into(), Json::Array(layers)); m.insert("pack_sha3".into(), out.pack_sha3.map(Json::Str).unwrap_or(Json::Null));
-    println!("{}", canonical(&Json::Object(m)));
-    std::process::exit(if out.ok { 0 } else if !out.assessed { 77 } else { 1 });   // 77 = NOT ASSESSED, as the Python reference
+    let code = if out.ok { 0 } else if !out.assessed { 77 } else { 1 };   // 77 = NOT ASSESSED, as the Python reference
+    std::process::exit(write_receipt(&canonical(&Json::Object(m)), code));
+}
+
+/// sysexits EX_IOERR: the verdict was computed but the receipt could not be written whole.
+const EX_IOERR: i32 = 74;
+
+/// Writes the receipt and returns the exit code: the verdict's, or 74 when stdout refused the bytes (ENOSPC, EPIPE,
+/// EBADF). `println!` panicked there instead (exit 101, its message swallowed by the panic hook above). The Rust
+/// runtime ignores SIGPIPE, so a closed reader is an EPIPE error here, not a signal.
+fn write_receipt(text: &str, code: i32) -> i32 {
+    use std::io::Write;
+    let mut so = std::io::stdout().lock();
+    match writeln!(so, "{text}").and_then(|_| so.flush()) {
+        Ok(()) => code,
+        Err(e) => {
+            let _ = writeln!(std::io::stderr(), "receipt not written: {e}");   // never eprintln!: it would panic if stderr is gone too
+            EX_IOERR
+        }
+    }
 }

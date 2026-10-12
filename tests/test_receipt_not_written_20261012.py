@@ -1,0 +1,300 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""12/10/2026: a receipt that could not be written is exit 74, never the verdict's code.
+
+Measured on 0.5.0 (6113d94): every `cra` subcommand and the four verifiers computed their outcome, failed to write it to
+stdout and exited either with the outcome's code — 0 or 1 with nothing on stderr (Python with stdout closed; JS on
+/dev/full and on a closed pipe; Go on /dev/full) — or with 120 (Python's own flush at exit, "Exception ignored"), 101 (Rust, `println!`
+panicking) and 141 (Go killed by SIGPIPE), none of them in the documented exit codes. The JS verifier also cut a
+receipt at 65 536 bytes on a pipe (process.exit() right after console.log).
+
+Real processes only (no mocked write): each command runs under bash with stdout to a file (the control: the verdict's
+code and the receipt), to /dev/full (ENOSPC), to a pipe whose read end is closed before it starts (EPIPE) and
+closed (`>&-`, Python only: Node, Go and Rust reopen fd 1 on /dev/null before the program runs, so
+for them that case cannot be told from `>/dev/null`). In every losing case: exit 74 and a `receipt not written:` line
+on stderr. A receipt above 64 KiB must arrive whole through a slow pipe. Go and Rust run when CRA_VERIFY_GO /
+CRA_VERIFY_RUST name a built binary (the CI verifiers job), Node when `node` is on PATH."""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXAMPLE = os.path.join(ROOT, "examples", "self_evidence")
+SYFT = os.path.join(ROOT, "tests", "fixtures", "real_tools", "syft-1.52.0_cyclonedx-1.7.json")
+PY = [sys.executable, "-m", "cra_evidence.cli"]
+CAN_RUN = os.name == "posix" and os.path.exists("/dev/full") and shutil.which("bash") is not None
+HAVE_SIGN = True
+try:
+    import cryptography  # noqa: F401
+except ImportError:
+    HAVE_SIGN = False
+
+MODES = {
+    "file": '{cmd} >"$W/.out" 2>"$W/.err"; echo $? >"$W/.rc"',
+    "devfull": '{cmd} >/dev/full 2>"$W/.err"; echo $? >"$W/.rc"',
+    # stdout is a pipe whose read end is closed BEFORE the command starts (see run()): every write is EPIPE. A reader
+    # that exits on its own (`| head -c 0`) races the writer: a small receipt can land in the pipe buffer first, and
+    # then the write did succeed (measured on 12/10/2026: the Rust verifier exited 1 once that way).
+    "pipe_closed": '{cmd} 2>"$W/.err"; echo $? >"$W/.rc"',
+    "closed": '{cmd} >&- 2>"$W/.err"; echo $? >"$W/.rc"',
+    "devfull_noerr": '{cmd} >/dev/full 2>&-; echo $? >"$W/.rc"',                 # stderr closed too: still 74, no traceback
+    "slow": '{cmd} 2>"$W/.err" | (sleep 0.5; cat >"$W/.out"); echo ${{PIPESTATUS[0]}} >"$W/.rc"',
+}
+
+# feeds without network: only the two fetch functions are replaced (canned answers / an OSError), the rest is the real code
+FEEDS_OFFLINE = r"""
+import sys
+from cra_evidence import feeds
+mode = sys.argv[1]
+def post(url, body, timeout):
+    if mode == "down": raise OSError("no network (test)")
+    return {"results": [{"vulns": [{"id": "GHSA-test", "aliases": ["CVE-2020-0001"]}]} for _ in body["queries"]]}
+def get(url, timeout):
+    if mode == "down": raise OSError("no network (test)")
+    if url == feeds.KEV_URL: return {"vulnerabilities": [{"cveID": "CVE-2021-44228"}]}
+    return [{"id": "EUVD-test", "aliases": "CVE-2021-44228"}]
+feeds._post_json, feeds._get_json = post, get
+from cra_evidence.cli import main
+sys.exit(main(["feeds", "CVE-2021-44228"]))
+"""
+
+
+def q(args):
+    return " ".join("'" + a.replace("'", "'\\''") + "'" for a in args)
+
+
+def read(path, mode="rb"):
+    with open(path, mode) as f:
+        return f.read()
+
+
+def write_big(d):
+    """the pack's `kind` made 200 000 characters long: the receipt (pack-kind FAIL echoes it) is above 64 KiB"""
+    p = os.path.join(d, "cra_pack.json")
+    with open(p, encoding="utf-8") as f:
+        pack = json.load(f)
+    pack["kind"] = "x" * 200000
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(pack, f)
+    return p
+
+
+def run(cmd, mode, W, cwd=ROOT):
+    env = dict(os.environ, W=W)
+    env.pop("PYTHONPATH", None)
+    for f in (".out", ".err", ".rc"):
+        try:
+            os.unlink(os.path.join(W, f))
+        except FileNotFoundError:
+            pass
+    script = ["bash", "-c", "cd " + q([cwd]) + " && " + MODES[mode].format(cmd=cmd)]
+    if mode == "pipe_closed":
+        r, w = os.pipe()
+        os.close(r)
+        try:
+            subprocess.run(script, env=env, timeout=120, check=True, stdout=w)
+        finally:
+            os.close(w)
+    else:
+        subprocess.run(script, env=env, timeout=120, check=True)
+    rc = int(read(os.path.join(W, ".rc"), "r").strip())
+    err = read(os.path.join(W, ".err")).decode("utf-8", "replace") if os.path.exists(os.path.join(W, ".err")) else ""
+    out = read(os.path.join(W, ".out")) if os.path.exists(os.path.join(W, ".out")) else None
+    return rc, err, out
+
+
+def altered_example(W, name="se_bad"):
+    d = os.path.join(W, name)
+    shutil.copytree(EXAMPLE, d)
+    p = os.path.join(d, "cra_pack.json")
+    with open(p, encoding="utf-8") as f:
+        pack = json.load(f)
+    pack["product_id"] = "ALTERED"
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(pack, f, indent=1)
+    return d
+
+
+@unittest.skipUnless(CAN_RUN, "needs bash and /dev/full (POSIX)")
+class ReceiptNotWritten(unittest.TestCase):
+    def setUp(self):
+        self.W = tempfile.mkdtemp(prefix="cra_receipt_")
+        self.addCleanup(shutil.rmtree, self.W, True)
+
+    def check(self, label, cmd, verdict, setup=None, modes=("devfull", "pipe_closed", "closed")):
+        """file mode: the verdict's code and a receipt; every losing mode: 74 + one stderr line, whatever the verdict"""
+        if setup:
+            setup()
+        rc, err, out = run(cmd, "file", self.W)
+        self.assertEqual(rc, verdict, f"{label} file: {err}")
+        self.assertTrue(out, f"{label}: no receipt in the control")
+        self.assertNotIn("receipt not written", err)
+        for mode in modes:
+            if setup:
+                setup()
+            rc, err, _ = run(cmd, mode, self.W)
+            self.assertEqual(rc, 74, f"{label} {mode}: exit {rc}, stderr {err!r}")
+            self.assertIn("receipt not written: ", err, f"{label} {mode}")
+            self.assertNotIn("Traceback", err, f"{label} {mode}")
+            self.assertNotIn("Exception ignored", err, f"{label} {mode}")
+        if setup:
+            setup()
+        rc, _, _ = run(cmd, "devfull_noerr", self.W)
+        self.assertEqual(rc, 74, f"{label}: stdout full AND stderr closed must still exit 74")
+
+    # ---- the reference CLI: every subcommand that prints an outcome ----
+    def py(self, *args):
+        return q(PY + list(args))
+
+    @staticmethod
+    def recent():   # awareness a minute ago: no deadline can be overdue during the test (the first one is 24 h away)
+        return (datetime.now(timezone.utc) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def ledger_args(self):
+        return ["--ledger", os.path.join(self.W, "l.jsonl"), "--product", "p", "--version", "1"]
+
+    def fresh_ledger(self):
+        for f in os.listdir(self.W):
+            if f.startswith("l.jsonl") or f in ("p.json", "drop"):
+                p = os.path.join(self.W, f)
+                shutil.rmtree(p) if os.path.isdir(p) else os.unlink(p)
+
+    @unittest.skipUnless(HAVE_SIGN, "the example pack is signed: verifying it needs cryptography")
+    def test_verify_valid_and_invalid(self):
+        good = os.path.join(self.W, "se")
+        shutil.copytree(EXAMPLE, good)
+        bad = altered_example(self.W)
+        self.check("verify ok", self.py("verify", os.path.join(good, "cra_pack.json"), "--trust-store", os.path.join(good, "trust.json")), 0)
+        self.check("verify bad", self.py("verify", os.path.join(bad, "cra_pack.json"), "--trust-store", os.path.join(bad, "trust.json")), 1)
+
+    def test_verify_not_assessed(self):
+        bad = altered_example(self.W, "se_na")
+        env_cmd = "CRA_VERIFY_INJECT_FAULT=1 " + self.py("verify", os.path.join(bad, "cra_pack.json"))
+        self.check("verify 77", env_cmd, 77)
+
+    def test_sbom_valid_and_invalid(self):
+        self.check("sbom ok", self.py("sbom", *self.ledger_args(), "--from-cyclonedx", SYFT, "--no-store-source"), 0, setup=self.fresh_ledger)
+        self.check("sbom bad", self.py("sbom", *self.ledger_args(), "--installed", "nonexistentpkgxyz"), 1, setup=self.fresh_ledger)
+
+    def test_sbom_record_kept_when_receipt_lost(self):
+        """the record is appended before the receipt is printed: a lost receipt (74) leaves it in the ledger"""
+        rc, _, _ = run(self.py("sbom", *self.ledger_args(), "--from-cyclonedx", SYFT, "--no-store-source"), "devfull", self.W)
+        self.assertEqual(rc, 74)
+        lines = read(os.path.join(self.W, "l.jsonl"), "r").splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0])["data"]["kind"], "cra_sbom")
+
+    def test_vuln_valid_and_invalid(self):
+        self.check("vuln ok", self.py("vuln", *self.ledger_args(), "--id", "CVE-2026-0001", "--aware", self.recent()), 0, setup=self.fresh_ledger)
+        self.check("vuln bad", self.py("vuln", *self.ledger_args(), "--id", "CVE-2026-0002", "--aware", "2026-01-01T00:00:00Z", "--exploited"), 1, setup=self.fresh_ledger)
+
+    def test_notice_valid_and_invalid(self):
+        ok_fields = {"awareness_datetime_utc": "2026-09-15T08:00:00Z", "manufacturer_name": "example manufacturer",
+                     "member_states_available": ["IT"], "notification_type": "Vulnerability", "product_name": "cra-evidence",
+                     "product_version": "0.4.0", "summary": "illustrative payload; never submitted", "title": "example (not a real report)"}
+        bad_fields = {k: v for k, v in ok_fields.items() if k != "title"}   # a required field missing: exit 1
+        ok, bad = os.path.join(self.W, "ok.json"), os.path.join(self.W, "bad.json")
+        for path, fields in ((ok, ok_fields), (bad, bad_fields)):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(fields, f)
+        drop = os.path.join(self.W, "drop")
+        self.check("notice ok", self.py("notice", *self.ledger_args(), "--stage", "early_warning", "--fields", ok, "--drop", drop), 0, setup=self.fresh_ledger)
+        self.check("notice bad", self.py("notice", *self.ledger_args(), "--stage", "early_warning", "--fields", bad, "--drop", drop), 1, setup=self.fresh_ledger)
+
+    def _ledger_with_event(self):
+        self.fresh_ledger()
+        subprocess.run(PY + ["vuln", *self.ledger_args(), "--id", "CVE-2026-0001", "--aware", self.recent()], cwd=ROOT, check=True, capture_output=True)
+
+    def test_pack(self):
+        self.check("pack", self.py("pack", *self.ledger_args(), "--out", os.path.join(self.W, "p.json")), 0, setup=self._ledger_with_event)
+
+    @unittest.skipUnless(HAVE_SIGN, "seal, keygen and sign need cryptography")
+    def test_seal_keygen_sign(self):
+        def sealed():
+            self._ledger_with_event()
+            subprocess.run(PY + ["pack", *self.ledger_args(), "--out", os.path.join(self.W, "p.json")], cwd=ROOT, check=True, capture_output=True)
+            sha3 = json.loads(read(os.path.join(self.W, "p.json"), "r"))["pack_sha3"]
+            with open(os.path.join(self.W, "sha3"), "w") as f:
+                f.write(sha3)
+        self.check("seal", "%s --pack-sha3 \"$(cat \"$W/sha3\")\"" % self.py("seal", *self.ledger_args()), 0, setup=sealed)
+        key = os.path.join(self.W, "k.seed")
+        rmkey = lambda: os.path.exists(key) and os.unlink(key)
+        self.check("keygen", self.py("keygen", key), 0, setup=rmkey)
+        se = os.path.join(self.W, "se_sign")
+        shutil.copytree(EXAMPLE, se)
+        self.check("sign", self.py("sign", os.path.join(se, "cra_pack.json"), "--key", key, "--signer-id", "me"), 0)
+
+    def test_schema(self):
+        self.check("schema", self.py("schema", "--template", "early_warning"), 0)
+        self.check("schema full", self.py("schema"), 0)
+
+    def test_feeds_offline(self):
+        self.check("feeds ok", q([sys.executable, "-c", FEEDS_OFFLINE, "up"]), 0)
+        self.check("feeds down", q([sys.executable, "-c", FEEDS_OFFLINE, "down"]), 1)
+
+    def test_python_large_receipt_slow_pipe(self):
+        """a receipt far above the 64 KiB pipe buffer arrives whole through a slow reader, with the verdict's code"""
+        cmd = self.py("verify", write_big(altered_example(self.W, "se_big")))
+        rc0, _, ref = run(cmd, "file", self.W)
+        self.assertGreater(len(ref), 200000)
+        rc, err, got = run(cmd, "slow", self.W)
+        self.assertEqual((rc, got), (rc0, ref), err)
+
+
+@unittest.skipUnless(CAN_RUN, "needs bash and /dev/full (POSIX)")
+class VerifiersReceiptNotWritten(unittest.TestCase):
+    """the JS, Go and Rust verifiers: same rule; `>&-` is not tested (their runtime reopens fd 1 on /dev/null)"""
+
+    def setUp(self):
+        self.W = tempfile.mkdtemp(prefix="cra_receipt_v_")
+        self.addCleanup(shutil.rmtree, self.W, True)
+        self.good = os.path.join(self.W, "se")
+        shutil.copytree(EXAMPLE, self.good)
+        self.bad = altered_example(self.W)
+        self.big = write_big(altered_example(self.W, "se_big"))
+
+    def verifiers(self):
+        vs = {}
+        if shutil.which("node"):
+            vs["js"] = ["node", os.environ.get("CRA_VERIFY_JS") or os.path.join(ROOT, "verifiers", "js", "cra-verify.mjs")]
+        if os.environ.get("CRA_VERIFY_GO"):
+            vs["go"] = [os.environ["CRA_VERIFY_GO"]]
+        if os.environ.get("CRA_VERIFY_RUST"):
+            vs["rust"] = [os.environ["CRA_VERIFY_RUST"]]
+        if not vs:
+            self.skipTest("no verifier available (node not on PATH, CRA_VERIFY_GO / CRA_VERIFY_RUST unset)")
+        return vs
+
+    def test_each_verifier(self):
+        for name, base in self.verifiers().items():
+            with self.subTest(verifier=name):
+                for label, d, verdict in (("valid", self.good, 0), ("invalid", self.bad, 1)):
+                    cmd = q(base + [os.path.join(d, "cra_pack.json"), "--trust-store", os.path.join(d, "trust.json")])
+                    rc, err, out = run(cmd, "file", self.W)
+                    self.assertEqual(rc, verdict, f"{name} {label} file: {err}")
+                    self.assertTrue(out)
+                    for mode in ("devfull", "pipe_closed", "devfull_noerr"):
+                        rc, err, _ = run(cmd, mode, self.W)
+                        self.assertEqual(rc, 74, f"{name} {label} {mode}: exit {rc}, stderr {err!r}")
+                        if mode != "devfull_noerr":
+                            self.assertIn("receipt not written: ", err, f"{name} {label} {mode}")
+
+    def test_large_receipt_slow_pipe(self):
+        """on 0.5.0 the JS verifier passed 65 536 of 201 502 bytes here (process.exit() right after console.log)"""
+        for name, base in self.verifiers().items():
+            with self.subTest(verifier=name):
+                cmd = q(base + [self.big])
+                rc0, _, ref = run(cmd, "file", self.W)
+                self.assertGreater(len(ref), 200000)
+                rc, err, got = run(cmd, "slow", self.W)
+                self.assertEqual(rc, rc0, f"{name} slow pipe: {err}")
+                self.assertEqual(len(got), len(ref), f"{name}: receipt cut on a slow pipe")
+                self.assertEqual(got, ref)
+
+
+if __name__ == "__main__":
+    unittest.main()

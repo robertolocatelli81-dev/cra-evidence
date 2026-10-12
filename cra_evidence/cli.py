@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
 overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
-is FAIL. Nothing is ever sent anywhere except the OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source
-cisa_kev|enisa_euvd` unless --assert-source)."""
+is FAIL (77 when it could not judge). Exit 74 when the JSON outcome could not be written whole to stdout (full disk,
+closed pipe, closed stdout), whatever the outcome was, with a `receipt not written: <reason>` line on stderr; what a
+subcommand records in the ledger is recorded before its outcome is printed. Nothing is ever sent anywhere except the
+OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source cisa_kev|enisa_euvd` unless --assert-source)."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from typing import Any, Dict, List
@@ -22,8 +25,54 @@ from .longterm import LongTermEvidence
 from datetime import datetime, timezone
 
 
+EX_IOERR = 74   # sysexits: the outcome was computed but its receipt could not be written
+
+
+class ReceiptNotWritten(Exception):
+    """stdout refused the receipt (ENOSPC, EPIPE, EBADF, a closed or absent stdout): the exit code becomes 74"""
+
+
 def _p(obj: Any) -> None:
-    print(json.dumps(obj, indent=1, ensure_ascii=False, sort_keys=True, default=str))
+    out = sys.stdout
+    if out is None:   # started with fd 1 closed: print() would drop the receipt and say nothing
+        raise ReceiptNotWritten("stdout is closed")
+    try:
+        out.write(json.dumps(obj, indent=1, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+        out.flush()   # flushed HERE, before the exit code is chosen: the interpreter's flush at exit would come too late
+    except (OSError, ValueError) as e:   # ValueError: a closed file object, or an encoding stdout cannot represent
+        raise ReceiptNotWritten(str(e) or type(e).__name__) from None
+
+
+def _silence(stream: Any, fd: int) -> None:
+    """point fd at /dev/null so the interpreter's own flush at exit does not fail again on what is still buffered
+    (it would print "Exception ignored" and exit 120 instead of 74). Only when the stream really is that fd: with fd 1
+    closed at start, a file this run opened may hold descriptor 1 and must not be touched."""
+    try:
+        if stream is None or stream.fileno() != fd:
+            return
+    except (OSError, ValueError, AttributeError):
+        return
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null, fd)
+        finally:
+            os.close(null)
+    except OSError:
+        pass
+
+
+def _receipt_lost(reason: str) -> int:
+    _silence(sys.stdout, 1)
+    err = sys.stderr
+    try:
+        if err is None:
+            raise OSError("stderr is closed")
+        err.write(f"receipt not written: {reason}\n")
+        err.flush()
+    except (OSError, ValueError):
+        _silence(err, 2)   # stderr refused too: the exit code alone says it
+    return EX_IOERR
 
 
 def _load_json(path: str) -> Any:
@@ -37,6 +86,13 @@ def _locker(a) -> CRAEvidenceLocker:
 
 
 def main(argv: List[str] = None) -> int:
+    try:
+        return _main(argv)
+    except ReceiptNotWritten as e:
+        return _receipt_lost(str(e))
+
+
+def _main(argv: List[str] = None) -> int:
     p = argparse.ArgumentParser(prog="cra", description="CRA evidence locker (SBOM, Art. 14 clock, SRP notices, 10-year seal) — offline-verifiable",
                                 allow_abbrev=False)   # `--require-source` is not `--require-sources`: the three independent verifiers refuse it, so does the reference
     p.add_argument("--version", action="version", version=f"cra-evidence {__version__}")
