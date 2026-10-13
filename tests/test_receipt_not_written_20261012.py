@@ -81,6 +81,12 @@ def read(path, mode="rb"):
         return f.read()
 
 
+def tmps(path):
+    """temporaries left next to `path`: `<path>.tmp` (until 13/10) or `<path>.<16 hex>.tmp`"""
+    d, base = os.path.split(path)
+    return [n for n in os.listdir(d) if n.startswith(base + ".") and n.endswith(".tmp")]
+
+
 def write_big(d):
     """the pack's `kind` made 200 000 characters long: the receipt (pack-kind FAIL echoes it) is above 64 KiB"""
     p = os.path.join(d, "cra_pack.json")
@@ -287,11 +293,9 @@ class OutputFileNotWritten(unittest.TestCase):
         self.lost("pack", *self.args, "--out", os.path.join(self.W, "notadir", "p.json"))
         os.mkdir(os.path.join(self.W, "adir"))
         self.lost("pack", *self.args, "--out", os.path.join(self.W, "adir"))
-        self.assertFalse(os.path.exists(os.path.join(self.W, "adir.tmp")))
-        os.symlink("/dev/full", os.path.join(self.W, "q.json.tmp"))   # the bytes themselves cannot be written (ENOSPC)
-        self.lost("pack", *self.args, "--out", os.path.join(self.W, "q.json"))
-        self.assertFalse(os.path.lexists(os.path.join(self.W, "q.json.tmp")), "a half-written pack was left behind")
-        self.assertFalse(os.path.exists(os.path.join(self.W, "q.json")))
+        self.assertEqual(tmps(os.path.join(self.W, "adir")), [])
+        # the pack's own bytes refused (a full disk) is in test_receipt_design_20261013.py (`ulimit -f`): since 13/10 the
+        # temporary has an unpredictable name, so a symlink to /dev/full planted at `q.json.tmp` is no longer followed
         r = subprocess.run(PY + ["pack", *self.args, "--out", os.path.join(self.W, "ok.json")], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)   # control: the same ledger still packs, and the anchor is appended
         self.assertEqual(len(self.lines()), 2)
@@ -313,7 +317,7 @@ class OutputFileNotWritten(unittest.TestCase):
         os.unlink(side)
         os.mkdir(side)   # the sidecar's path is taken by a directory
         self.lost("sign", os.path.join(se, "cra_pack.json"), "--key", key, "--signer-id", "me")
-        self.assertFalse(os.path.exists(side + ".tmp"))
+        self.assertEqual(tmps(side), [])
 
 
 @unittest.skipUnless(CAN_RUN, "needs bash and /dev/full (POSIX)")
@@ -399,7 +403,7 @@ class LedgerNeverHalfWritten(unittest.TestCase):
         before = read(self.ledger)
         self.assertLess(len(before), 2048)
         rc, err, _ = run("(ulimit -f 2; %s)" % self.py("sbom", *self.args, "--from-cyclonedx", SYFT, "--no-store-source"), "file", self.W)
-        self.assertNotEqual(rc, 0, err)
+        self.assertEqual(rc, 74, err)   # nothing recorded: 74 since 13/10 (exit 1 with a traceback before)
         self.assertEqual(read(self.ledger), before, "half a record was left in the hash-chained ledger")
         subprocess.run(PY + ["vuln", *self.args, "--id", "CVE-2026-0002", "--aware", self.aware], cwd=ROOT, check=True, capture_output=True)
         sys.path.insert(0, ROOT)
@@ -424,8 +428,8 @@ class LedgerNeverHalfWritten(unittest.TestCase):
         self.assertEqual(last["kind"], "cra_pack_anchor")
         with open(out, encoding="utf-8") as f:   # 0.5.1 deleted the pack its anchor names
             self.assertEqual(json.load(f)["pack_sha3"], last["anchored_pack_sha3"])
-        self.assertFalse(os.path.lexists(out + ".tmp"))
-        self.assertFalse(os.path.lexists(tip + ".tmp"))
+        self.assertEqual(tmps(out), [])
+        self.assertEqual(tmps(tip), [])
         r = subprocess.run(PY + ["vuln", *a, "--id", "CVE-2026-0002", "--aware", self.aware], cwd=ROOT, capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 74, r.stderr)
         self.assertEqual(json.loads(read(self.ledger, "r").splitlines()[-1])["data"]["kind"], "cra_vuln")
