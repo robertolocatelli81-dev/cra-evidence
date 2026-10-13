@@ -120,19 +120,8 @@ def write_tip(out: str, key: Tuple[Any, str], entries: int, ledger_id: str, tip_
     ts = ts or datetime.now(timezone.utc).isoformat(timespec="seconds")
     tip = {"kind": TIP_KIND, "entries": entries, "ledger_id": ledger_id, "tip_sha256": tip_sha256, "ts": ts,
            "log_pubkey_hex": pk, "signature_hex": sk.sign(tip_payload(entries, ledger_id, tip_sha256, ts)).hex()}
-    tmp = out + ".tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(tip, f, separators=(",", ":"), sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, out)
-    except OSError:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    from .outputs import commit_tmp, write_tmp
+    commit_tmp(write_tmp(out, json.dumps(tip, separators=(",", ":"), sort_keys=True)), out)   # OutputNotWritten (an OSError)
     return tip
 
 

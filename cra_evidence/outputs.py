@@ -2,10 +2,14 @@
 """Files a command promises to write (the pack of `cra pack --out`, the sidecar of `cra sign`, the drop file of
 `cra notice`, the seed file of `cra keygen`). A file that cannot be written whole raises OutputNotWritten; the CLI
 turns it into exit 74 with a `receipt not written: <reason>` line, like a receipt stdout refused (12/10/2026). Nothing
-is left half-written: the bytes go to `<path>.tmp` first and are renamed over the path only once complete."""
+is left half-written: the bytes go to a temporary file of a name nobody can predict, created with O_EXCL in the same
+folder (`<path>.<16 hex>.tmp`: a symlink or FIFO planted at a predictable `<path>.tmp` was followed or blocked the run
+until 0.5.1), written in a loop that checks the count, fsynced and closed, and renamed over the path only once
+complete."""
 from __future__ import annotations
 
 import os
+import secrets
 
 
 class OutputNotWritten(OSError):
@@ -24,13 +28,27 @@ def _unlink_quietly(path: str) -> None:
         pass
 
 
-def write_tmp(path: str, text: str) -> str:
-    """write `text` to `<path>.tmp` and return that name; on failure remove it and raise OutputNotWritten"""
-    tmp = str(path) + ".tmp"
+def write_tmp(path: str, text) -> str:
+    """write `text` (str as UTF-8, or bytes) to a new temporary file next to `path` and return its name; on failure remove it and raise
+    OutputNotWritten. The name is `<path>.<16 random hex>.tmp`, created with O_CREAT|O_EXCL (never an existing file, a
+    symlink or a FIFO); the mode is 0666 less the umask, as `open(path, "w")` gives."""
+    data = memoryview(text if isinstance(text, bytes) else text.encode("utf-8"))
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    tmp = f"{path}.{secrets.token_hex(8)}.tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
+        fd = os.open(tmp, flags, 0o666)
+    except OSError as e:
+        raise OutputNotWritten(f"{path}: {e.strerror or e}") from None
+    try:
+        try:
+            while data:
+                n = os.write(fd, data)
+                if n <= 0:
+                    raise OSError(f"short write: {len(data)} bytes not written")
+                data = data[n:]
+            os.fsync(fd)
+        finally:
+            os.close(fd)   # inside the try: a deferred error (NFS, a full disk at close) is a failed write too
     except OSError as e:
         _unlink_quietly(tmp)
         raise OutputNotWritten(f"{path}: {e.strerror or e}") from None

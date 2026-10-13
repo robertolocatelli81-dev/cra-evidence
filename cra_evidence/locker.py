@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .outputs import OutputNotWritten, TipNotWritten, refuse_directory, write_tmp
+from .outputs import OutputNotWritten, TipNotWritten, commit_tmp, refuse_directory, write_tmp
 
 from .canonical import deep_recursion, floatfree, sha3_hex
 from .ledger import Ledger
@@ -132,10 +132,10 @@ class CRAEvidenceLocker:
                     if f.read() != raw:
                         raise ValueError(f"source store already holds different bytes for {fp['sha256'][:16]}…: refusing to overwrite evidence")
             else:
-                tmp = f"{dst}.{os.getpid()}.{threading.get_ident()}.tmp"   # unique: two concurrent stores of the same document both succeed
-                with open(tmp, "wb") as f:
-                    f.write(raw)
-                os.replace(tmp, dst)
+                # a temporary of its own (two concurrent stores of the same document both succeed), whole or not at all:
+                # the stored copy is a file this subcommand promises, so a failed write is OutputNotWritten (exit 74),
+                # with nothing recorded
+                commit_tmp(write_tmp(dst, raw), dst)
                 created = dst
             source["stored_as"] = os.path.basename(dst)
         try:

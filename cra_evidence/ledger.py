@@ -252,20 +252,24 @@ class Ledger:
                 while data:
                     data = data[os.write(fd, data):]
                 os.fsync(fd)
-            except BaseException:
+            except BaseException as e:
                 try:
                     os.ftruncate(fd, end)   # back to the bytes this call found (it holds the exclusive lock)
                     os.fsync(fd)
+                    left = "the ledger is left as it was"
                 except OSError:
-                    pass
+                    left = "the ledger could not be truncated back and may end in part of the line"
+                if isinstance(e, OSError):   # the record could not be delivered to the ledger: exit 74, as a promised file
+                    from .outputs import OutputNotWritten
+                    raise OutputNotWritten(f"ledger {self.path}: {e.strerror or e}; nothing was recorded, {left}") from None
                 raise
             if self._tip_key is not None:
                 from .signing import write_tip
                 from .outputs import TipNotWritten
                 try:
                     write_tip(self.path + ".tip.json", self._tip_key, idx + 1, first if idx > 0 else entry["self_hash"], entry["self_hash"])
-                except OSError as e:
-                    raise TipNotWritten(f"{self.path}.tip.json: {e.strerror or e}; record {idx} is in the ledger, the tip still names "
+                except OSError as e:   # write_tip raises OutputNotWritten, whose text already names the tip's path
+                    raise TipNotWritten(f"{e}; record {idx} is in the ledger, the tip still names "
                                         f"the previous entry") from None
         return entry
 
