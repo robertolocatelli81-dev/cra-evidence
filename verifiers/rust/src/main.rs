@@ -445,8 +445,15 @@ fn verify_sidecar(pack_path: &str, pack: &BTreeMap<String, Json>, declared: &str
     ("PASS".into(), "signed (signer not compared with a trust store)".into(), false)
 }
 
+/// One line on stderr that never panics: `eprintln!` panics when stderr cannot take it (a full disk, a reader gone),
+/// and the panic made a usage error exit 101 instead of the documented 2 (measured 13/10/2026).
+fn say(msg: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr(), "{msg}");
+}
+
 fn flag_value(args: &[String], i: usize, flag: &str) -> String {   // a flag without a value, or with "", is a usage error — never a silent default
-    match args.get(i) { Some(v) if !v.is_empty() && !v.starts_with('-') => v.clone(), _ => { eprintln!("usage: {flag} needs a value"); std::process::exit(2) } }
+    match args.get(i) { Some(v) if !v.is_empty() && !v.starts_with('-') => v.clone(), _ => { say(&format!("usage: {flag} needs a value")); std::process::exit(2) } }
 }
 
 fn main() {
@@ -464,17 +471,17 @@ fn main() {
         match args[i].as_str() {
             "--ledger" => { i += 1; ledger = Some(flag_value(&args, i, "--ledger")); }
             "--trust-store" => { i += 1; trust_file = Some(flag_value(&args, i, "--trust-store")); }
-            "--log-pubkey" => { i += 1; let k = flag_value(&args, i, "--log-pubkey"); if !is_hex64(&k) { eprintln!("usage: --log-pubkey must be 64 lower-case hex characters"); std::process::exit(2); } key = Some(k); }
+            "--log-pubkey" => { i += 1; let k = flag_value(&args, i, "--log-pubkey"); if !is_hex64(&k) { say("usage: --log-pubkey must be 64 lower-case hex characters"); std::process::exit(2); } key = Some(k); }
             "--require-sources" => { require_sources = true; }
-            a => { if a.starts_with('-') || pack.is_some() { eprintln!("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2); } pack = Some(a.to_string()); }
+            a => { if a.starts_with('-') || pack.is_some() { say("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2); } pack = Some(a.to_string()); }
         }
         i += 1;
     }
-    let Some(pack) = pack else { eprintln!("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2) };
+    let Some(pack) = pack else { say("usage: cra-verify <pack.json> [--ledger path] [--trust-store file] [--log-pubkey hex] [--require-sources]"); std::process::exit(2) };
     let trust = trust_file.map(|f| {
-        let text = read_text(&f).unwrap_or_else(|e| { eprintln!("trust store unreadable: {e}"); std::process::exit(2) });   // a regular file within the bound: a FIFO / device is unreadable, never a hang
-        let o = parse_obj(&text).unwrap_or_else(|_| { eprintln!("trust store unreadable"); std::process::exit(2) });
-        if !o.values().all(|v| matches!(v, Json::Str(_))) { eprintln!("trust store unreadable: values must be strings"); std::process::exit(2); }
+        let text = read_text(&f).unwrap_or_else(|e| { say(&format!("trust store unreadable: {e}")); std::process::exit(2) });   // a regular file within the bound: a FIFO / device is unreadable, never a hang
+        let o = parse_obj(&text).unwrap_or_else(|_| { say("trust store unreadable"); std::process::exit(2) });
+        if !o.values().all(|v| matches!(v, Json::Str(_))) { say("trust store unreadable: values must be strings"); std::process::exit(2); }
         o
     });
     // a panic inside verify is the VERIFIER's defect, not a finding about the pack: fail-closed (ok false, FAIL) but
@@ -506,7 +513,6 @@ const EX_IOERR: i32 = 74;
 /// EBADF). `println!` panicked there instead (exit 101, its message swallowed by the panic hook above). The Rust
 /// runtime ignores SIGPIPE, so a closed reader is an EPIPE error here, not a signal.
 fn write_receipt(text: &str, code: i32) -> i32 {
-    use std::io::Write;
     // SIGXFSZ: past a file size limit (`ulimit -f`) the kernel kills the process (exit 153, measured 12/10/2026) unless
     // the signal is ignored; ignored, the write returns EFBIG and the receipt is 74 like any other failed write.
     #[cfg(all(any(target_os = "linux", target_os = "macos"), not(any(target_arch = "mips", target_arch = "mips64", target_arch = "sparc64"))))]
@@ -516,12 +522,55 @@ fn write_receipt(text: &str, code: i32) -> i32 {
         const SIG_IGN: usize = 1;
         unsafe { signal(SIGXFSZ, SIG_IGN); }
     }
-    let mut so = std::io::stdout().lock();
-    match writeln!(so, "{text}").and_then(|_| so.flush()) {
+    let mut bytes = text.as_bytes().to_vec();
+    bytes.push(b'\n');
+    match write_all_stdout(&bytes) {
         Ok(()) => code,
         Err(e) => {
-            let _ = writeln!(std::io::stderr(), "receipt not written: {e}");   // never eprintln!: it would panic if stderr is gone too
+            say(&format!("receipt not written: {e}"));   // never eprintln!: it would panic if stderr is gone too
             EX_IOERR
         }
     }
+}
+
+/// Every byte to fd 1, in a loop that sees the count: a short write continues from the next byte, EINTR retries, a
+/// full NON-BLOCKING stdout (WouldBlock: a reader that reads late) is waited for in poll(2) as a blocking write would
+/// wait — `writeln!` returned WouldBlock there and the receipt was 74 with 65 536 bytes in the pipe (measured
+/// 13/10/2026) —, and 0 bytes taken is an error. The descriptor is borrowed, never closed.
+#[cfg(unix)]
+fn write_all_stdout(mut buf: &[u8]) -> std::io::Result<()> {
+    use std::io::{ErrorKind, Write};
+    use std::os::unix::io::FromRawFd;
+    #[repr(C)]
+    struct PollFd { fd: i32, events: i16, revents: i16 }
+    #[cfg(target_os = "linux")]
+    type NFds = u64;
+    #[cfg(not(target_os = "linux"))]
+    type NFds = u32;
+    extern "C" { fn poll(fds: *mut PollFd, nfds: NFds, timeout: i32) -> i32; }
+    const POLLOUT: i16 = 4;
+    let mut out = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(1) });
+    while !buf.is_empty() {
+        match out.write(buf) {
+            Ok(0) => return Err(std::io::Error::new(ErrorKind::WriteZero, format!("short write: {} bytes not written", buf.len()))),
+            Ok(n) => buf = &buf[n..],
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                let mut p = PollFd { fd: 1, events: POLLOUT, revents: 0 };
+                if unsafe { poll(&mut p, 1, -1) } < 0 {
+                    let e = std::io::Error::last_os_error();
+                    if e.kind() != ErrorKind::Interrupted { return Err(e); }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_all_stdout(buf: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut so = std::io::stdout().lock();
+    so.write_all(buf).and_then(|_| so.flush())
 }

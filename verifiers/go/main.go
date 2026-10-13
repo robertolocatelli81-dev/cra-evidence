@@ -725,6 +725,10 @@ func sourceDocuments(lp string, entries []*Object, require bool) layer {
 }
 
 func main() {
+	// SIGPIPE ignored from the start: a usage line written to a stderr whose reader has gone would otherwise kill the
+	// process (141, measured 13/10/2026) instead of the documented 2; ignored, the write returns EPIPE (not checked:
+	// the exit code says it), and the receipt's own write below reports EPIPE as 74
+	signal.Ignore(syscall.SIGPIPE)
 	var pack, ledger, trustFile, key string
 	requireSources := false
 	args := os.Args[1:]
@@ -817,9 +821,9 @@ const exIOErr = 74
 
 // writeReceipt writes the receipt and returns the exit code: the verdict's, or 74 when stdout refused the bytes
 // (ENOSPC, EPIPE, EBADF). fmt.Println's error was discarded before (exit 0/1 with the receipt lost on /dev/full), and
-// on a closed pipe the runtime killed the process with SIGPIPE (141); with SIGPIPE ignored the write returns EPIPE.
+// on a closed pipe the runtime killed the process with SIGPIPE (141); with SIGPIPE ignored (start of main) the write
+// returns EPIPE.
 func writeReceipt(b []byte, code int) int {
-	signal.Ignore(syscall.SIGPIPE)
 	if _, err := os.Stdout.Write(b); err != nil {
 		fmt.Fprintln(os.Stderr, "receipt not written: "+err.Error()) // its own error is not checked: the exit code says it
 		return exIOErr
