@@ -27,12 +27,12 @@
   under a regular file, a directory in the file's place, or the pack's bytes on a full disk each ended in a traceback
   with exit 1, and `pack --out <a directory>` appended the pack's anchor to the ledger before failing to rename the pack
   over the directory (and left `<path>.tmp`). Now the pack, the sidecar and the drop file are written to `<path>.tmp`
-  and renamed only once complete (the temporary file is removed on failure), `pack --out` refuses a directory before
+  (a name nobody can predict since the entry "13 October" below) and renamed only once complete (the temporary file is removed on failure), `pack --out` refuses a directory before
   reading the ledger, and a seed that failed half-way is removed (`keygen` creates it with `O_EXCL`, so a stub would block
   the next run; by code reading, not reproduced). If the rename of the pack fails after its anchor was appended — not
   reproduced: the directory case is refused earlier — the error says the anchor is in the ledger and the complete pack
   stays at `<path>.tmp`. An existing seed file is still refused as before (`FileExistsError`, exit 1), not counted as a
-  failed write.
+  failed write (until the entry "13 October" below: one line, no traceback, exit 1 still).
 - The ledger and its signed tip (`--tip-key`). Measured on 0.5.0 and on the first 0.5.1 commits: with the tip's path
   unwritable (a directory in its place), `pack` appended the anchor, then deleted the pack it names and exited 1 with a
   traceback (an anchor whose pack exists nowhere); `sbom`, `vuln`, `notice` and `seal` appended the record and exited 1,
@@ -42,7 +42,7 @@
   tip that cannot be replaced exits 74 with the line naming the record that is in the ledger, `pack` then keeps the
   pack at its path, and no `.tip.json.tmp` is left; after that 74 the record is in the chain and the signed tip still
   names the previous entry. A record that could not be appended at all still exits 1 with a traceback, as before, and
-  the ledger is left as it was.
+  the ledger is left as it was (until the entry "13 October" below: 74, nothing recorded).
 - A regular file that stops taking bytes part-way (a file size limit): measured with `ulimit -f 4` and a 201 502-byte
   receipt, the JS verifier (Node 22 and 24) wrote 4 096 bytes and exited with the verdict's code and nothing on stderr
   (Node's stream does one write on a regular file and drops the rest after a short write), and the Rust verifier was
@@ -67,6 +67,52 @@
   on an invalid pack: started together, Go and Rust exited 1 once each, the receipt written to the pipe and discarded by
   `head`; with the producer started 0.2 s after `head`, and with the read end closed first, 74 in all 50 for Python, JS,
   Go and Rust).
+
+### 13 October: the receipt whole or 74 in the cases the first 0.5.1 commits did not reach
+
+- Measured on the first 0.5.1 commits (2026-10-13, real processes, Python 3.11.2, Node 22 and 24, Go 1.27, Rust 1.98):
+  with `PYTHONUNBUFFERED=1` (or `-u`) stdout is a raw file whose short write the text layer dropped in silence, so
+  appended to a file under `ulimit -f 1` that still took 24 bytes, `cra schema` exited 0 and `cra verify` 1 with 24
+  bytes of the receipt; on a non-blocking stdout read one second late, a 201 502-byte receipt reached the pipe as
+  65 536 bytes with exit 74 (exit 1 unbuffered), and the Rust verifier did the same with its 201 189-byte receipt — a
+  reader that is slow, not gone; with stdout open read-only (`1<file`) the Rust verifier exited with the verdict's
+  code and no receipt (Rust's standard stdout treats `EBADF` as success). A usage error, an unreadable trust store or
+  `keygen` on an existing seed, with stderr full or its reader gone, exited 120 (Python), 101 (Rust, `eprintln!`
+  panicking) or was killed by SIGPIPE (Go, 141 in a shell); with stderr closed the Python usage (104 bytes) and the
+  trust-store message (98 bytes) went to STDOUT. `cra --version` and `cra --help` on a full stdout or a closed pipe
+  exited 120. A refusal printed as a traceback (`seal` of a digest no pack anchored, an SBOM file that does not
+  exist) exited 120 with stderr full instead of 1.
+- Now the Python CLI encodes the receipt as its stdout text layer would (that layer's encoding and error handler, a
+  byte order mark only where that layer writes one: `str.encode` would put one on a pipe too) and writes it to
+  `sys.stdout.buffer` in a loop that sees the count: a short count continues, a full non-blocking stdout is waited for
+  in `select` (POSIX; on Windows `select` waits on sockets only, so there it would be 74 — not measured), 0 bytes taken
+  is an error; a stdout with no descriptor (`io.StringIO`, an `io.TextIOWrapper` over `io.BytesIO` as pytest's capsys)
+  gets the receipt in process. argparse prints through a stderr writer that never raises: a usage error keeps exit 2,
+  a refusal its own code (1 or 2), nothing reaches stdout; `--help` and `--version` are the command's output, 74 when
+  lost. `keygen` on an existing seed is one line, `keygen refused: <path> already exists …`, still exit 1. The other
+  refusals keep their traceback and exit 1, now also with stderr lost (one line per refusal, exit 2, is left for a
+  minor version: it changes exit codes). The Go verifier ignores SIGPIPE from the start of `main`; the Rust verifier
+  writes stderr lines with `writeln!` and its result ignored, never `eprintln!`, and writes the receipt to fd 1 in a
+  loop that waits in `poll(2)` on `WouldBlock` and reports `EBADF`. The JS verifier needed no change (measured).
+- What a subcommand promises besides stdout: a ledger line that cannot be written (a full disk, a file size limit) and
+  the copy of an ingested SBOM document that cannot be stored now exit 74 with a line that says nothing was recorded
+  (they exited 1 with a traceback, the code of an overdue deadline or an unmet floor); the ledger is left as it was.
+  The temporary file of the pack, the sidecar, the drop file, the signed tip and the stored copy is
+  `<path>.<16 random hex>.tmp`, created with `O_CREAT|O_EXCL|O_NOFOLLOW`, written in a loop, fsynced and closed
+  inside the same `try`: a symlink planted at `<path>.tmp` was followed (the pack was written into its target) and a
+  FIFO there blocked the run.
+- Receipts unchanged where they are written: the 186 cases of the differential oracle through the Python CLI, the JS
+  verifier (Node 22 and 24), Go and Rust, plus 17 runs of `schema`, `--help`, usage errors, `sbom`, `vuln`, `notice`,
+  `pack`, `keygen` and `feeds` (offline), compared with 0.5.0 (6113d94): 947 of 947 identical (exit code, stdout and
+  stderr byte for byte; `notice`, `pack` and `keygen` by shape, as they hold a time, an id or a key); the comparator
+  sees 517 differences when 0.5.0's Python and JS indentation is altered.
+- `tests/test_receipt_design_20261013.py` (19 tests, real processes): unbuffered Python in every losing mode,
+  a non-blocking stdout already full at start (the process must sleep: under 0.2 s of CPU in a one-second window,
+  then the receipt whole), stdout read-only, usage and refusals with stderr full, closed or gone, `--version` and
+  `--help` lost, six encodings and one error handler to a file, appended and to a pipe against Python's own text
+  layer, `main()` in process, the planted temporary, the ledger line and the stored copy not written. On the first
+  0.5.1 commits 14 of its 19 tests fail, on 0.5.0 18; 34 mutants of the new lines, 34 killed (Python 3.11, Go 1.27,
+  Rust 1.98). The CI verifiers job runs it with the Go and Rust binaries.
 
 ## 0.5.0 — 2026-10-11
 

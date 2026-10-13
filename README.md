@@ -93,6 +93,24 @@ that holds the complete pack. A ledger line is written whole or not at all (a fu
 the ledger as it was). With `--tip-key`, a signed tip that cannot be replaced exits 74 too: the record is in the ledger
 and the line says so, the tip still names the previous entry, and `pack` keeps the pack its anchor names.
 
+The same rule, measured again on 13/10/2026 over the cases the first 0.5.1 commits did not reach (a generative bench:
+every subcommand that prints an outcome, `--help`, `--version`, usage errors and refusals, the four verifiers, × stdout
+to a file, `/dev/null`, a slow pipe, a non-blocking pipe read late or never, `| head -c 100`, `/dev/full`, a pipe
+without reader, closed, read-only, a file size limit part-way and at 0 × stderr working, full, closed or without
+reader × Python buffered and unbuffered: 1 564 runs on Python 3.11.2 and 1 380 on 3.9.25 and on 3.13.15 (3.11 has
+`cryptography`, so `keygen`, `seal` and `sign` run there only), Node 22 and 24, Go and Rust; 0 departures from the rule
+on this code; with Python 3.11, 814 on 0.5.0 and 198 on the first 0.5.1 commits). The Python CLI writes the receipt in a loop that sees
+the count, also under `-u` / `PYTHONUNBUFFERED`, with the bytes and byte order mark its stdout text layer would write;
+stdout open read-only is 74 in the four (the Rust verifier exited with the verdict's code there). A non-blocking stdout
+that is full is waited for, as a blocking one — the process sleeps until a reader takes the bytes, the receipt arrives
+whole with the verdict's code; it is never 74 for a slow reader (POSIX; on Windows Python's `select` waits on sockets
+only: not measured). Usage errors exit 2 and refusals keep their code with stderr full, closed or gone, and write
+nothing to stdout; `cra --help` and `cra --version` exit 74 when their text is lost. A ledger line or the stored copy
+of an ingested SBOM that cannot be written exits 74 with nothing recorded. The temporary file of a promised file has a
+name nobody can predict (`<path>.<16 random hex>.tmp`, `O_EXCL`), so a symlink or FIFO planted at `<path>.tmp` is
+neither followed nor waited on. `keygen` on an existing seed is one line, `keygen refused: …`, exit 1; the other
+refusals of the CLI are still a traceback with exit 1.
+
 Every file a verifier reads must be a regular file — decided on the opened descriptor, without blocking on a FIFO — of
 at most 64 MiB (67108864 bytes) for a JSON document (pack, sidecar, tip, trust store, one ledger line) and 256 MiB for a
 stored generator document; anything else is refused unread, with the outcome of an unreadable file in that position.
