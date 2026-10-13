@@ -544,9 +544,9 @@ fn write_all_stdout(mut buf: &[u8]) -> std::io::Result<()> {
     #[repr(C)]
     struct PollFd { fd: i32, events: i16, revents: i16 }
     #[cfg(target_os = "linux")]
-    type NFds = u64;
+    type NFds = std::os::raw::c_ulong;   // nfds_t is unsigned long on Linux: 32 bits on a 32-bit target
     #[cfg(not(target_os = "linux"))]
-    type NFds = u32;
+    type NFds = std::os::raw::c_uint;
     extern "C" { fn poll(fds: *mut PollFd, nfds: NFds, timeout: i32) -> i32; }
     const POLLOUT: i16 = 4;
     let mut out = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(1) });

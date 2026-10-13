@@ -6,7 +6,7 @@ not be written whole to stdout (full disk, closed pipe, closed or read-only stdo
 PYTHONUNBUFFERED), or what the subcommand promises could not be written: its ledger line, the copy of an ingested
 SBOM document, a file (`pack --out`, the `sign` sidecar, the `notice` drop file, the `keygen` seed, the ledger's
 signed tip) — whatever the outcome was, with a `receipt not written: <reason>` line on stderr. A stdout that is
-non-blocking and full is waited for, as a blocking one (POSIX; not measured on Windows). Usage errors exit 2 and
+non-blocking and full is waited for, as a blocking one (measured on Linux; not on macOS or Windows). Usage errors exit 2 and
 refusals keep their code (`keygen` on an existing seed: 1, one line, no traceback) even when stderr cannot take
 their line. What a subcommand records in the ledger is recorded before its outcome is printed. Nothing is ever sent
 anywhere except the OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source cisa_kev|enisa_euvd` unless
@@ -92,8 +92,15 @@ def _write_all(text: str) -> None:
     if out is None:   # started with fd 1 closed: print() would drop the receipt and say nothing
         raise OSError("stdout is closed")
     try:
-        out.flush()   # whatever the text layer still holds goes first
         buf = getattr(out, "buffer", None)
+        while True:   # whatever the text layer still holds goes first: text the caller wrote and left unflushed, on a full
+            try:      # non-blocking stdout, is waited for like the receipt (at e25795e that was exit 74 with nothing written)
+                out.flush()
+                break
+            except BlockingIOError:
+                if buf is None:
+                    raise
+                _wait_writable(buf)
         if buf is None:   # an in-process text stream (io.StringIO): no bytes below it
             out.write(text)
             out.flush()

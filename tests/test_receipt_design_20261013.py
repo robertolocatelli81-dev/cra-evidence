@@ -4,13 +4,14 @@
 Measured on the first 0.5.1 commits (fb31ab4) with real processes, Python 3.9.25, 3.11.2 and 3.13.15, Node 22 and 24,
 Go and Rust:
 - with PYTHONUNBUFFERED=1 (or -u) sys.stdout writes to a raw FileIO, whose short write the text layer drops in
-  silence: appended to a file of 1 000 bytes under `ulimit -f 1` every subcommand exited with the outcome's code and
-  24 bytes of its receipt;
+  silence: appended to a file of 1 000 bytes under `ulimit -f 1`, `schema` exited 0 and `verify` 1 with 24 bytes of
+  the receipt (so did `feeds`, `keygen`, `sign` and `--help`; `sbom`, `vuln` and `seal` exited 1 with a traceback,
+  their ledger line refused first);
 - on a NON-BLOCKING stdout that a reader drains late, the Python CLI exited 74 with 65 536 bytes of a 201 502-byte
-  receipt in the pipe (0 with them, unbuffered), and so did the Rust verifier (74): a slow reader is not a lost one;
+  receipt in the pipe (the verdict's 1 with them, unbuffered), and so did the Rust verifier (74): a slow reader is not a lost one;
 - a usage error, an unreadable trust store or an existing seed with stderr full or its reader gone exited 120
   (Python), 101 (Rust: `eprintln!` panics) or 141 (Go: SIGPIPE on fd 2); with stderr closed the Python usage went to
-  STDOUT (exit 1); `cra --version` and `cra --help` on a full stdout exited 120;
+  STDOUT (exit 1 on 3.9 and 3.11, 2 on 3.13); `cra --version` and `cra --help` on a full stdout exited 120;
 - `keygen` on an existing seed printed a traceback;
 - the temporary file of a promised file was `<path>.tmp`: a symlink planted there was followed, a FIFO blocked the run;
 - a ledger line that could not be written at all exited 1 with a traceback (the code of an overdue deadline or an unmet
@@ -388,6 +389,49 @@ class InProcess(unittest.TestCase):
         self.assertEqual((rc, head), (0, "before"))
         self.assertIn("title", json.loads(rest))
 
+    @unittest.skipUnless(CAN_RUN, "needs a non-blocking pipe (POSIX)")
+    def test_unflushed_caller_text_on_a_full_nonblocking_pipe(self):
+        """the caller's text still in its buffer, stdout a non-blocking pipe already full: that text is flushed first
+        and waited for like the receipt — exit 0, "before" then the receipt, the process asleep meanwhile (at e25795e:
+        exit 74 and nothing written)"""
+        import fcntl
+        r, w = os.pipe()
+        fcntl.fcntl(w, fcntl.F_SETFL, fcntl.fcntl(w, fcntl.F_GETFL) | os.O_NONBLOCK)
+        filled = 0
+        while True:
+            try:
+                filled += os.write(w, b"P" * 4096)
+            except BlockingIOError:
+                break
+        s = io.TextIOWrapper(io.BufferedWriter(io.FileIO(w, "w", closefd=False)), encoding="utf-8")
+        s.write("before\n")
+        got = []
+
+        def drain():
+            time.sleep(0.5)
+            while True:
+                b = os.read(r, 1 << 16)
+                if not b:
+                    break
+                got.append(b)
+        th = threading.Thread(target=drain)
+        th.start()
+        c0 = time.process_time()
+        try:
+            rc = self._main(s, ["schema", "--template", "early_warning"])
+        finally:
+            cpu = time.process_time() - c0
+            os.close(w)
+            th.join()
+            os.close(r)
+        data = b"".join(got)
+        self.assertEqual(rc, 0)
+        self.assertEqual(data[:filled], b"P" * filled)
+        head, _, rest = data[filled:].decode("utf-8").partition("\n")
+        self.assertEqual(head, "before")
+        self.assertIn("title", json.loads(rest))
+        self.assertLess(cpu, 0.3, "waiting must sleep, not spin")
+
 
 @unittest.skipUnless(CAN_RUN, "needs bash")
 class Encodings(unittest.TestCase):
@@ -498,9 +542,19 @@ class PromisedFilesAndLedger(unittest.TestCase):
         self.addCleanup(os.chmod, src, 0o700)
         p = subprocess.run(PY + ["sbom", *self.args, "--from-cyclonedx", SYFT], cwd=ROOT, capture_output=True, text=True, timeout=60, env=_env())
         self.assertEqual((p.returncode, p.stdout), (EX_IOERR, ""), p.stderr)
-        self.assertTrue(one_line(p.stderr), p.stderr)
+        self.assertTrue(one_line(p.stderr) and "nothing was recorded" in p.stderr, p.stderr)
         self.assertFalse(os.path.exists(self.ledger) and os.path.getsize(self.ledger))
         self.assertEqual(os.listdir(src), [])
+
+    def test_source_folder_cannot_be_made_is_74(self):
+        """the folder of the stored copies cannot be created (a regular file in its place): the copy cannot be stored
+        either — 74, one line that says nothing was recorded, no ledger line (it was exit 1 with a traceback)"""
+        with open(self.ledger + ".sources", "w") as f:
+            f.write("not a folder")
+        p = subprocess.run(PY + ["sbom", *self.args, "--from-cyclonedx", SYFT], cwd=ROOT, capture_output=True, text=True, timeout=60, env=_env())
+        self.assertEqual((p.returncode, p.stdout), (EX_IOERR, ""), p.stderr)
+        self.assertTrue(one_line(p.stderr) and "nothing was recorded" in p.stderr, p.stderr)
+        self.assertFalse(os.path.exists(self.ledger) and os.path.getsize(self.ledger))
 
     def test_stdout_closed_leaves_the_ledger_whole(self):
         """started with fd 1 and fd 2 closed, the ledger may be opened as descriptor 1: the receipt's failure must not
@@ -552,6 +606,92 @@ class WriteTmp(unittest.TestCase):
             outputs.secrets.token_hex = saved
         with open(victim) as f:
             self.assertEqual(f.read(), "untouched")
+
+    @unittest.skipUnless(CAN_RUN, "needs a FIFO (POSIX)")
+    def test_existing_regular_file_or_fifo_at_the_drawn_name(self):
+        """O_EXCL itself, not only O_NOFOLLOW: a regular file at the very name the call drew is refused, not truncated,
+        and a FIFO there is refused at once, never waited on (child process: a regression would hang, not pass)"""
+        code = ("import os, sys; sys.path.insert(0, sys.argv[1]); from cra_evidence import outputs\n"
+                "outputs.secrets.token_hex = lambda n: '0' * (2 * n)\n"
+                "try:\n    outputs.write_tmp(sys.argv[2], 'pack')\nexcept outputs.OutputNotWritten as e:\n    print('refused')\n"
+                "else:\n    print('written')\n")
+        for kind in ("regular", "fifo"):
+            with self.subTest(kind=kind):
+                d = tempfile.mkdtemp(prefix="cra_wt_", dir=self.W)
+                target = os.path.join(d, "p.json")
+                name = target + ".0000000000000000.tmp"
+                if kind == "regular":
+                    with open(name, "w") as f:
+                        f.write("untouched")
+                else:
+                    os.mkfifo(name)
+                r = subprocess.run([sys.executable, "-B", "-c", code, ROOT, target], capture_output=True, text=True, timeout=30, env=_env())
+                self.assertEqual(r.stdout, "refused\n", (r.stdout, r.stderr))
+                if kind == "regular":
+                    with open(name) as f:
+                        self.assertEqual(f.read(), "untouched")
+                self.assertEqual(os.listdir(d), [os.path.basename(name)])
+
+    def test_error_at_close_is_a_failed_write(self):
+        """close() inside the try: an error it reports (a deferred write error, NFS or a full disk) is OutputNotWritten
+        and the temporary is removed"""
+        import errno
+        sys.path.insert(0, ROOT)
+        from cra_evidence import outputs
+
+        class FailingClose:
+            def __getattr__(self, name):
+                return getattr(os, name)
+
+            @staticmethod
+            def close(fd):
+                os.close(fd)
+                raise OSError(errno.EIO, "Input/output error")
+        saved = outputs.os
+        outputs.os = FailingClose()
+        try:
+            with self.assertRaises(outputs.OutputNotWritten):
+                outputs.write_tmp(os.path.join(self.W, "p.json"), "pack")
+        finally:
+            outputs.os = saved
+        self.assertEqual(os.listdir(self.W), [])
+
+
+FEED_REFUSAL = r"""
+import sys
+from cra_evidence import feeds
+mode, ledger = sys.argv[1], sys.argv[2]
+def get(url, timeout):
+    if mode == "down":
+        raise OSError("no network (test)")
+    return {"vulnerabilities": [{"cveID": "CVE-2021-44228"}]}
+feeds._get_json = get
+from cra_evidence.cli import main
+sys.exit(main(["vuln", "--ledger", ledger, "--product", "p", "--version", "1", "--id", "CVE-2026-0001",
+               "--aware", "2026-10-12T00:00:00Z", "--source", "cisa_kev"]))
+"""
+
+
+@unittest.skipUnless(CAN_RUN, "needs bash and /dev/full (POSIX)")
+class FeedRefusalsWithStderrLost(unittest.TestCase):
+    """`vuln --source cisa_kev` refused (the feed unavailable, the id not in it): one line, exit 1, nothing recorded and
+    nothing on stdout — with stderr full, closed or gone too (`print(..., file=sys.stderr)` put the line on STDOUT with
+    stderr closed). No network: the feed's fetch function is replaced."""
+
+    def test_each(self):
+        W = tempfile.mkdtemp(prefix="cra_feed_")
+        self.addCleanup(shutil.rmtree, W, True)
+        for mode, needle in (("down", "unavailable"), ("absent", "is NOT in cisa_kev")):
+            with self.subTest(mode=mode):
+                ledger = os.path.join(W, mode + ".jsonl")
+                argv = [sys.executable, "-B", "-c", FEED_REFUSAL, mode, ledger]
+                rc, out, err = run(argv, "file")
+                self.assertEqual((rc, out), (1, b""), err)
+                self.assertEqual(len(err.splitlines()), 1, err)
+                self.assertIn(needle, err)
+                for how, rc, out in stderr_lost(argv):
+                    self.assertEqual((rc, out), (1, b""), how)
+                self.assertFalse(os.path.exists(ledger) and os.path.getsize(ledger))
 
 
 if __name__ == "__main__":

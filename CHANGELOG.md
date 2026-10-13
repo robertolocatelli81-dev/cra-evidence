@@ -16,9 +16,11 @@
   not written whole, whatever the outcome, with a `receipt not written: <reason>` line on stderr (still 74 when stderr
   is closed too). Python writes and flushes the receipt itself before choosing the exit code; JS listens for the
   stream's `error` event; Go checks the write's error with SIGPIPE ignored; Rust uses `writeln!` and `flush` with their
-  `Result`. 0, 1, 2 and 77 are unchanged when the receipt is written (receipts byte-identical to 0.5.0's where their
+  `Result` (until the entry "13 October" below: a write loop of its own on fd 1). 0, 1, 2 and 77 are unchanged when the receipt is written (receipts byte-identical to 0.5.0's where their
   content does not depend on the clock, a random id or a key). Ledger records are appended before the outcome is
-  printed: after a 74 from `sbom`, `vuln`, `notice`, `pack` or `seal` the record is in the ledger. Started with stdout
+  printed: after a 74 for the printed outcome from `sbom`, `vuln`, `notice`, `pack` or `seal` the record is in the
+  ledger (since the entry "13 October" below, a ledger line or a stored SBOM copy that cannot be written is 74 too,
+  with nothing recorded, and the line says so). Started with stdout
   closed, Node, Go and Rust reopen it on `/dev/null` before the verifier runs, which the verifier cannot tell from
   `>/dev/null`; the Python CLI exits 74 there.
 - The files a subcommand promises — the pack of `pack --out`, the sidecar of `sign`, the drop file of `notice`, the
@@ -77,25 +79,29 @@
   65 536 bytes with exit 74 (exit 1 unbuffered), and the Rust verifier did the same with its 201 189-byte receipt — a
   reader that is slow, not gone; with stdout open read-only (`1<file`) the Rust verifier exited with the verdict's
   code and no receipt (Rust's standard stdout treats `EBADF` as success). A usage error, an unreadable trust store or
-  `keygen` on an existing seed, with stderr full or its reader gone, exited 120 (Python), 101 (Rust, `eprintln!`
+  `keygen` on an existing seed, with stderr full or its reader gone, exited 120 (Python; 1 under `-u`), 101 (Rust, `eprintln!`
   panicking) or was killed by SIGPIPE (Go, 141 in a shell); with stderr closed the Python usage (104 bytes) and the
   trust-store message (98 bytes) went to STDOUT. `cra --version` and `cra --help` on a full stdout or a closed pipe
-  exited 120. A refusal printed as a traceback (`seal` of a digest no pack anchored, an SBOM file that does not
+  exited 120 (1 under `-u`). A refusal printed as a traceback (`seal` of a digest no pack anchored, an SBOM file that does not
   exist) exited 120 with stderr full instead of 1.
 - Now the Python CLI encodes the receipt as its stdout text layer would (that layer's encoding and error handler, a
-  byte order mark only where that layer writes one: `str.encode` would put one on a pipe too) and writes it to
+  byte order mark only where that layer writes one as the first thing written: `str.encode` would put one on a pipe
+  too; in process, after text the caller wrote to a `utf-8-sig` pipe, the receipt carries a second one) and writes it to
   `sys.stdout.buffer` in a loop that sees the count: a short count continues, a full non-blocking stdout is waited for
-  in `select` (POSIX; on Windows `select` waits on sockets only, so there it would be 74 — not measured), 0 bytes taken
+  in `select` (measured on Linux, not on macOS; on Windows `select` waits on sockets only, so there it would be 74 —
+  not measured), 0 bytes taken
   is an error; a stdout with no descriptor (`io.StringIO`, an `io.TextIOWrapper` over `io.BytesIO` as pytest's capsys)
   gets the receipt in process. argparse prints through a stderr writer that never raises: a usage error keeps exit 2,
   a refusal its own code (1 or 2), nothing reaches stdout; `--help` and `--version` are the command's output, 74 when
-  lost. `keygen` on an existing seed is one line, `keygen refused: <path> already exists …`, still exit 1. The other
-  refusals keep their traceback and exit 1, now also with stderr lost (one line per refusal, exit 2, is left for a
+  lost. `keygen` on an existing seed is one line, `keygen refused: <path> already exists …`, still exit 1. The refusals
+  raised as exceptions (`seal` of a digest no pack anchored, an SBOM file that does not exist) keep their traceback
+  and exit 1, now also with stderr lost (one line per refusal, exit 2, is left for a
   minor version: it changes exit codes). The Go verifier ignores SIGPIPE from the start of `main`; the Rust verifier
   writes stderr lines with `writeln!` and its result ignored, never `eprintln!`, and writes the receipt to fd 1 in a
   loop that waits in `poll(2)` on `WouldBlock` and reports `EBADF`. The JS verifier needed no change (measured).
 - What a subcommand promises besides stdout: a ledger line that cannot be written (a full disk, a file size limit) and
-  the copy of an ingested SBOM document that cannot be stored now exit 74 with a line that says nothing was recorded
+  the copy of an ingested SBOM document that cannot be stored (also when the folder of the copies cannot be created)
+  now exit 74 with a line that says nothing was recorded
   (they exited 1 with a traceback, the code of an overdue deadline or an unmet floor); the ledger is left as it was.
   The temporary file of the pack, the sidecar, the drop file, the signed tip and the stored copy is
   `<path>.<16 random hex>.tmp`, created with `O_CREAT|O_EXCL|O_NOFOLLOW`, written in a loop, fsynced and closed
@@ -106,13 +112,18 @@
   `pack`, `keygen` and `feeds` (offline), compared with 0.5.0 (6113d94): 947 of 947 identical (exit code, stdout and
   stderr byte for byte; `notice`, `pack` and `keygen` by shape, as they hold a time, an id or a key); the comparator
   sees 517 differences when 0.5.0's Python and JS indentation is altered.
-- `tests/test_receipt_design_20261013.py` (19 tests, real processes): unbuffered Python in every losing mode,
+- `tests/test_receipt_design_20261013.py` (24 tests, real processes): unbuffered Python in every losing mode,
   a non-blocking stdout already full at start (the process must sleep: under 0.2 s of CPU in a one-second window,
   then the receipt whole), stdout read-only, usage and refusals with stderr full, closed or gone, `--version` and
   `--help` lost, six encodings and one error handler to a file, appended and to a pipe against Python's own text
-  layer, `main()` in process, the planted temporary, the ledger line and the stored copy not written. On the first
-  0.5.1 commits 14 of its 19 tests fail, on 0.5.0 18; 34 mutants of the new lines, 34 killed (Python 3.11, Go 1.27,
-  Rust 1.98). The CI verifiers job runs it with the Go and Rust binaries.
+  layer, `main()` in process (also with the caller's unflushed text on a full non-blocking pipe), the planted temporary, the ledger line and the stored copy not written (also its folder not
+  created), the `vuln --source` feed refusals with stderr lost, a regular file or a FIFO at the very temporary name
+  drawn, an error reported by `close()`. On the first 0.5.1 commits 19 of its 24 tests fail, on 0.5.0 23; 34 mutants
+  of the new lines, 34 killed (Python 3.11, Go 1.27, Rust 1.98); a review's own 25 mutants (20 Python, 4 Rust, 1 Go):
+  23 killed once 4 tests were added for the 4 that survived (`O_EXCL` replaced by `O_TRUNC`, `close()` left out, the
+  two feed refusals printed with `print`), 2 equivalent (`O_NOFOLLOW` under `O_EXCL`; `/dev/null` on descriptor 1
+  when stdout was closed at start, as nothing holds descriptor 1 there); 2 more on the review's correction of the
+  caller's unflushed text (not waited for, retried in a spin): killed. The CI verifiers job runs it with the Go and Rust binaries.
 
 ## 0.5.0 — 2026-10-11
 

@@ -74,7 +74,9 @@ JSON outcome they computed could not be written whole to stdout — a full disk,
 stdout — whatever the outcome was, with a `receipt not written: <reason>` line on stderr; still 74 when stderr cannot
 take that line either (closed, or a full disk too). 0, 1, 2 and 77 are unchanged when the receipt is written. What
 `sbom`, `vuln`, `notice`, `pack` and `seal` record in the ledger is recorded before the outcome is printed, so after a
-74 the record is there and only the printed outcome is lost. Measured on 0.5.0: the same runs exited with the
+74 for the printed outcome the record is there and only that outcome is lost (since 13/10/2026, below, a 74 can also
+mean that the ledger line itself or the stored copy of an ingested SBOM could not be written: then nothing was
+recorded, and the line on stderr says so). Measured on 0.5.0: the same runs exited with the
 outcome's code and nothing on stderr (Python with stdout closed, the JS verifier on a full disk or a closed pipe, Go on
 a full disk), or with 120 (Python), 101 (Rust) or 141 (Go, SIGPIPE), codes that meant nothing here; the JS verifier
 also cut a receipt above 64 KiB at 65 536 bytes on a pipe, and on a regular file that stops growing (`ulimit -f`) the JS and Go
@@ -100,16 +102,20 @@ without reader, closed, read-only, a file size limit part-way and at 0 × stderr
 reader × Python buffered and unbuffered: 1 564 runs on Python 3.11.2 and 1 380 on 3.9.25 and on 3.13.15 (3.11 has
 `cryptography`, so `keygen`, `seal` and `sign` run there only), Node 22 and 24, Go and Rust; 0 departures from the rule
 on this code; with Python 3.11, 814 on 0.5.0 and 198 on the first 0.5.1 commits). The Python CLI writes the receipt in a loop that sees
-the count, also under `-u` / `PYTHONUNBUFFERED`, with the bytes and byte order mark its stdout text layer would write;
+the count, also under `-u` / `PYTHONUNBUFFERED`, with the bytes and byte order mark its stdout text layer would write as the first thing written (in process,
+after text the caller wrote to a `utf-8-sig` pipe, the receipt carries a second one);
 stdout open read-only is 74 in the four (the Rust verifier exited with the verdict's code there). A non-blocking stdout
 that is full is waited for, as a blocking one — the process sleeps until a reader takes the bytes, the receipt arrives
-whole with the verdict's code; it is never 74 for a slow reader (POSIX; on Windows Python's `select` waits on sockets
-only: not measured). Usage errors exit 2 and refusals keep their code with stderr full, closed or gone, and write
+whole with the verdict's code; it is never 74 for a slow reader (measured on Linux; macOS not measured; on Windows Python's
+`select` waits on sockets only, so there it would be 74: not measured). Usage errors exit 2 and refusals keep their code with stderr full, closed or gone, and write
 nothing to stdout; `cra --help` and `cra --version` exit 74 when their text is lost. A ledger line or the stored copy
-of an ingested SBOM that cannot be written exits 74 with nothing recorded. The temporary file of a promised file has a
+of an ingested SBOM that cannot be written (also when the folder of the copies cannot be created) exits 74 with
+nothing recorded, and the line says so. The temporary file of a promised file has a
 name nobody can predict (`<path>.<16 random hex>.tmp`, `O_EXCL`), so a symlink or FIFO planted at `<path>.tmp` is
-neither followed nor waited on. `keygen` on an existing seed is one line, `keygen refused: …`, exit 1; the other
-refusals of the CLI are still a traceback with exit 1.
+neither followed nor waited on. `keygen` on an existing seed is one line, `keygen refused: …`, exit 1; the refusals
+raised as exceptions (`seal` of a digest no pack anchored, an SBOM file that does not exist) are still a traceback
+with exit 1, while an unreadable trust store (exit 2) and a `vuln --source` feed that is unavailable or does not list
+the id (exit 1) are one line, as before.
 
 Every file a verifier reads must be a regular file — decided on the opened descriptor, without blocking on a FIFO — of
 at most 64 MiB (67108864 bytes) for a JSON document (pack, sidecar, tip, trust store, one ledger line) and 256 MiB for a
