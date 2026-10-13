@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
 overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
-is FAIL (77 when it could not judge). Exit 74 when the JSON outcome could not be written whole to stdout (full disk,
-closed pipe, closed stdout) or a file it promises (`pack --out`, the `sign` sidecar, the `notice` drop file, the
-`keygen` seed, the ledger's signed tip) could not be written, whatever the outcome was, with a `receipt not written: <reason>` line on stderr;
-what a subcommand records in the ledger is recorded before its outcome is printed. Nothing is ever sent anywhere except the
-OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source cisa_kev|enisa_euvd` unless --assert-source)."""
+is FAIL (77 when it could not judge). Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
+not be written whole to stdout (full disk, closed pipe, closed or read-only stdout, a file size limit, also under -u /
+PYTHONUNBUFFERED), or what the subcommand promises could not be written: its ledger line, the copy of an ingested
+SBOM document, a file (`pack --out`, the `sign` sidecar, the `notice` drop file, the `keygen` seed, the ledger's
+signed tip) — whatever the outcome was, with a `receipt not written: <reason>` line on stderr. A stdout that is
+non-blocking and full is waited for, as a blocking one (POSIX; not measured on Windows). Usage errors exit 2 and
+refusals keep their code (`keygen` on an existing seed: 1, one line, no traceback) even when stderr cannot take
+their line. What a subcommand records in the ledger is recorded before its outcome is printed. Nothing is ever sent
+anywhere except the OSV/KEV/EUVD read-only queries (`feeds`, and `vuln --source cisa_kev|enisa_euvd` unless
+--assert-source)."""
 from __future__ import annotations
 
 import argparse
@@ -35,23 +40,112 @@ class ReceiptNotWritten(Exception):
 
 
 def _p(obj: Any) -> None:
-    out = sys.stdout
-    if out is None:   # started with fd 1 closed: print() would drop the receipt and say nothing
-        raise ReceiptNotWritten("stdout is closed")
+    """print the JSON outcome: every byte to stdout and flushed HERE, before the exit code is chosen, or
+    ReceiptNotWritten (exit 74)"""
     try:
-        out.write(json.dumps(obj, indent=1, ensure_ascii=False, sort_keys=True, default=str) + "\n")
-        out.flush()   # flushed HERE, before the exit code is chosen: the interpreter's flush at exit would come too late
-    except (OSError, ValueError) as e:   # ValueError: a closed file object, or an encoding stdout cannot represent
+        _write_all(json.dumps(obj, indent=1, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+    except OSError as e:
         raise ReceiptNotWritten(str(e) or type(e).__name__) from None
 
 
-def _silence(stream: Any, fd: int) -> None:
-    """point fd at /dev/null so the interpreter's own flush at exit does not fail again on what is still buffered
-    (it would print "Exception ignored" and exit 120 instead of 74). Only when the stream really is that fd: with fd 1
-    closed at start, a file this run opened may hold descriptor 1 and must not be touched."""
+def _text_layer_bytes(out: Any, buf: Any, text: str) -> bytes:
+    """The bytes Python's own stdout text layer writes for `text` as the first thing written: its encoding and error
+    handler, "\\n" as os.linesep where the platform translates it (not Linux; not measured here), and a byte order mark
+    only where that layer puts one — utf-16 / utf-32 only on a stdout seekable at offset 0 (a file), utf-8-sig on a
+    pipe too, none on a seekable stdout past offset 0 (str.encode would put one on a pipe too)."""
+    import codecs
+    if os.linesep != "\n":
+        text = text.replace("\n", os.linesep)
+    encoding = out.encoding or "utf-8"
+    enc = codecs.getincrementalencoder(encoding)(out.errors or "strict")
     try:
-        if stream is None or stream.fileno() != fd:
+        seekable = buf.seekable()
+        at_start = seekable and buf.tell() == 0
+    except (OSError, ValueError):
+        seekable = at_start = False
+    if (seekable and not at_start) or (not seekable and codecs.lookup(encoding).name in ("utf-16", "utf-32")):
+        enc.setstate(0)   # no byte order mark
+    return enc.encode(text, final=True)
+
+
+def _wait_writable(buf: Any) -> None:
+    """stdout is non-blocking and full: wait until it can take more, as a blocking write would (the reader is slow, not
+    gone; one that goes away makes the next write EPIPE). `select` sleeps in the kernel and Python retries it after a
+    signal (PEP 475). The descriptor is asked for only here: a byte stream with no descriptor (an io.BytesIO under a
+    TextIOWrapper, as pytest's capsys) never blocks. POSIX only: on Windows `select` waits on sockets only, so a full
+    non-blocking pipe there would be reported as 74 (not measured)."""
+    import select
+    try:
+        select.select([], [buf.fileno()], [])
+    except (OSError, ValueError) as e:   # no descriptor, or one select cannot wait on
+        raise OSError(f"stdout is non-blocking and cannot be waited for: {e}")
+
+
+def _write_all(text: str) -> None:
+    """Write the whole text to stdout and flush it; OSError when it did not all get there. The bytes go to
+    `sys.stdout.buffer` in a loop that checks the count: with -u or PYTHONUNBUFFERED that is a raw FileIO whose write()
+    can take part of the data (a file size limit, a disk nearly full) and return the count without raising, or return
+    None (a full non-blocking pipe) — the text layer above dropped the rest in silence (measured on 0.5.1's first
+    commits, 13/10/2026: the verdict's code with the receipt cut). A full non-blocking stdout is waited for, never
+    given up on."""
+    out = sys.stdout
+    if out is None:   # started with fd 1 closed: print() would drop the receipt and say nothing
+        raise OSError("stdout is closed")
+    try:
+        out.flush()   # whatever the text layer still holds goes first
+        buf = getattr(out, "buffer", None)
+        if buf is None:   # an in-process text stream (io.StringIO): no bytes below it
+            out.write(text)
+            out.flush()
             return
+        data = memoryview(_text_layer_bytes(out, buf, text))
+        while data:
+            try:
+                n = buf.write(data)
+                waited = False
+            except BlockingIOError as e:   # buffered stdout on a full non-blocking pipe: part of it taken
+                n, waited = e.characters_written, True
+            if n is None:   # raw stdout on a full non-blocking pipe: nothing taken
+                n, waited = 0, True
+            if n < 0 or n > len(data) or (n == 0 and not waited):
+                raise OSError(f"short write: {len(data)} bytes not written")
+            data = data[n:]
+            if data and waited:
+                _wait_writable(buf)
+        while True:   # flushed HERE, before the exit code is chosen, not by the interpreter at exit
+            try:
+                buf.flush()
+                return
+            except BlockingIOError:
+                _wait_writable(buf)
+    except ValueError as e:   # I/O operation on a closed file, or text the stream cannot encode
+        raise OSError(str(e))
+
+
+def _say(text: str) -> bool:
+    """Write `text` to stderr without ever raising; True when it was written. If stderr is full, closed or its reader
+    gone, its descriptor is pointed at the null device (so the interpreter's last flush cannot fail again and turn the
+    exit code into 120) and the caller's exit code stands."""
+    err = sys.stderr
+    if err is None:   # started with fd 2 closed
+        return False
+    try:
+        err.write(text)
+        err.flush()
+        return True
+    except (OSError, ValueError):
+        _silence(err)
+        return False
+
+
+def _silence(stream: Any) -> None:
+    """point the descriptor BEHIND `stream` at /dev/null so the interpreter's own flush at exit does not fail again on
+    what is still buffered (it would print "Exception ignored" and exit 120 instead of 74). The descriptor is the
+    stream's own, never a fixed number: with fd 1 closed at start, a file this run opened may hold descriptor 1."""
+    try:
+        if stream is None:
+            return
+        fd = stream.fileno()
     except (OSError, ValueError, AttributeError):
         return
     try:
@@ -66,16 +160,50 @@ def _silence(stream: Any, fd: int) -> None:
 
 def _receipt_lost(reason: str, stdout_failed: bool = True) -> int:
     if stdout_failed:
-        _silence(sys.stdout, 1)
-    err = sys.stderr
-    try:
-        if err is None:
-            raise OSError("stderr is closed")
-        err.write(f"receipt not written: {reason}\n")
-        err.flush()
-    except (OSError, ValueError):
-        _silence(err, 2)   # stderr refused too: the exit code alone says it
+        _silence(sys.stdout)
+    _say(f"receipt not written: {reason}\n")   # stderr refused too: the exit code alone says it
     return EX_IOERR
+
+
+class _Version(argparse.Action):
+    """`--version` prints through the receipt writer: not written whole, the exit is 74 (argparse's own print exited
+    120 on a full stdout, "Exception ignored")"""
+
+    def __init__(self, option_strings, version=None, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help="show program's version number and exit", **kw):
+        super().__init__(option_strings=option_strings, dest=dest, default=default, nargs=0, help=help, **kw)
+        self.version = version
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        formatter = parser._get_formatter()
+        formatter.add_text(self.version)
+        parser._print_outcome(formatter.format_help())
+        parser.exit()
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse with its output through the writers above. Every message argparse prints (the usage and error lines
+    of a usage error, exit 2) goes through `_print_message` to stderr with a write that never raises (argparse's own:
+    with stderr full or its reader gone the interpreter's last flush exited 120; with stderr closed the usage went to
+    STDOUT, exit 1). `--help` and `--version` print the command's output: not written whole, the exit is 74."""
+
+    def _print_outcome(self, text: str) -> None:
+        try:
+            _write_all(text)
+        except OSError as e:
+            raise SystemExit(_receipt_lost(str(e) or type(e).__name__))
+
+    def print_help(self, file=None):
+        if file is not None:
+            return super().print_help(file)
+        self._print_outcome(self.format_help())
+
+    def _print_message(self, message, file=None):   # argparse's only writer: error() and exit() print through it
+        if not message:
+            return
+        if file is not None and file is not sys.stdout and file is not sys.stderr:   # a file a caller passed itself
+            file.write(message)
+        else:
+            _say(message)
 
 
 def _load_json(path: str) -> Any:
@@ -95,12 +223,16 @@ def main(argv: List[str] = None) -> int:
         return _receipt_lost(str(e))
     except OutputNotWritten as e:   # a promised file (pack, sidecar, drop file, seed) could not be written whole
         return _receipt_lost(str(e), stdout_failed=False)
+    except Exception:   # a refusal still printed as a traceback (exit 1, as before): through the writer that never raises,
+        import traceback   # so a full stderr or one whose reader has gone keeps exit 1 (the interpreter's own print exited 120)
+        _say(traceback.format_exc())
+        return 1
 
 
 def _main(argv: List[str] = None) -> int:
-    p = argparse.ArgumentParser(prog="cra", description="CRA evidence locker (SBOM, Art. 14 clock, SRP notices, 10-year seal) — offline-verifiable",
+    p = _Parser(prog="cra", description="CRA evidence locker (SBOM, Art. 14 clock, SRP notices, 10-year seal) — offline-verifiable",
                                 allow_abbrev=False)   # `--require-source` is not `--require-sources`: the three independent verifiers refuse it, so does the reference
-    p.add_argument("--version", action="version", version=f"cra-evidence {__version__}")
+    p.add_argument("--version", action=_Version, version=f"cra-evidence {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(s):
@@ -150,7 +282,12 @@ def _main(argv: List[str] = None) -> int:
     a = p.parse_args(argv)
 
     if a.cmd == "keygen":
-        _p(keygen(a.path)); return 0
+        try:
+            r = keygen(a.path)
+        except FileExistsError:   # the refusal (O_EXCL): an existing key is never overwritten — one line, no traceback
+            _say(f"keygen refused: {a.path} already exists (an existing key is never overwritten)\n")
+            return 1
+        _p(r); return 0
     if a.cmd == "schema":
         if a.template:
             sch = schema(a.stream)
@@ -183,10 +320,10 @@ def _main(argv: List[str] = None) -> int:
                 from .feeds import cisa_kev_ids, euvd_kev_ids, exploitation_signal
                 feed = cisa_kev_ids() if a.source == "cisa_kev" else euvd_kev_ids()
                 if feed["error"]:
-                    print(f"feed {a.source} unavailable ({feed['error']}): use --assert-source to record an unverified provenance", file=sys.stderr); return 1
+                    _say(f"feed {a.source} unavailable ({feed['error']}): use --assert-source to record an unverified provenance\n"); return 1
                 sig = exploitation_signal([a.id], feed if a.source == "cisa_kev" else None, feed if a.source == "enisa_euvd" else None)
                 if a.id.upper() not in {k.upper() for k in sig["actively_exploited"]}:
-                    print(f"{a.id} is NOT in {a.source} today: refusing to record that provenance (use --assert-source)", file=sys.stderr); return 1
+                    _say(f"{a.id} is NOT in {a.source} today: refusing to record that provenance (use --assert-source)\n"); return 1
                 exploited = True     # confirmed in a known-exploited catalogue: the clock and the provenance cannot diverge
         rec = VulnerabilityRecord(product_id=a.product, vuln_id=a.id, actively_exploited=exploited, awareness_utc=a.aware,
                                   status=a.status, exploitation_source=source, corrective_available_utc=a.fix_available,
@@ -238,7 +375,7 @@ def _main(argv: List[str] = None) -> int:
             try:   # a regular file within MAX_DOC_BYTES (a FIFO / device is unreadable, never a hang); strict JSON: a duplicate signer_id would make two readers disagree
                 ts = load_trust_store(read_regular(a.trust_store).decode("utf-8"))
             except (OSError, ValueError) as e:
-                print(f"trust store unreadable: {e}", file=sys.stderr); return 2
+                _say(f"trust store unreadable: {e}\n"); return 2
         r = verify_pack(a.pack, a.ledger, ts, a.log_pubkey, require_sources=a.require_sources); _p(r)
         # 0 = verified; 77 = NOT ASSESSED (assessed=false: this host or the verifier itself could not judge, and no layer
         # judged against the pack); 1 = a finding against the pack. Since 27/09/2026, as omega-evidence: before, both
