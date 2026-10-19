@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — 2026-10-17
+
+### Who is bound from when, and the horizons counted in years (`cra obligations`)
+
+- New module `cra_evidence/applicability.py`, pure functions on explicit instants (no clock read, nothing recorded):
+  `reporting_in_force(role, at, stream)` — manufacturer from 11/09/2026 (Art. 71(2)), also for products placed on the
+  market before 11/12/2027 (Art. 69(3)); open-source steward from 11/12/2027 (Art. 24(3), 71(2)) with its scope
+  condition recorded, `scope_condition_checked: false`; `legacy_product_scope()` (Art. 69(2)-(3)); `support_period()`
+  (Art. 13(8): `meets_minimum` / `shorter_declared` / `below_minimum`); `retention_until()` (13(13));
+  `update_available_until()` (13(9)); `user_information()` (14(8): the instant, never a computed deadline). A date of
+  the Regulation is read as 00:00:00 UTC of that day — a convention of this tool, stated in every result.
+- New subcommand `cra obligations --at <instant> [--role] [--stream] [--placed-on-market] [--substantially-modified]
+  [--support-period-end] [--shorter-use-reason] [--update-issued]`: exit 0, or 1 when a support period is below five
+  years with no declared shorter expected use; inconsistent options are usage errors (exit 2, nothing on stdout).
+- `tests/test_applicability_20261017.py`: every date boundary on both sides (one second, one day), 29 February, the
+  refusals, the CLI in process and as a real process. Written by Athena on 17/10/2026 in a session WITHOUT a shell: the
+  tests were NOT run when this entry was written — the first run is the measure.
+- Not changed: the ledger records, the pack, the verifiers. `VulnerabilityRecord.overdue()` still computes deadlines
+  for an awareness instant earlier than 11/09/2026 (by code reading); whether such an exploitation must be reported
+  from that date is a legal question left open, see `spec/LEGAL_BASIS.md`.
+
 ## 0.5.1 — 2026-10-12
 
 ### A receipt that could not be written exits 74

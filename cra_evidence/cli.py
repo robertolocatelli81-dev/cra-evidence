@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
 overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
-is FAIL (77 when it could not judge). Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
+is FAIL (77 when it could not judge), `obligations` when a support period is below the five-year minimum with no
+declared shorter expected use. Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
 not be written whole to stdout (full disk, closed pipe, closed or read-only stdout, a file size limit, also under -u /
 PYTHONUNBUFFERED), or what the subcommand promises could not be written: its ledger line, the copy of an ingested
 SBOM document, a file (`pack --out`, the `sign` sidecar, the `notice` drop file, the `keygen` seed, the ledger's
@@ -21,6 +22,7 @@ import sys
 from typing import Any, Dict, List
 
 from . import __version__
+from .applicability import ROLES, STREAMS
 from .locker import CRAEvidenceLocker
 from .sbom import resolved_components, sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx
 from .signing import keygen, load_key, sign_pack
@@ -284,6 +286,15 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--log-pubkey", help="trusted public key (hex) of the ledger's signed tip: detects a truncated tail")
     s.add_argument("--require-sources", action="store_true", help="every SBOM source document recorded by hash must be present next to the ledger and match (absence = FAIL)")
     s = sub.add_parser("feeds", help="read-only network checks: OSV positive control, KEV/EUVD exploitation signal for ids"); s.add_argument("ids", nargs="*")
+    s = sub.add_parser("obligations", help="which CRA obligations are in force for a role at an instant, and the horizons counted in years "
+                                           "(Art. 13(8), 13(9), 13(13), 14, 24(3), 69, 71); never reads the clock, records nothing")
+    s.add_argument("--role", default="manufacturer", choices=list(ROLES)); s.add_argument("--stream", default="vulnerability", choices=list(STREAMS))
+    s.add_argument("--at", required=True, help="the instant evaluated (ISO-8601 with zone)")
+    s.add_argument("--placed-on-market", help="instant the product was placed on the market (the latest placing you know of)")
+    s.add_argument("--substantially-modified", help="instant of a substantial modification (Art. 69(2)); whether it is substantial is yours to decide")
+    s.add_argument("--support-period-end", help="ISO-8601 end of the support period")
+    s.add_argument("--shorter-use-reason", help="why the support period is shorter than five years (Art. 13(8)): recorded, not assessed")
+    s.add_argument("--update-issued", help="instant a security update was issued: how long it must stay available (Art. 13(9))")
     for sp_ in sub.choices.values():
         sp_.allow_abbrev = False          # subparsers do not inherit it: `--require-source` must not become `--require-sources`
     a = p.parse_args(argv)
@@ -397,6 +408,25 @@ def _main(argv: List[str] = None) -> int:
             out["signal"] = exploitation_signal(a.ids, kev, eu)
         _p(out)
         return 0 if (pc["ok"] and not kev["error"] and not eu["error"]) else 1
+    if a.cmd == "obligations":
+        from .applicability import (legacy_product_scope, reporting_in_force, retention_until, support_period,
+                                    update_available_until)
+        if (a.substantially_modified or a.shorter_use_reason) and not a.placed_on_market:
+            p.error("obligations: --substantially-modified and --shorter-use-reason need --placed-on-market")
+        if a.support_period_end and not (a.placed_on_market or a.update_issued):
+            p.error("obligations: --support-period-end needs --placed-on-market or --update-issued")
+        ob: Dict[str, Any] = {"reporting": reporting_in_force(a.role, a.at, a.stream)}
+        if a.placed_on_market:
+            ob["legacy_scope"] = legacy_product_scope(a.placed_on_market, a.substantially_modified)
+            ob["retention"] = retention_until(a.placed_on_market, a.support_period_end)
+            if a.support_period_end:
+                ob["support_period"] = support_period(a.placed_on_market, a.support_period_end, a.shorter_use_reason)
+            elif a.shorter_use_reason:
+                p.error("obligations: --shorter-use-reason needs --support-period-end")
+        if a.update_issued:
+            ob["update_availability"] = update_available_until(a.update_issued, a.support_period_end)
+        _p(ob)
+        return 1 if ob.get("support_period", {}).get("status") == "below_minimum" else 0
     return 2
 
 

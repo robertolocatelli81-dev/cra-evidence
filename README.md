@@ -47,7 +47,15 @@ cra sign  cra_pack.json --key ~/.cra/log.key --signer-id myapp-ci
 cra seal  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --pack-sha3 <pack_sha3>
 cra verify cra_pack.json --trust-store trust.json --log-pubkey <hex> --require-sources   # exit 0 only if authenticity is not FAIL (and every stored SBOM document re-hashes)
 cra feeds CVE-2026-32202                                                     # OSV positive control (with CVE alias) + KEV/EUVD signal; exit 1 if any feed fails
+cra obligations --at 2026-10-17T00:00:00Z --role manufacturer --placed-on-market 2025-03-01T00:00:00Z \
+          --support-period-end 2031-03-01T00:00:00Z --update-issued 2026-10-01T00:00:00Z   # Art. 14 in force? Art. 69 legacy scope, support period (exit 1 below 5 years undeclared), retention, update availability
 ```
+
+`cra obligations` (unreleased, 17/10/2026) reads no clock and records nothing: it says, for an instant you give, whether
+Art. 14 binds a manufacturer (from 11/09/2026, products placed before 11/12/2027 included, Art. 69(3)) or an open-source
+steward (from 11/12/2027, Art. 24(3), its scope condition recorded and not checked), and computes the horizons the
+Regulation counts in years (Art. 13(8), 13(9), 13(13)). A date of the Regulation is read as 00:00 UTC of that day, a
+convention it states in every result.
 
 `cra verify` reports layers (pack JSON, kind, declared limits, pack digest, the pack's own verification snapshot,
 ledger chain + record binding + anchor, declared ledger state, stored SBOM source documents, signed tip, producer
