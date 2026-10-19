@@ -207,7 +207,7 @@ class ReceiptNotWritten(unittest.TestCase):
 
     def test_vuln_valid_and_invalid(self):
         self.check("vuln ok", self.py("vuln", *self.ledger_args(), "--id", "CVE-2026-0001", "--aware", self.recent()), 0, setup=self.fresh_ledger)
-        self.check("vuln bad", self.py("vuln", *self.ledger_args(), "--id", "CVE-2026-0002", "--aware", "2026-01-01T00:00:00Z", "--exploited"), 1, setup=self.fresh_ledger)
+        self.check("vuln bad", self.py("vuln", *self.ledger_args(), "--id", "CVE-2026-0002", "--aware", "2026-09-15T00:00:00Z", "--exploited"), 1, setup=self.fresh_ledger)
 
     def test_notice_valid_and_invalid(self):
         ok_fields = NOTICE_OK

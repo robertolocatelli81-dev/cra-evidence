@@ -2,7 +2,7 @@
 """`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
 overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
 is FAIL (77 when it could not judge), `obligations` when a support period is below the five-year minimum with no
-declared shorter expected use. Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
+declared shorter expected use (under one reading of the day, at least). Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
 not be written whole to stdout (full disk, closed pipe, closed or read-only stdout, a file size limit, also under -u /
 PYTHONUNBUFFERED), or what the subcommand promises could not be written: its ledger line, the copy of an ingested
 SBOM document, a file (`pack --out`, the `sign` sidecar, the `notice` drop file, the `keygen` seed, the ledger's
@@ -257,7 +257,7 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--no-store-source", action="store_true", help="do not copy the ingested document to <ledger>.sources/ (its SHA-256 is still recorded)")
     s.add_argument("--spec-version", default="1.6", choices=["1.6", "1.7"], help="CycloneDX version of the index export written into the record (default 1.6)")
     s = sub.add_parser("vuln", help="record a vulnerability-handling event"); common(s)
-    s.add_argument("--id", required=True); s.add_argument("--aware", required=True, help="awareness instant, ISO-8601 UTC")
+    s.add_argument("--id", required=True); s.add_argument("--aware", required=True, help="awareness instant, ISO-8601 UTC: with --exploited, awareness of the ACTIVE EXPLOITATION (the Art. 14 trigger); with --incident, of the severe incident")
     s.add_argument("--exploited", action="store_true"); s.add_argument("--source", default="manual", choices=["manual", "cisa_kev", "enisa_euvd", "vendor_advisory"])
     s.add_argument("--incident", action="store_true", help="severe incident (Art. 14(3)): final report one month after the 72 h notification")
     s.add_argument("--status", default="aware", choices=list(STATUSES)); s.add_argument("--fix-available", help="ISO-8601 UTC when the corrective measure became available")
@@ -289,7 +289,10 @@ def _main(argv: List[str] = None) -> int:
     s = sub.add_parser("obligations", help="which CRA obligations are in force for a role at an instant, and the horizons counted in years "
                                            "(Art. 13(8), 13(9), 13(13), 14, 24(3), 69, 71); never reads the clock, records nothing")
     s.add_argument("--role", default="manufacturer", choices=list(ROLES)); s.add_argument("--stream", default="vulnerability", choices=list(STREAMS))
-    s.add_argument("--at", required=True, help="the instant evaluated (ISO-8601 with zone)")
+    s.add_argument("--at", help="the instant evaluated: is the reporting obligation in force then? (ISO-8601 with zone)")
+    s.add_argument("--exploitation-aware", help="instant the reporter became aware of the ACTIVE EXPLOITATION (or, with --stream incident, of the "
+                                                "severe incident): does the Art. 14 obligation arise? (guidance C(2026) 5252 §217, non-binding)")
+    s.add_argument("--vulnerability-aware", help="instant the vulnerability itself became known (recorded; it never decides: §217)")
     s.add_argument("--placed-on-market", help="instant the product was placed on the market (the latest placing you know of)")
     s.add_argument("--substantially-modified", help="instant of a substantial modification (Art. 69(2)); whether it is substantial is yours to decide")
     s.add_argument("--support-period-end", help="ISO-8601 end of the support period")
@@ -409,24 +412,37 @@ def _main(argv: List[str] = None) -> int:
         _p(out)
         return 0 if (pc["ok"] and not kev["error"] and not eu["error"]) else 1
     if a.cmd == "obligations":
-        from .applicability import (legacy_product_scope, reporting_in_force, retention_until, support_period,
-                                    update_available_until)
+        from .applicability import (DEPENDS, art14_obligation, legacy_product_scope, reporting_in_force, retention_until,
+                                    support_period, update_available_until)
+        if not (a.at or a.exploitation_aware):
+            p.error("obligations: give --at and/or --exploitation-aware")
+        if a.vulnerability_aware and not a.exploitation_aware:
+            p.error("obligations: --vulnerability-aware needs --exploitation-aware")
         if (a.substantially_modified or a.shorter_use_reason) and not a.placed_on_market:
             p.error("obligations: --substantially-modified and --shorter-use-reason need --placed-on-market")
         if a.support_period_end and not (a.placed_on_market or a.update_issued):
             p.error("obligations: --support-period-end needs --placed-on-market or --update-issued")
-        ob: Dict[str, Any] = {"reporting": reporting_in_force(a.role, a.at, a.stream)}
-        if a.placed_on_market:
-            ob["legacy_scope"] = legacy_product_scope(a.placed_on_market, a.substantially_modified)
-            ob["retention"] = retention_until(a.placed_on_market, a.support_period_end)
-            if a.support_period_end:
-                ob["support_period"] = support_period(a.placed_on_market, a.support_period_end, a.shorter_use_reason)
-            elif a.shorter_use_reason:
-                p.error("obligations: --shorter-use-reason needs --support-period-end")
-        if a.update_issued:
-            ob["update_availability"] = update_available_until(a.update_issued, a.support_period_end)
+        if a.shorter_use_reason and not a.support_period_end:
+            p.error("obligations: --shorter-use-reason needs --support-period-end")
+        ob: Dict[str, Any] = {}
+        try:   # an instant without a zone, inconsistent instants, a reason for a period that needs none: usage (exit 2, nothing printed)
+            if a.at:
+                ob["reporting"] = reporting_in_force(a.role, a.at, a.stream)
+            if a.exploitation_aware:
+                ob["art14_obligation"] = art14_obligation(a.exploitation_aware, a.role, a.stream, a.vulnerability_aware)
+            if a.placed_on_market:
+                ob["legacy_scope"] = legacy_product_scope(a.placed_on_market, a.substantially_modified)
+                ob["retention"] = retention_until(a.placed_on_market, a.support_period_end)
+                if a.support_period_end:
+                    ob["support_period"] = support_period(a.placed_on_market, a.support_period_end, a.shorter_use_reason)
+            if a.update_issued:
+                ob["update_availability"] = update_available_until(a.update_issued, a.support_period_end)
+        except ValueError as e:
+            p.error(f"obligations: {e}")
         _p(ob)
-        return 1 if ob.get("support_period", {}).get("status") == "below_minimum" else 0
+        sp_ = ob.get("support_period", {})
+        below = sp_.get("status") == "below_minimum" or (sp_.get("status") == DEPENDS and "below_minimum" in [x["status"] for x in sp_["readings"].values()])
+        return 1 if below else 0   # below the minimum under one reading is a finding: exit 1, both readings in the JSON
     return 2
 
 

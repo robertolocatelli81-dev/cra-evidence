@@ -6,6 +6,11 @@ Deadlines, as stated by the European Commission (digital-strategy.ec.europa.eu/e
 later than 14 days after a corrective or mitigating measure is AVAILABLE (not 14 days after awareness — the detail
 summaries get wrong); for a severe incident the final report is due one month after the 72 h notification.
 The obligation arises only for ACTIVELY EXPLOITED vulnerabilities: a non-exploited one is never "overdue".
+For an actively exploited vulnerability `awareness_utc` is the instant the manufacturer became aware of its ACTIVE
+EXPLOITATION (the Art. 14 trigger; Commission guidance C(2026) 5252 annex §217, non-binding), for an incident the instant
+it became aware of the severe incident. Since 0.6.0 `overdue()` also says whether the obligation arose at all
+(`applicability.art14_obligation`): an exploitation known before 11 September 2026 is not reported retroactively, and
+an awareness between 00:00 Europe/Brussels and 00:00 UTC of that day depends on the time-zone reading — both answers given.
 """
 from __future__ import annotations
 
@@ -108,9 +113,26 @@ class VulnerabilityRecord:
                 "final_report_due_utc": fr, "final_report_basis": basis}
 
     def overdue(self, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
+        from .applicability import READINGS, art14_obligation   # here: applicability imports this module
         now = now_utc or datetime.now(timezone.utc)
+        reportable = bool(self.actively_exploited) or self.kind == "incident"
+        a14 = art14_obligation(self.awareness_utc, "manufacturer", self.kind) if reportable else None
+        if a14 is None or a14["obligation"] is not None:
+            out = self._overdue(now, reportable and (a14 is None or a14["obligation"]))
+            out["art14_obligation"] = a14
+            return out
+        # the two readings of 11 September 2026 disagree: both answers, the overdue flags of the reading that obliges
+        # (any_overdue true when one reading is overdue: stated in `time_zone_reading`, never chosen in silence)
+        per = {r: self._overdue(now, a14["readings"][r]["obligation"]) for r in READINGS}
+        out = dict(self._overdue(now, True))
+        out["reporting_applicable"] = None
+        out["time_zone_reading"] = {"outcome": a14["outcome"], **{r: {"reporting_applicable": per[r]["reporting_applicable"],
+                                                                       "any_overdue": per[r]["any_overdue"]} for r in READINGS}}
+        out["art14_obligation"] = a14
+        return out
+
+    def _overdue(self, now: datetime, applicable: bool) -> Dict[str, Any]:
         d = self.deadlines()
-        applicable = bool(self.actively_exploited) or self.kind == "incident"
         def _state(due_iso, sent_iso):
             if not applicable or due_iso is None:
                 return {"overdue": False, "late": False}

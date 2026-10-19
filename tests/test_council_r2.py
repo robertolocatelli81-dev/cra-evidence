@@ -237,10 +237,11 @@ class TestCouncilR2(unittest.TestCase):
     def test_cli_vuln_exit_code_on_overdue(self):
         from cra_evidence.cli import main
         led = os.path.join(self.d, "l.jsonl")
-        rc = main(["vuln", "--ledger", led, "--product", "p", "--version", "1", "--id", "CVE-1", "--aware", "2026-01-01T00:00:00Z", "--exploited"])
+        # 0.6.0: awareness after 11/09/2026 (an exploitation known before it is not reported retroactively, guidance §217)
+        rc = main(["vuln", "--ledger", led, "--product", "p", "--version", "1", "--id", "CVE-1", "--aware", "2026-09-15T00:00:00Z", "--exploited"])
         self.assertEqual(rc, 1)
-        rc = main(["vuln", "--ledger", led, "--product", "p", "--version", "1", "--id", "CVE-1", "--aware", "2026-01-01T00:00:00Z", "--exploited",
-                   "--ew-sent", "2026-01-01T10:00:00Z", "--notified", "2026-01-02T00:00:00Z", "--final-sent", "2026-01-20T00:00:00Z", "--fix-available", "2026-01-10T00:00:00Z"])
+        rc = main(["vuln", "--ledger", led, "--product", "p", "--version", "1", "--id", "CVE-1", "--aware", "2026-09-15T00:00:00Z", "--exploited",
+                   "--ew-sent", "2026-09-15T10:00:00Z", "--notified", "2026-09-16T00:00:00Z", "--final-sent", "2026-10-03T00:00:00Z", "--fix-available", "2026-09-24T00:00:00Z"])
         self.assertEqual(rc, 0)
 
 

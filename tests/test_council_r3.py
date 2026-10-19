@@ -171,7 +171,7 @@ class TestCouncilR3(unittest.TestCase):
         feeds.cisa_kev_ids = lambda timeout=60: {"ids": {"CVE-2021-44228"}, "count": 1, "error": None}
         led = os.path.join(self.d, "l.jsonl")
         try:
-            rc = main(["vuln", "--ledger", led, "--product", "p", "--version", "1", "--id", "CVE-2021-44228", "--aware", "2026-01-01T00:00:00Z", "--source", "cisa_kev"])
+            rc = main(["vuln", "--ledger", led, "--product", "p", "--version", "1", "--id", "CVE-2021-44228", "--aware", "2026-09-15T00:00:00Z", "--source", "cisa_kev"])   # 0.6.0: after 11/09/2026, so the Art. 14 obligation arises
         finally:
             feeds.cisa_kev_ids = oldk
         self.assertEqual(rc, 1)   # exploited (forced) and overdue → 1
