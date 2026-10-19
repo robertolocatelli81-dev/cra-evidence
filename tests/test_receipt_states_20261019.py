@@ -16,6 +16,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "verifiers"))
 VP = importlib.import_module("cra_evidence.verify_pack")
+_bind = importlib.import_module("cra_evidence.locker")._bind
 try:
     import cryptography  # noqa: F401
     HAVE_CRYPTO = True
@@ -132,6 +133,76 @@ class TestStates(unittest.TestCase):
         self.assertEqual(r["policy"]["unmet"], ["ledger_required"])
         self.assertEqual(r["states"]["ledger_anchor"]["reasons"], ["not_present"])
         self.assertEqual(r["states"]["signed_tip"]["reasons"], ["ledger_not_verified"])
+        self.assertEqual(r["states"]["source_documents"]["reasons"], ["ledger_not_verified"])
+
+    def test_ledger_that_is_not_a_file_is_contradicted_one_that_cannot_be_read_is_not(self):
+        d, pack = self.copy("full")
+        led = os.path.join(d, "cra.ledger.jsonl")
+        os.remove(led); os.mkdir(led)
+        r = VP.verify_pack(pack, trust_store=self.trust("full"))
+        self.assertEqual(r["states"]["ledger_anchor"], {"state": "contradicted", "reasons": ["ledger_malformed"]})
+        if os.geteuid() != 0:   # root reads a chmod-000 file: the case does not exist for it
+            d, pack = self.copy("full")
+            os.chmod(os.path.join(d, "cra.ledger.jsonl"), 0); os.chmod(pack + ".sig.json", 0)
+            r = VP.verify_pack(pack, trust_store=self.trust("full"))
+            self.assertEqual(r["states"]["ledger_anchor"], {"state": "not_evaluated", "reasons": ["unreadable"]})
+            self.assertEqual(r["states"]["producer_signature"], {"state": "not_evaluated", "reasons": ["unreadable"]})
+            self.assertFalse(r["ok"]); self.assertTrue(r["assessed"])
+        d, pack = self.copy("full")
+        os.remove(pack + ".sig.json"); os.mkdir(pack + ".sig.json")
+        r = VP.verify_pack(pack, trust_store=self.trust("full"))
+        self.assertEqual(r["states"]["producer_signature"], {"state": "contradicted", "reasons": ["sidecar_malformed"]})
+
+    def _rechain(self, led, change):
+        from cra_evidence.ledger import entry_hash
+        with open(led, encoding="utf-8") as f:
+            es = [json.loads(x) for x in f.read().splitlines() if x.strip()]
+        change(es)
+        prev = "0" * 64
+        for e in es:
+            e["prev_hash"] = prev; e["self_hash"] = entry_hash({k: v for k, v in e.items() if k != "self_hash"}); prev = e["self_hash"]
+        with open(led, "w", encoding="utf-8") as f:
+            f.write("".join(json.dumps(e) + "\n" for e in es))
+
+    def test_entry_unknown_member_in_a_consistent_chain(self):
+        d, pack = self.copy("unsigned")
+        self._rechain(os.path.join(d, "cra.ledger.jsonl"), lambda es: es[0].update({"x_unknown": 1}))
+        with open(pack, encoding="utf-8") as f:
+            p = json.load(f)
+        led = os.path.join(d, "cra.ledger.jsonl")
+        with open(led, encoding="utf-8") as f:
+            es = [json.loads(x) for x in f.read().splitlines() if x.strip()]
+        p["ledger_last_self_hash"] = es[p["ledger_entries"] - 1]["self_hash"]   # the declared state follows the rewritten chain
+        from cra_evidence.canonical import sha3_hex
+        p["pack_sha3"] = sha3_hex({k: v for k, v in p.items() if k != "pack_sha3"})
+        for e in es:
+            if e["data"].get("kind") == "cra_pack_anchor":
+                e["data"]["anchored_pack_sha3"] = p["pack_sha3"]
+                e["data"]["record_sha3"] = sha3_hex({k: v for k, v in e["data"].items() if k != "record_sha3"})
+        with open(led, "w", encoding="utf-8") as f:
+            f.write("".join(json.dumps(e) + "\n" for e in es))
+        self._rechain(led, lambda es: None)
+        with open(pack, "w", encoding="utf-8") as f:
+            json.dump(p, f)
+        r = VP.verify_pack(pack)
+        self.assertEqual(r["states"]["ledger_anchor"], {"state": "contradicted", "reasons": ["entry_unknown_member"]})
+        self.assertTrue(r["anchored"]); self.assertFalse(r["ok"])
+
+    def test_declared_ledger_state_that_is_not_the_ledgers(self):
+        """The pack is anchored and the chain verifies, but the ledger state it declares is not the ledger's."""
+        d, pack = self.copy("unsigned")
+        from cra_evidence.canonical import sha3_hex
+        with open(pack, encoding="utf-8") as f:
+            p = json.load(f)
+        p["ledger_last_self_hash"] = "ab" * 32
+        p["pack_sha3"] = sha3_hex({k: v for k, v in p.items() if k != "pack_sha3"})
+        with open(pack, "w", encoding="utf-8") as f:
+            json.dump(p, f)
+        from cra_evidence.ledger import Ledger
+        Ledger(os.path.join(d, "cra.ledger.jsonl")).append(_bind({"kind": "cra_pack_anchor", "anchored_pack_sha3": p["pack_sha3"], "pack_file": "cra_pack.json"}))
+        r = VP.verify_pack(pack)
+        self.assertTrue(r["anchored"])
+        self.assertEqual(r["states"]["ledger_anchor"], {"state": "contradicted", "reasons": ["state_mismatch"]})
 
     def test_unsigned_unanchored_is_authenticity_basis(self):
         d, pack = self.copy("unsigned")

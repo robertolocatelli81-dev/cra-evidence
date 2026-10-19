@@ -414,8 +414,8 @@ def _main(argv: List[str] = None) -> int:
     if a.cmd == "obligations":
         from .applicability import (DEPENDS, art14_obligation, legacy_product_scope, reporting_in_force, retention_until,
                                     support_period, update_available_until)
-        if not (a.at or a.exploitation_aware):
-            p.error("obligations: give --at and/or --exploitation-aware")
+        if not (a.at or a.exploitation_aware or a.placed_on_market or a.update_issued):
+            p.error("obligations: give at least one of --at, --exploitation-aware, --placed-on-market, --update-issued")
         if a.vulnerability_aware and not a.exploitation_aware:
             p.error("obligations: --vulnerability-aware needs --exploitation-aware")
         if (a.substantially_modified or a.shorter_use_reason) and not a.placed_on_market:

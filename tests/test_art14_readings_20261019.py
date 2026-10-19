@@ -41,6 +41,11 @@ class BrusselsRule(unittest.TestCase):
                 self.assertEqual(A.brussels_offset(t), t.astimezone(BXL).utcoffset(), t)
             d += timedelta(days=1); n += 1
         self.assertEqual(n, 14976)
+        for y in range(2000, 2041):   # the transition instants themselves (01:00:00 UTC) and one second before
+            for m in (3, 10):
+                t = A._last_sunday(y, m).replace(hour=1)
+                for u in (t - timedelta(seconds=1), t):
+                    self.assertEqual(A.brussels_offset(u), u.astimezone(BXL).utcoffset(), u)
         self.assertEqual(A.day_start(2026, 9, 11, "europe_brussels").isoformat(), "2026-09-10T22:00:00+00:00")
         self.assertEqual(A.day_start(2027, 12, 11, "europe_brussels").isoformat(), "2027-12-10T23:00:00+00:00")
 
@@ -129,6 +134,12 @@ class ObligationsCLI(unittest.TestCase):
         rc, out, _ = _run(["obligations", "--exploitation-aware", "2026-09-10T23:30:00Z", "--vulnerability-aware", "2026-08-01T00:00:00Z"])
         self.assertEqual(rc, 0); r = json.loads(out)
         self.assertEqual(r["art14_obligation"]["outcome"], "depends_on_time_zone_reading"); self.assertNotIn("reporting", r)
+
+    def test_support_period_below_under_one_reading_exits_1(self):
+        rc, out, _ = _run(["obligations", "--placed-on-market", "2028-01-15T00:00:00Z", "--support-period-end", "2033-01-15T23:30:00Z"])
+        self.assertEqual(rc, 1); self.assertEqual(json.loads(out)["support_period"]["status"], "depends_on_time_zone_reading")
+        rc, out, _ = _run(["obligations", "--placed-on-market", "2028-01-15T00:00:00Z", "--support-period-end", "2033-01-16T00:00:00Z"])
+        self.assertEqual(rc, 0)
 
     def test_usage(self):
         for argv in (["obligations", "--vulnerability-aware", "2026-08-01T00:00:00Z", "--at", "2027-01-01T00:00:00Z"],
