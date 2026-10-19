@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import re
 
-from .ledger import parse_line, read_regular
+from .ledger import UnreadableFile, parse_line, read_regular
 from .outputs import OutputNotWritten, write_file
 
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
@@ -220,28 +220,29 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
     try:                                                # one rule in the four: lstat ENOENT/ENOTDIR = no sidecar; any other error = a sidecar path that cannot be used
         os.lstat(sp)
     except (FileNotFoundError, NotADirectoryError):
-        return {"status": "SKIP", "detail": "pack not signed"}
+        return {"status": "SKIP", "reason": "not_present", "detail": "pack not signed"}
     except OSError as e:
-        return {"status": "FAIL", "detail": f"sidecar path unusable ({e.errno}: {e.strerror})"}
+        return {"status": "FAIL", "reason": "unreadable", "detail": f"sidecar path unusable ({e.errno}: {e.strerror})"}
     try:                                                # a regular file within MAX_DOC_BYTES (a FIFO / device is a FAIL, never a hang)
         side = parse_line(read_regular(sp).decode("utf-8"))              # strict: duplicate keys / NaN / UTF-8 refused like the verifiers
         if pack is None:
             pack = parse_line(read_regular(pack_path).decode("utf-8"))   # the verifier passes the pack it already read (read once)
-    except (OSError, ValueError, RecursionError) as e:
-        return {"status": "FAIL", "detail": f"unreadable: {str(e)[:120]}"}
+    except (OSError, ValueError, RecursionError) as e:   # 0.6.0 reason: a host read error is `unreadable`; content is `sidecar_malformed`
+        why = "unreadable" if isinstance(e, OSError) and not isinstance(e, UnreadableFile) else "sidecar_malformed"
+        return {"status": "FAIL", "reason": why, "detail": f"unreadable: {str(e)[:120]}"}
     if not isinstance(side, dict) or not isinstance(pack, dict):
-        return {"status": "FAIL", "detail": "sidecar or pack is not a JSON object"}
+        return {"status": "FAIL", "reason": "sidecar_malformed", "detail": "sidecar or pack is not a JSON object"}
     unknown = sidecar_unknown_fields(side)
     if unknown:
-        return {"status": "FAIL", "detail": "sidecar field not in the closed schema: " + ", ".join(unknown)[:120]}
+        return {"status": "FAIL", "reason": "sidecar_malformed", "detail": "sidecar field not in the closed schema: " + ", ".join(unknown)[:120]}
     try:
         digest = pack_digest(pack)
     except TypeError as e:
-        return {"status": "FAIL", "detail": f"pack not canonicalisable: {e}"}
+        return {"status": "FAIL", "reason": "digest_mismatch", "detail": f"pack not canonicalisable: {e}"}
     if pack.get("pack_sha3") != digest:
-        return {"status": "FAIL", "detail": "content does not match pack_sha3 (modified after signing)"}
+        return {"status": "FAIL", "reason": "digest_mismatch", "detail": "content does not match pack_sha3 (modified after signing)"}
     if side.get("signed_pack_sha3") != digest:
-        return {"status": "FAIL", "detail": "pack changed after signature (digest differs from the signed one)"}
+        return {"status": "FAIL", "reason": "digest_mismatch", "detail": "pack changed after signature (digest differs from the signed one)"}
     try:
         _, Ed25519PublicKey, _ = _ed()
     except ImportError:
@@ -249,26 +250,26 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         # than a finding about the pack. Measured 24/09/2026 while building the 0.3.1 release: a pack signed minutes
         # earlier with the KMS key verified as authenticity=FAIL in a venv without `cryptography` — our own missing
         # library reported with the value of a bad signature, on our own release artifact.
-        return {"status": "FAIL", "assessed": False,
+        return {"status": "FAIL", "assessed": False, "reason": "instrument_failure",
                 "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
     if not sidecar_fields_ok(side):   # the signed fields must exist as strings (a missing field is never signed "as null")
-        return {"status": "FAIL", "detail": "sidecar field missing or not a string (signed_pack_sha3, signer_id, signed_utc instant, public_key_hex, signature_hex; alg if present)"}
+        return {"status": "FAIL", "reason": "sidecar_malformed", "detail": "sidecar field missing or not a string (signed_pack_sha3, signer_id, signed_utc instant, public_key_hex, signature_hex; alg if present)"}
     if not (_hex_ok(side.get("public_key_hex"), 64) and _hex_ok(side.get("signature_hex"), 128)):
-        return {"status": "FAIL", "detail": "signature invalid for the declared key (key/signature must be lower-case hex of exact length)"}
+        return {"status": "FAIL", "reason": "signature_invalid", "detail": "signature invalid for the declared key (key/signature must be lower-case hex of exact length)"}
     if weak_ed25519_key(side["public_key_hex"]):
-        return {"status": "FAIL", "detail": "signature invalid for the declared key (weak key: small order or non-canonical)"}
+        return {"status": "FAIL", "reason": "signature_invalid", "detail": "signature invalid for the declared key (weak key: small order or non-canonical)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001
-        return {"status": "FAIL", "detail": f"signature invalid for the declared key ({type(e).__name__})"}
+        return {"status": "FAIL", "reason": "signature_invalid", "detail": f"signature invalid for the declared key ({type(e).__name__})"}
     fp = hashlib.sha256(bytes.fromhex(side["public_key_hex"])).hexdigest()[:16]   # recomputed, never echoed
     # absent = not declared; PRESENT must be the key's fingerprint — `null` is a malformed value like any other non-match
     # (the signer always writes the 16-hex string). Measured 25/09/2026: `fingerprint: null` passed in the five while an
     # int / list / object failed: absent != null.
     if "fingerprint" in side and side["fingerprint"] != fp:
-        return {"status": "FAIL", "detail": "declared fingerprint does not match the signing key"}
+        return {"status": "FAIL", "reason": "signature_invalid", "detail": "declared fingerprint does not match the signing key"}
     if not isinstance(side.get("signer_id"), str):
-        return {"status": "FAIL", "detail": "signer_id must be a string"}
+        return {"status": "FAIL", "reason": "sidecar_malformed", "detail": "signer_id must be a string"}
     out = {"status": "PASS", "signer_id": side.get("signer_id"), "fingerprint": fp, "trusted": False}
     if trust_store is not None:
         expected = trust_store.get(side.get("signer_id", ""))

@@ -12,7 +12,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from .canonical import sha3_hex
-from .ledger import FileTooLarge, Ledger, NotRegularFile, open_regular, parse_line, read_regular
+from .ledger import FileTooLarge, Ledger, NotRegularFile, UnreadableFile, open_regular, parse_line, read_regular
 from .locker import HONEST_SCOPE_MARK, PACK_KIND, RECORD_KINDS, source_file
 from .signing import verify_pack_signature, verify_tip
 
@@ -30,6 +30,46 @@ from .sbom import MAX_SOURCE_BYTES   # noqa: E402 — a stored generator documen
 # blocking and read only if the OPEN descriptor is a regular file, within a declared bound (ledger.read_regular): a FIFO
 # must not hang a verifier and a symlink to /dev/zero must not exhaust its memory — in the four verifiers alike.
 FAULT_ENV = "CRA_VERIFY_INJECT_FAULT"   # test hook: "1" raises inside the guarded verification (only ever an inconclusive FAIL)
+
+# 0.6.0 — spec/RECEIPT.md: admission, refusal_class, states (vocabulary below, immutable), policy. Computed BESIDE the
+# 0.5.1 fields, never from them: `ok` keeps its 0.5.1 computation and its equation with the states is proved on a bench.
+STATES_VOCABULARY = "cra-evidence/states-1"
+REFUSAL_CLASSES = ("format_unsupported", "unknown_member", "malformed")
+SUBJECTS = ("sealed_content", "ledger_anchor", "signed_tip", "source_documents", "producer_signature")
+STATES = ("verified", "contradicted", "indeterminate", "not_evaluated")
+REASONS = {   # the closed reason list of each subject (spec/RECEIPT.md §2): (contradicted reasons, not_evaluated reasons)
+    "sealed_content": (("digest_mismatch", "self_verification_failed"), ()),
+    "ledger_anchor": (("ledger_malformed", "entry_unknown_member", "chain_broken", "record_unbound", "not_anchored", "state_mismatch"),
+                      ("not_present", "unreadable")),
+    "signed_tip": (("tip_invalid", "tail_mismatch"), ("key_not_given", "not_present", "ledger_not_verified", "instrument_failure", "unreadable")),
+    "source_documents": (("source_mismatch", "record_malformed"), ("hash_only", "not_present", "ledger_not_verified", "unreadable")),
+    "producer_signature": (("sidecar_malformed", "digest_mismatch", "signature_invalid"),
+                           ("self_asserted", "key_unresolved", "not_present", "instrument_failure", "unreadable")),
+}
+POLICY_UNMET = ("trusted_signer", "ledger_required", "tip_required", "sources_required", "authenticity_basis")
+FAIL_CLOSED_REASONS = ("instrument_failure", "unreadable")   # not_evaluated, yet `ok` is false (spec/RECEIPT.md §4)
+
+
+def _fold(elements: List[tuple]) -> Dict[str, Any]:
+    """One state per subject from its elements (state, reason, detail): contradicted > not_evaluated/instrument_failure >
+    other not_evaluated > verified; `verified` only when every element is; `reasons` = one per element not verified."""
+    if not elements:
+        return {"state": "not_evaluated", "reasons": ["not_present"]}
+
+    def rank(e):
+        return 3 if e[0] == "contradicted" else 2 if e[1] == "instrument_failure" else 1 if e[0] == "not_evaluated" else 0
+    out: Dict[str, Any] = {"state": max(elements, key=rank)[0], "reasons": [e[1] for e in elements if e[0] != "verified"]}
+    details = [e[2] for e in elements if len(e) > 2 and e[2]]
+    if details:
+        out["detail"] = "; ".join(details)[:300]
+    return out
+
+
+def _with_admission(r: Dict[str, Any], admission: str, refusal_class: Optional[str] = None,
+                    states: Optional[Dict[str, Any]] = None, policy: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    r.update({"admission": admission, "refusal_class": refusal_class, "states_vocabulary": STATES_VOCABULARY,
+              "states": states, "policy": policy})
+    return r
 
 
 def _present(p: str) -> bool:
@@ -84,14 +124,16 @@ def verify_pack(path: str, ledger_path: Optional[str] = None, trust_store: Optio
         # error, indistinguishable from a tampered one. The exit code and the (ok, authenticity, anchored) tuple are
         # unchanged on purpose. Since 25/09/2026 the Go/JS/Rust verifiers carry the same layer and `assessed=False` on
         # their own internal errors (recover / catch / catch_unwind), and the oracle compares `assessed` too.
-        return {"ok": False, "assessed": False, "authenticity": "FAIL", "anchored": False,
-                "layers": [_layer("verifier-exception", "FAIL", f"{type(e).__name__}: {str(e)[:160]}")], "pack_sha3": None}
+        return _with_admission({"ok": False, "assessed": False, "authenticity": "FAIL", "anchored": False,
+                                "layers": [_layer("verifier-exception", "FAIL", f"{type(e).__name__}: {str(e)[:160]}")], "pack_sha3": None},
+                               "not_evaluated")
 
 
-def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: bool) -> Dict[str, str]:
+def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: bool, el: Optional[List[tuple]] = None) -> Dict[str, str]:
     """Layer over the SBOM source documents: for every cra_sbom record with source.sha256, the file
     <ledger>.sources/<sha256>.json must hash to that value when present. A mismatch is a FAIL; absence is a SKIP
-    (hash-only evidence) unless required."""
+    (hash-only evidence) unless required. `el` (0.6.0) collects one state element per recorded document."""
+    el = [] if el is None else el
     wanted: Dict[str, int] = {}
     malformed = 0
     for e in entries:
@@ -102,10 +144,12 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
         if src.get("sha256") in (None, ""):
             if src.get("format") in EXTERNAL_FORMATS:         # an ingested document is always recorded WITH its hash: a record without it is malformed
                 malformed += 1
+                el.append(("contradicted", "record_malformed"))
             continue                                          # otherwise absent / null / empty: no hash recorded (installed floor)
         h = src["sha256"]
         if not isinstance(h, str) or not HEX64.fullmatch(h):
             malformed += 1                                    # present but not a SHA-256: a FAIL, never a path
+            el.append(("contradicted", "record_malformed"))
             continue
         wanted[h] = wanted.get(h, 0) + 1
     if not wanted and not malformed:
@@ -117,25 +161,32 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
             os.lstat(fp)
         except FileNotFoundError:
             absent += 1                         # genuinely absent (hash-only evidence)
+            el.append(("not_evaluated", "hash_only"))
             continue
         except OSError as e:
             bad.append(f"{h[:16]}… stored path unusable ({e.errno})")
+            el.append(("not_evaluated", "unreadable"))
             continue
         try:                                    # opened without blocking, judged on the open descriptor, bounded
             got = hashlib.sha256(read_regular(fp, MAX_SOURCE_BYTES)).hexdigest()
         except NotRegularFile:                  # something IS there but it is not a regular file: never "absent"
             bad.append(f"{h[:16]}… stored path is not a regular file")
+            el.append(("contradicted", "source_mismatch", "stored path is not a regular file"))
             continue
         except FileTooLarge:
             bad.append(f"{h[:16]}… stored file exceeds {MAX_SOURCE_BYTES} bytes")
+            el.append(("contradicted", "source_mismatch", "stored file above the bound"))
             continue
         except OSError as e:
             bad.append(f"{h[:16]}… unreadable ({type(e).__name__})")
+            el.append(("not_evaluated", "unreadable"))
             continue
         if got == h:
             present += 1
+            el.append(("verified", None))
         else:
             bad.append(f"{h[:16]}… stored bytes hash to {got[:16]}…")
+            el.append(("contradicted", "source_mismatch"))
     if bad:
         return _layer("source-documents", "FAIL", f"{len(bad)} source document(s) do not match their recorded SHA-256: " + "; ".join(bad[:3]))
     if absent:
@@ -146,35 +197,51 @@ def _source_documents(ledger_path: str, entries: List[Dict[str, Any]], require: 
 
 def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=False) -> Dict[str, Any]:
     layers: List[Dict[str, str]] = []
+    el: Dict[str, List[tuple]] = {k: [] for k in SUBJECTS}   # 0.6.0 state elements, recorded where each check runs
     try:
         # OS path semantics (pathlib would turn "p.json/" into "p.json"; the three do not); a regular file within
         # MAX_DOC_BYTES; strict: duplicate keys / NaN / invalid UTF-8 refused, like the three verifiers
         pack = parse_line(read_regular(path).decode("utf-8"))
         layers.append(_layer("pack-json", "PASS"))
     except (OSError, ValueError, RecursionError) as e:
-        return {"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", str(e))], "pack_sha3": None}
+        return _with_admission({"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", str(e))], "pack_sha3": None},
+                               "refused", "malformed")
     if not isinstance(pack, dict):
-        return {"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", "pack is not a JSON object")], "pack_sha3": None}
-    layers.append(_layer("pack-kind", "PASS" if pack.get("kind") == PACK_KIND else "FAIL", str(pack.get("kind"))))
+        return _with_admission({"ok": False, "assessed": True, "authenticity": "FAIL", "anchored": False, "layers": [_layer("pack-json", "FAIL", "pack is not a JSON object")], "pack_sha3": None},
+                               "refused", "malformed")
+    refusal: List[str] = []   # refusal classes in the order they are checked (spec/RECEIPT.md §1): the first is the class
+    kind_ok = pack.get("kind") == PACK_KIND
+    if not kind_ok:
+        refusal.append("format_unsupported")
+    layers.append(_layer("pack-kind", "PASS" if kind_ok else "FAIL", str(pack.get("kind"))))
     # closed schema (2026-10-10): the pack's top level is exactly what the locker writes; a key nobody defined is a FAIL that
     # names it — the pack is sealed by pack_sha3 and signed, so a pack WRITTEN with an extra key verified trusted-signed
     unknown_top = sorted(k for k in pack if k not in PACK_KEYS)
+    if unknown_top:
+        refusal.append("unknown_member")
     layers.append(_layer("pack-schema", "FAIL" if unknown_top else "PASS", ("unknown top-level field(s): " + ", ".join(unknown_top))[:160] if unknown_top else "top-level fields in the closed schema"))
     scope = pack.get("honest_scope")
     scope_ok = isinstance(scope, str) and HONEST_SCOPE_MARK in scope      # a string, not a list that happens to contain the mark
+    if not scope_ok:
+        refusal.append("malformed")
     layers.append(_layer("honest-scope", "PASS" if scope_ok else "FAIL",
                          "declared limits present" if scope_ok else f"missing the declared limit {HONEST_SCOPE_MARK!r} (honest_scope must be a string containing it)"))
     try:
         computed = sha3_hex({k: v for k, v in pack.items() if k != "pack_sha3"})
     except TypeError as e:
         computed = None
+        refusal.append("malformed")
         layers.append(_layer("pack-sha3", "FAIL", f"pack not canonicalisable: {e}"))
     if computed is not None:
-        layers.append(_layer("pack-sha3", "PASS" if pack.get("pack_sha3") == computed else "FAIL",
+        digest_ok = pack.get("pack_sha3") == computed
+        el["sealed_content"].append(("verified", None) if digest_ok else ("contradicted", "digest_mismatch"))
+        layers.append(_layer("pack-sha3", "PASS" if digest_ok else "FAIL",
                              f"declared {str(pack.get('pack_sha3'))[:16]}… computed {computed[:16]}…"))
     # the pack's own verification snapshot must be clean (a producer must never ship a pack over a broken chain)
     pv = pack.get("verification") if isinstance(pack.get("verification"), dict) else {}
-    layers.append(_layer("pack-self-verification", "PASS" if (pv.get("chain_ok") is True and pv.get("record_digests_bound") is True) else "FAIL",
+    snap_ok = pv.get("chain_ok") is True and pv.get("record_digests_bound") is True
+    el["sealed_content"].append(("verified", None) if snap_ok else ("contradicted", "self_verification_failed"))
+    layers.append(_layer("pack-self-verification", "PASS" if snap_ok else "FAIL",
                          f"chain_ok={pv.get('chain_ok')} record_digests_bound={pv.get('record_digests_bound')}"))
     # ledger: explicit path wins; otherwise only the NAME next to the pack (never a path from the pack): ledger_file must be
     # a plain file name — a non-string, an empty string or anything with a path separator is a malformed pack field
@@ -183,16 +250,24 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     if lp is None and lf is not None and not lf_bad:
         lp = os.path.join(os.path.dirname(os.path.realpath(path)), lf)   # the pack's REAL directory (symlinks resolved), the same in all four
     anchored = False
+    unmet = set()
+    required = bool(ledger_path or log_pubkey_hex or require_sources)
+    ledger_checked = False   # the chain verified: the tip and the source documents are looked at only then
     if lf_bad:
+        refusal.append("malformed")
         layers.append(_layer("ledger-chain", "FAIL", "ledger_file malformed: must be a plain file name (string, no path separators)"))
-    elif (ledger_path or log_pubkey_hex or require_sources) and not (lp and _present(lp)):
+    elif required and not (lp and _present(lp)):
         # the caller asked for a chain/tip/source check by name: a missing ledger is a FAIL, never a silent skip
+        el["ledger_anchor"].append(("not_evaluated", "not_present", "a ledger was required and is not there"))
+        unmet.add("ledger_required")
         layers.append(_layer("ledger-chain", "FAIL", "ledger explicitly required (ledger_path / log key / require_sources given) but not found"))
     elif lp and _present(lp):
         led = Ledger(lp)
+        read_el = None
         try:                                            # something is there: it must open as a regular file (a FIFO / device / directory is a FAIL, never "absent")
             fh = open_regular(lp)
         except OSError as ex:
+            read_el = ("contradicted", "ledger_malformed") if isinstance(ex, UnreadableFile) else ("not_evaluated", "unreadable")
             entries, lv = [], {"chain_ok": False, "failures": [f"ledger unreadable: {_why(ex)}"], "entries": 0}
         else:
             with fh:
@@ -200,13 +275,20 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                     entries = list(led.entries(fh))
                     lv = led.verify(entries)
                 except (ValueError, TypeError, RecursionError, OSError) as ex:
+                    read_el = ("not_evaluated", "unreadable") if isinstance(ex, OSError) and not isinstance(ex, UnreadableFile) else ("contradicted", "ledger_malformed")
                     entries, lv = [], {"chain_ok": False, "failures": [f"unparsable line: {type(ex).__name__}: {str(ex)[:120]}"], "entries": 0}
+        if read_el is not None:
+            el["ledger_anchor"].append(read_el)
         unknown_entry = [(_idx_shown(e.get("idx")), sorted(k for k in e if k not in ENTRY_KEYS)) for e in entries if isinstance(e, dict) and any(k not in ENTRY_KEYS for k in e)]
         if unknown_entry:   # closed entry schema (2026-10-10): idx, ts, data, prev_hash, self_hash — nothing else at the top level
+            el["ledger_anchor"].append(("contradicted", "entry_unknown_member"))
             layers.append(_layer("ledger-schema", "FAIL", f"{len(unknown_entry)} entry(ies) with a top-level field outside the closed schema, first at idx {unknown_entry[0][0]}: {', '.join(unknown_entry[0][1])}"[:200]))
         if not lv["chain_ok"]:
+            if read_el is None:
+                el["ledger_anchor"].append(("contradicted", "chain_broken"))
             layers.append(_layer("ledger-chain", "FAIL", "; ".join(lv["failures"][:3])))
         else:
+            ledger_checked = True
             bound, anchor, anchor_idx = True, False, None
             for e in entries:
                 d = e.get("data") if isinstance(e.get("data"), dict) else {}
@@ -216,42 +298,81 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
                     if d.get("kind") == "cra_pack_anchor" and isinstance(pack.get("pack_sha3"), str) and HEX64.fullmatch(pack["pack_sha3"]) and d.get("anchored_pack_sha3") == pack["pack_sha3"]:
                         anchor, anchor_idx = True, e.get("idx")
             if not bound:
+                el["ledger_anchor"].append(("contradicted", "record_unbound"))
                 layers.append(_layer("ledger-chain", "FAIL", "a record's record_sha3 does not match its content"))
             elif not anchor:
+                el["ledger_anchor"].append(("contradicted", "not_anchored"))
                 layers.append(_layer("ledger-chain", "FAIL", "chain valid but THIS pack is not anchored (no cra_pack_anchor entry with its pack_sha3)"))
             else:
                 anchored = True
+                el["ledger_anchor"].append(("verified", None))
                 layers.append(_layer("ledger-chain", "PASS", f"{lv['entries']} entries, records bound, pack anchored at idx {anchor_idx}"))
             # the ledger state the pack DECLARES must be the state the ledger HAS at that point (not decorative)
             n = pack.get("ledger_entries")
             ok_state = (type(n) is int and 0 < n <= len(entries) and entries[n - 1].get("self_hash") == pack.get("ledger_last_self_hash")
                         and (anchor_idx is None or anchor_idx >= n))
+            el["ledger_anchor"].append(("verified", None) if ok_state else ("contradicted", "state_mismatch"))
             layers.append(_layer("pack-ledger-state", "PASS" if ok_state else "FAIL",
                                  f"declared entries={n} last={str(pack.get('ledger_last_self_hash'))[:12]}…; anchor idx={anchor_idx}"))
-            layers.append(_source_documents(lp, entries, require_sources))
+            src_layer = _source_documents(lp, entries, require_sources, el["source_documents"])
+            if src_layer["status"] == "FAIL" and require_sources and any(e[1] == "hash_only" for e in el["source_documents"]):
+                unmet.add("sources_required")
+            layers.append(src_layer)
             # signed tip: the only thing that sees a truncated TAIL (records after the anchor silently dropped)
             tip_path = lp + ".tip.json"
             if log_pubkey_hex:
                 if not _present(tip_path):
+                    el["signed_tip"].append(("not_evaluated", "not_present", "a trusted log key was given and no tip is there"))
+                    unmet.add("tip_required")
                     layers.append(_layer("signed-tip", "FAIL", "trusted log key given but no tip file next to the ledger"))
                 else:
                     try:
                         tip = parse_line(read_regular(tip_path).decode("utf-8"))   # a regular file within MAX_DOC_BYTES
                         tv = verify_tip(tip, log_pubkey_hex, len(entries), entries[0]["self_hash"], entries[-1]["self_hash"])
-                        layers.append(_layer("signed-tip", "PASS" if tv.get("ok") else "FAIL", str(tv.get("error") or "tip verified: no tail truncation")))
+                        err = str(tv.get("error") or "")
+                        tip_layer = _layer("signed-tip", "PASS" if tv.get("ok") else "FAIL", err or "tip verified: no tail truncation")
+                        if tv.get("ok"):
+                            el["signed_tip"].append(("verified", None))
+                        elif err.startswith("tip_unchecked"):
+                            # 0.6.0: no `cryptography` here is this host's absence, not a finding (exit 1 → 77; spec/RECEIPT.md §6)
+                            tip_layer["assessed"] = False
+                            el["signed_tip"].append(("not_evaluated", "instrument_failure", "cryptography not installed"))
+                        elif err.startswith("tip_invalid"):
+                            el["signed_tip"].append(("contradicted", "tip_invalid"))
+                        else:
+                            el["signed_tip"].append(("contradicted", "tail_mismatch", err[:60]))
+                        layers.append(tip_layer)
                     except Exception as e:  # noqa: BLE001
+                        el["signed_tip"].append(("not_evaluated", "unreadable") if isinstance(e, OSError) and not isinstance(e, UnreadableFile)
+                                                else ("contradicted", "tip_invalid"))
                         layers.append(_layer("signed-tip", "FAIL", f"tip unreadable: {type(e).__name__}: {str(e)[:80]}"))
             elif _present(tip_path):
+                el["signed_tip"].append(("not_evaluated", "key_not_given"))
                 layers.append(_layer("signed-tip", "SKIP", "tip present but NOT checked: pass the trusted log key (tail not sealed: truncation, rewrite or additions undetected)"))
             else:
                 layers.append(_layer("signed-tip", "SKIP", "no tip: tail not sealed — truncation, rewrite or additions undetectable offline (use a tip key / cryptovalid monitor)"))
     else:
         layers.append(_layer("ledger-chain", "SKIP", "ledger not next to the pack (honest: integrity of the chain not checked)"))
+    if not ledger_checked:   # absent, required and absent, or not verified: the tip and the sources were not looked at
+        el["signed_tip"].append(("not_evaluated", "ledger_not_verified"))
+        el["source_documents"].append(("not_evaluated", "ledger_not_verified"))
     sig = verify_pack_signature(path, trust_store, pack=pack)
     sig_layer = _layer("producer-signature", sig["status"], sig.get("detail", ""))
     if sig.get("assessed") is False:      # this host could not run the check: an absence, not a finding
         sig_layer["assessed"] = False
     layers.append(sig_layer)
+    if sig["status"] == "PASS":
+        if trust_store is None:
+            el["producer_signature"].append(("not_evaluated", "self_asserted"))
+        elif sig.get("trusted"):
+            el["producer_signature"].append(("verified", None))
+        else:
+            el["producer_signature"].append(("not_evaluated", "key_unresolved"))
+    else:
+        r_ = sig.get("reason") or "signature_invalid"
+        el["producer_signature"].append((("not_evaluated" if r_ in ("not_present", "instrument_failure", "unreadable") else "contradicted"), r_))
+    if trust_store is not None and not (sig["status"] == "PASS" and sig.get("trusted")):
+        unmet.add("trusted_signer")
     if sig["status"] == "FAIL":
         auth = "FAIL"
     elif trust_store is not None and sig["status"] == "SKIP":
@@ -268,6 +389,8 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
         auth = "anchored"
     else:
         auth = "FAIL"
+    if not (sig["status"] == "PASS" or anchored):
+        unmet.add("authenticity_basis")
     hard_fail = any(l["status"] == "FAIL" for l in layers)
     ok = auth != "FAIL" and not hard_fail
     # `assessed` is present on EVERY return: a field that appears only on the bad path cannot be told from an older
@@ -276,5 +399,9 @@ def _verify(path, ledger_path, trust_store, log_pubkey_hex, require_sources=Fals
     # NOT_ASSESSED > PASS). `ok` and `authenticity` stay as they are: fail-closed either way.
     judged = any(l["status"] == "FAIL" and l.get("assessed", True) for l in layers)
     absent = any(l.get("assessed") is False for l in layers)
-    return {"ok": ok, "assessed": judged or not absent, "authenticity": auth if ok else "FAIL",
-            "anchored": anchored, "layers": layers, "pack_sha3": pack.get("pack_sha3")}
+    r = {"ok": ok, "assessed": judged or not absent, "authenticity": auth if ok else "FAIL",
+         "anchored": anchored, "layers": layers, "pack_sha3": pack.get("pack_sha3")}
+    if refusal:
+        return _with_admission(r, "refused", refusal[0])
+    return _with_admission(r, "admitted", None, {k: _fold(el[k]) for k in SUBJECTS},
+                           {"met": not unmet, "unmet": [u for u in POLICY_UNMET if u in unmet]})
