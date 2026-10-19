@@ -2,7 +2,7 @@
 """`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
 overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
 is FAIL (77 when it could not judge), `obligations` when a support period is below the five-year minimum with no
-declared shorter expected use (under one reading of the day, at least). Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
+declared shorter expected use (under one reading of the day, at least) for a product the requirements reach (Art. 69(2)). Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
 not be written whole to stdout (full disk, closed pipe, closed or read-only stdout, a file size limit, also under -u /
 PYTHONUNBUFFERED), or what the subcommand promises could not be written: its ledger line, the copy of an ingested
 SBOM document, a file (`pack --out`, the `sign` sidecar, the `notice` drop file, the `keygen` seed, the ledger's
@@ -412,7 +412,7 @@ def _main(argv: List[str] = None) -> int:
         _p(out)
         return 0 if (pc["ok"] and not kev["error"] and not eu["error"]) else 1
     if a.cmd == "obligations":
-        from .applicability import (DEPENDS, art14_obligation, legacy_product_scope, reporting_in_force, retention_until,
+        from .applicability import (art14_obligation, legacy_product_scope, reporting_in_force, retention_until,
                                     support_period, update_available_until)
         if not (a.at or a.exploitation_aware or a.placed_on_market or a.update_issued):
             p.error("obligations: give at least one of --at, --exploitation-aware, --placed-on-market, --update-issued")
@@ -437,12 +437,22 @@ def _main(argv: List[str] = None) -> int:
                     ob["support_period"] = support_period(a.placed_on_market, a.support_period_end, a.shorter_use_reason)
             if a.update_issued:
                 ob["update_availability"] = update_available_until(a.update_issued, a.support_period_end)
+            # Art. 69(2): a product placed before 11 December 2027 and not substantially modified from that date is not
+            # subject to the requirements (Art. 13 included): its horizons are computed, marked, and never a finding
+            lg = ob.get("legacy_scope")
+            for k in ("retention", "support_period", "update_availability"):
+                if k in ob:
+                    ob[k]["requirements_apply"] = lg["requirements_apply"] if lg else None
+                    ob[k]["requirements_apply_basis"] = ("Art. 69(2): see legacy_scope" if lg else
+                                                         "not known: give --placed-on-market (Art. 69(2))")
         except ValueError as e:
             p.error(f"obligations: {e}")
         _p(ob)
         sp_ = ob.get("support_period", {})
-        below = sp_.get("status") == "below_minimum" or (sp_.get("status") == DEPENDS and "below_minimum" in [x["status"] for x in sp_["readings"].values()])
-        return 1 if below else 0   # below the minimum under one reading is a finding: exit 1, both readings in the JSON
+        lg_r = ob.get("legacy_scope", {}).get("readings", {})
+        # below the minimum under one reading WHERE THE REQUIREMENTS REACH THE PRODUCT (Art. 69(2)) is a finding: exit 1
+        below = any(x["status"] == "below_minimum" and lg_r.get(r, {}).get("requirements_apply") for r, x in sp_.get("readings", {}).items())
+        return 1 if below else 0
     return 2
 
 

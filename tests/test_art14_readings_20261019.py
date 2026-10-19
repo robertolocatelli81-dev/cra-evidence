@@ -82,7 +82,7 @@ class Obligation(unittest.TestCase):
         self.assertEqual(A.art14_obligation("2027-12-10T23:00:00Z", "open_source_steward")["outcome"], "depends_on_time_zone_reading")
         r = A.art14_obligation("2026-09-12T00:00:00Z", stream="incident")
         self.assertEqual((r["outcome"], r["trigger"]), ("obligation", "awareness of the severe incident"))
-        self.assertIn("this tool's, not the guidance's", r["interpretation"])
+        self.assertIn("this tool's reading, not the guidance's", r["interpretation"]); self.assertIn("§211", r["interpretation"])
 
     def test_refusals(self):
         with self.assertRaises(ValueError):   # the vulnerability cannot become known after its exploitation

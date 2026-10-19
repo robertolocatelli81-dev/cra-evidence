@@ -42,7 +42,9 @@ with an optional `detail` (free text, informative, never compared). S is one of 
 
 **Elements and precedence** (as ap2-evidence-pack 1.6.0 §6.9). A subject is stated from its elements and takes the
 state of its highest element under `contradicted` > `not_evaluated` with `instrument_failure` > any other
-`not_evaluated` > `verified`. `verified` only when every element is. `reasons` lists one reason per element that is not
+`not_evaluated` > `verified`. The two `not_evaluated` ranks give the same state (no receipt can show
+the difference); an `instrument_failure` element is never hidden, because `reasons` lists every element that is not
+`verified`. `verified` only when every element is. `reasons` lists one reason per element that is not
 `verified`, in element order. A subject with no element is `not_evaluated` with `not_present`.
 
 | subject | elements | `verified` | `contradicted` (reason) | `not_evaluated` (reason) |
@@ -72,10 +74,11 @@ this verifier), not a state of the pack.
 
 `ok` is computed as in 0.5.1. On every admitted receipt it equals: no subject is `contradicted`, AND no element has the
 reason `instrument_failure` or `unreadable`, AND `policy.met`. On every refused or not-evaluated receipt `ok` is false.
-`assessed: false` implies no subject `contradicted` and at least one `instrument_failure`. Measured by
+On every admitted receipt `assessed: false` implies no subject `contradicted` and at least one `instrument_failure`; a
+not-evaluated receipt (§1) has `assessed: false` and no states. Measured by
 `verifiers/states_bench.py` (§8 of the 0.6.0 CHANGELOG entry gives the numbers).
 
-## 5. Exit codes (unchanged): 0 `ok`; 1 a finding (refused included — read `admission`); 77 not assessed; 2 usage; 74 the receipt was not written
+## 5. Exit codes (meanings unchanged; §6 lists the cases whose code changes): 0 `ok`; 1 a finding (refused included — read `admission`); 77 not assessed; 2 usage; 74 the receipt was not written
 
 The giro-unico design (ap2-evidence-pack 1.6.0 §6.10) gives exit 74 WITH a complete receipt to a check that could not
 run. That point does not fit this format and is not applied: since 0.3.3 cra-evidence exits 77 for exactly that case,
@@ -88,7 +91,15 @@ cases apart without reading stdout.
 - On a host without `cryptography`, `cra verify --log-pubkey` on a ledger with a signed tip: the `signed-tip` layer was
   `FAIL` with `assessed` true ("tip_unchecked", exit 1: a finding against the pack that is not one); it now carries
   `assessed: false` like the producer-signature layer since 0.3.2, so the receipt is `assessed: false` and the exit 77
-  when no other layer judged against the pack. `ok` and `authenticity` do not change.
+  when no other layer judged against the pack. `ok` and `authenticity` do not change. This covers a tip that is a
+  well-formed `cryptovalid_tip/1` with only its signature left to check; a tip that is not one (not an object, another
+  `kind`, a field of the wrong type or form, a log key other than the trusted one) is `contradicted/tip_invalid` on
+  every host, exit 1 as in 0.5.1.
+- On a host without `cryptography`, a producer-signature sidecar with a field missing, mistyped or malformed (a
+  required field absent, key or signature not lower-case hex of the exact length, a weak key) was `assessed: false`,
+  exit 77 when nothing else judged ("not checkable here"); it is now judged as on a host with the library
+  (`sidecar_malformed` or `signature_invalid`, `assessed` true, exit 1). Only a well-formed sidecar whose signature is
+  left to check is `instrument_failure`. `ok` and `authenticity` do not change.
 - Every other 0.5.1 field keeps its value on every input (measured on the bench, §4).
 
 ## 7. Where it does not apply in 0.6.0

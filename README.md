@@ -49,7 +49,7 @@ cra verify cra_pack.json --trust-store trust.json --log-pubkey <hex> --require-s
 cra feeds CVE-2026-32202                                                     # OSV positive control (with CVE alias) + KEV/EUVD signal; exit 1 if any feed fails
 cra obligations --exploitation-aware 2026-09-10T23:00:00Z --vulnerability-aware 2026-08-01T00:00:00Z   # does the Art. 14 obligation arise? (here: depends on the time-zone reading, both answers)
 cra obligations --at 2026-10-17T00:00:00Z --role manufacturer --placed-on-market 2025-03-01T00:00:00Z \
-          --support-period-end 2031-03-01T00:00:00Z --update-issued 2026-10-01T00:00:00Z   # Art. 14 in force? Art. 69 legacy scope, support period (exit 1 below 5 years undeclared), retention, update availability
+          --support-period-end 2031-03-01T00:00:00Z --update-issued 2026-10-01T00:00:00Z   # Art. 14 in force? Art. 69 legacy scope, support period (exit 1 below 5 years undeclared, for a product the requirements reach: Art. 69(2)), retention, update availability
 ```
 
 `cra obligations` (0.6.0; contributed by Athena, the project's confined research agent, reviewed by Noûs) reads no clock
@@ -61,7 +61,10 @@ annex §217, non-binding; Art. 71(2) is the norm). For an instant you give it sa
 Art. 24(3): 14(1), and 14(3) and (8) for severe incidents, its scope condition recorded and not checked), and it computes
 the horizons the Regulation counts in years (Art. 13(8), 13(9), 13(13), with Reg. 1182/71 Art. 3). No text names the
 time zone of "11 September 2026": every threshold is computed at 00:00 UTC and at 00:00 Europe/Brussels
-(2026-09-10T22:00:00Z), and between the two the answer is `depends_on_time_zone_reading` with both answers. `cra vuln`
+(2026-09-10T22:00:00Z), and between the two the answer is `depends_on_time_zone_reading` with both answers (other local
+times of the Union — UTC+3 in September in eight Member States, the outermost regions — are not computed: "net" means net
+between these two). For a product placed before 11/12/2027 and not substantially modified from that date the
+horizons carry `requirements_apply: false` and are never a finding (Art. 69(2)). `cra vuln`
 applies the same rule: an exploitation known before 11/09/2026 is no longer reported as overdue (0.5.1: exit 1).
 
 `cra verify` reports layers (pack JSON, kind, declared limits, pack digest, the pack's own verification snapshot,
@@ -75,12 +78,14 @@ Since 0.6.0 the Python verifier's receipt also carries one closed field per ques
 when the verifier itself failed), `states` (vocabulary `cra-evidence/states-1`: `sealed_content`, `ledger_anchor`,
 `signed_tip`, `source_documents`, `producer_signature`, each `verified`, `contradicted` or `not_evaluated` with its
 reasons, e.g. `self_asserted` for a signature that verifies with no trust store) and `policy` (`met`, `unmet`). The 0.5.1
-fields and exit codes keep their values (one declared exception below). The Go, JS and Rust verifiers do not carry
+fields and exit codes keep their values (two declared exceptions, both on a host without `cryptography`: below and
+`spec/RECEIPT.md` §6). The Go, JS and Rust verifiers do not carry
 these fields in 0.6.0.
 
 Every result also carries `assessed`. It is false when the verifier could not judge and no layer judged against the
 pack: the run ended in the verifier's own exception, or (Python) this host lacks `cryptography` to check a producer
-signature or (since 0.6.0; exit 1 before) a signed tip. `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller can tell "this verifier could not
+signature or (since 0.6.0; exit 1 before) a well-formed signed tip; a malformed tip or sidecar is judged there too
+(0.6.0: exit 1; a malformed sidecar was 77 before). `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller can tell "this verifier could not
 judge" from "this pack is bad". The field is present on every return, so its absence means an older build rather than
 "assessed". Measured 24/09/2026: with an internal error injected, a genuinely signed pack that verifies as
 `authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. Since 0.3.2 the Go, JS and Rust

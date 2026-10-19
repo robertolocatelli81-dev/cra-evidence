@@ -62,7 +62,9 @@ the provisions are newly used by `cra_evidence/applicability.py`, `cra obligatio
   last year (the month's last day when that date does not exist). No time zone is named. 1182/71 speaks of acts of the
   Council or the Commission; applying it to this Regulation is this tool's reading. Art. 3(4) (a last day on a Saturday,
   Sunday or public holiday) is not applied.
-- Commission guidance C(2026) 5252 (27/07/2026), annex, document 131456 (sha256 fe209c25…8234), §217, pp. 75–76 —
+- Commission guidance C(2026) 5252 (27/07/2026), annex, document 131456 (sha256 fe209c25…8234), §217, pp. 75–76 (the
+  covering note approves the content of the DRAFT guidance and says it will be formally adopted, and apply, once all
+  language versions are available; its formal adoption was not checked on 19/10/2026) —
   NON-BINDING: the obligation applies when the manufacturer "becomes aware of active exploitation"; a vulnerability "of
   whose active exploitation it had already become aware before 11 September 2026" is not reported (no retroactive
   reporting); a vulnerability known before that date whose active exploitation becomes known after it is reported. The
@@ -73,7 +75,12 @@ the provisions are newly used by `cra_evidence/applicability.py`, `cra obligatio
   Europe/Brussels (11/09/2026: 2026-09-10T22:00:00Z, CEST; 11/12/2027: 2027-12-10T23:00:00Z, CET — checked against the
   IANA zone day by day 2000–2040 in the tests); when the two readings disagree the result is
   `depends_on_time_zone_reading` with both answers, never one picked in silence. The year horizons (13(8), 13(9), 13(13))
-  are given under both readings, with the later one as `latest_until_utc`.
+  are given under both readings, with the later one as `latest_until_utc`. Two readings only: the local midnight of the
+  Member States at UTC+3 in September (Bulgaria, Cyprus, Estonia, Finland, Greece, Latvia, Lithuania, Romania:
+  2026-09-10T21:00:00Z) and of the outermost regions (UTC−4 to UTC+4: from 2026-09-10T20:00:00Z to 2026-09-11T04:00:00Z)
+  are not computed; a net answer is net between these two readings only. The 24 h / 72 h / 14-day / one-month counts
+  of Art. 14 run from the instant itself (1182/71 Art. 3(1)-(2), which would leave out the hour or the day of the
+  event, is NOT applied to them: their ends are up to one hour, or one day, earlier than under it).
 - Not re-read on 19/10/2026: the ENISA SRP FAQ ("Updated: 15 October 2026" per Athena: steward reporting from 11/12/2027,
   no API at the initial release, voluntary notifications not implemented) and the EN 40000 standardisation status
   (secondary trackers only).
@@ -84,9 +91,9 @@ the provisions are newly used by `cra_evidence/applicability.py`, `cra obligatio
 | Software bill of materials in a commonly used, machine-readable format covering at least the top-level dependencies, in the technical documentation | `SBOMRecord` (CycloneDX 1.6/1.7 subset; the generator's document is stored byte-exact since 0.3.0), from the installed environment (floor) or by ingesting a full generator's CycloneDX or SPDX document (stored byte-exact); an empty SBOM is recorded as not meeting the floor | Annex I Part II(1); full application 11 December 2027 |
 | Technical documentation and EU declaration of conformity kept at the disposal of the market surveillance authorities for at least 10 years after the product is placed on the market or for the support period, whichever is longer | evidence pack (records the support period end when given, so the retention horizon is the right one) + hash-chained ledger + crypto-agile long-term seal, renewable before an algorithm is retired (NIST IR 8547 initial public draft, https://csrc.nist.gov/pubs/ir/8547/ipd: quantum-vulnerable signatures deprecated after 2030, disallowed after 2035 — used as the verifier's default policy) | Art. 13(13) (retention), Art. 31 (technical documentation content) |
 | Art. 14 applies from 11 September 2026; the obligation arises on awareness of ACTIVE EXPLOITATION (not of the vulnerability) | `art14_obligation()` / `cra obligations --exploitation-aware [--vulnerability-aware]` / `VulnerabilityRecord.overdue()["art14_obligation"]`: obligation, no obligation, or depends on the time-zone reading (both answers) | Art. 14(1)/(3), Art. 71(2); guidance C(2026) 5252 §217 (non-binding); Reg. 1182/71 Art. 4(2) |
-| Open-source software stewards: reporting obligations from 11 December 2027 (Art. 14(1); 14(3) and (8) for severe incidents) | same tooling; the stream/stage model is identical; `reporting_in_force("open_source_steward", …)` / `cra obligations --role open_source_steward` says from when, under both readings, with the Art. 24(3) scope condition recorded and never checked | Art. 24(3), Art. 71(2) |
+| Open-source software stewards: reporting obligations from 11 December 2027 (Art. 14(1); 14(3) and (8) for severe incidents) | same tooling; the stream/stage model is identical, but `cra vuln` computes the manufacturer's start (11/09/2026): for a steward, before 11/12/2027 its `overdue` flags do not apply; `reporting_in_force("open_source_steward", …)` / `cra obligations --role open_source_steward` says from when, under both readings, with the Art. 24(3) scope condition recorded and never checked | Art. 24(3), Art. 71(2) |
 | Products placed on the market before 11 December 2027: Art. 14 applies to them; the requirements only after a substantial modification from that date | `legacy_product_scope()` / `cra obligations --placed-on-market [--substantially-modified]`; scope (Art. 2) and "substantial" are not decided | Art. 69(2)-(3) |
-| Support period at least five years (shorter only for a shorter expected use); each security update available 10 years or the remainder of the support period | `support_period()` (`meets_minimum` / `shorter_declared` / `below_minimum` / `depends_on_time_zone_reading`, exit 1 when below under one reading), `update_available_until()`, `retention_until()` (both readings, 1182/71 Art. 3) | Art. 13(8), 13(9), 13(13) |
+| Support period at least five years (shorter only for a shorter expected use); each security update available 10 years or the remainder of the support period | `support_period()` (`meets_minimum` / `shorter_declared` / `below_minimum` / `depends_on_time_zone_reading`; `cra obligations` exits 1 when below under one reading where the requirements reach the product, Art. 69(2), and marks the horizons `requirements_apply`), `update_available_until()`, `retention_until()` (both readings, 1182/71 Art. 3) | Art. 13(8), 13(9), 13(13) |
 | Inform the impacted users of an actively exploited vulnerability or severe incident | `user_information()` records the instant; no deadline is computed (the Regulation gives no hour count) | Art. 14(8) |
 
 What this tool is NOT (and says so in every pack): a conformity assessment, CE marking, the official CSIRT/ENISA channel,

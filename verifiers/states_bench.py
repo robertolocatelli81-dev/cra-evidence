@@ -452,6 +452,17 @@ def main():
                     for x in lay_a:
                         if x.get("layer") == "signed-tip" and x.get("assessed") is False and "tip_unchecked" in x.get("detail", ""):
                             x.pop("assessed")
+                    # review 19/10: without cryptography a malformed tip / sidecar is judged (tip_invalid, sidecar_malformed,
+                    # exit 1) instead of "not checkable" — the second declared case (spec/RECEIPT.md §6)
+                    by_name = {y.get("layer"): y for y in lay_b}
+                    for x in lay_a:
+                        y = by_name.get(x.get("layer"))
+                        if y is None or x.get("status") != "FAIL" or y.get("status") != "FAIL" or x.get("assessed") is False:
+                            continue
+                        if x["layer"] == "signed-tip" and "tip_unchecked" in y.get("detail", "") and x.get("detail", "").startswith("tip_invalid"):
+                            x["detail"] = y["detail"]
+                        if x["layer"] == "producer-signature" and y.get("assessed") is False and "NOT checkable" in y.get("detail", ""):
+                            x["detail"], x["assessed"] = y["detail"], False
                     declared = cases[i]["nocrypto"] and lay_a == lay_b and a["ok"] == b["ok"] and a["authenticity"] == b["authenticity"]
                     if declared:
                         c7["declared"] += 1

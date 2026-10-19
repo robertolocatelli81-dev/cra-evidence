@@ -28,16 +28,19 @@ Sources (read 19/10/2026):
   last day of the month when that date does not exist). Neither article names a time zone. (1182/71 speaks of acts of
   the Council or Commission; its use for this Regulation of the Parliament and the Council is this tool's reading.)
 - Commission guidance C(2026) 5252, annex (ec.europa.eu/newsroom/dae/redirection/document/131456, sha256 fe209c25…8234),
-  §217, pp. 75–76 — NON-BINDING interpretation: the obligation to report applies when the manufacturer becomes aware of
+  §217, pp. 75–76 (the content of the DRAFT guidance, approved 27/07/2026; formal adoption not checked) — NON-BINDING
+  interpretation: the obligation to report applies when the manufacturer becomes aware of
   ACTIVE EXPLOITATION; a vulnerability whose active exploitation it knew before 11 September 2026 is not reported
   retroactively; one known before that date whose exploitation becomes known after it is reported. §217 speaks of
-  vulnerabilities; for a severe incident this tool applies the same reading of "becomes aware" (the guidance does not say
-  it). The 84 pages name no time zone and no hour of the start.
+  vulnerabilities. For a severe incident §211 ties the obligation to the awareness that it has occurred; that an
+  incident known before 11 September 2026 is not reported is this tool's reading (§217 does not say it). The 84 pages name no time zone and no hour of the start.
 
 The start instant of a date of the Regulation: Art. 4(2) of 1182/71 gives the hour (the beginning of the day), nothing
 gives the time zone. Every date threshold is therefore computed under TWO readings — 00:00 UTC and 00:00 Europe/Brussels
 (CET/CEST by the EU summer-time rule, Directive 2000/84/EC) — and both answers are returned. When they agree the result
-is net; when they differ it is `depends_on_time_zone_reading`, with both answers: never one picked in silence.
+is net; when they differ it is `depends_on_time_zone_reading`, with both answers: never one picked in silence. Net
+means net between these two readings: other local times of the Union (UTC+3 in September in eight Member States, the
+outermost regions from UTC-4 to UTC+4) are not computed.
 Nothing here decides whether a product is in scope (Art. 2), whether a modification is substantial, whether a declared
 shorter expected use is justified, or whether the steward's scope condition is met: recorded as given.
 """
@@ -77,7 +80,8 @@ def _last_sunday(y: int, m: int) -> datetime:
 
 def brussels_offset(at: datetime) -> timedelta:
     """UTC offset of Europe/Brussels at the instant `at` (aware): CET +1 h, CEST +2 h from 01:00 UTC on the last Sunday of
-    March to 01:00 UTC on the last Sunday of October (Directive 2000/84/EC). Tested against the IANA zone."""
+    March to 01:00 UTC on the last Sunday of October (Directive 2000/84/EC). Equal to the IANA zone from 1996 (tested
+    2000-2040); before 1996 Belgian summer time ended in September and this rule differs."""
     u = at.astimezone(timezone.utc)
     start = _last_sunday(u.year, 3).replace(hour=1)
     end = _last_sunday(u.year, 10).replace(hour=1)
@@ -193,7 +197,8 @@ def art14_obligation(trigger_awareness_utc: str, role: str = "manufacturer", str
             "norm": ("Art. 14(1)/(3) (\"that it becomes aware of\"), applying from 11 September 2026 (Art. 71(2))" if role == "manufacturer"
                      else "Art. 24(3) with Art. 14(1)/(3), applying from 11 December 2027 (Art. 71(2))"),
             "interpretation": GUIDANCE + ("" if stream == "vulnerability" else "; §217 speaks of vulnerabilities: for a severe "
-                                          "incident the same reading of 'becomes aware' is this tool's, not the guidance's"),
+                                          "incident §211 ties the obligation to awareness, and no reporting of an incident "
+                                          "known before 11 September 2026 is this tool's reading, not the guidance's"),
             "start_rule": START_RULE}
 
 
@@ -212,8 +217,11 @@ def legacy_product_scope(placed_on_market_utc: str, substantially_modified_utc: 
     net = _net(per)
     if net is None:
         basis = "depends on the time-zone reading of 11 December 2027: see readings"
-    elif net and placed >= day_start(*FULL_APPLICATION_DATE, "europe_brussels"):
+    elif net and all(placed >= day_start(*FULL_APPLICATION_DATE, r) for r in READINGS):
         basis = "placed on the market from 11 December 2027: the Regulation applies (Art. 71(2))"
+    elif net and placed >= day_start(*FULL_APPLICATION_DATE, "europe_brussels"):
+        basis = ("placed on 11 December 2027 under the Europe/Brussels reading (the Regulation applies, Art. 71(2)) and on "
+                 "10 December under the UTC reading, substantially modified from 11 December 2027 (Art. 69(2))")
     elif net:
         basis = "placed before 11 December 2027 and substantially modified from that date (Art. 69(2))"
     else:

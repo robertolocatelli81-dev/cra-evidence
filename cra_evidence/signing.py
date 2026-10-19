@@ -129,10 +129,6 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
     """Minimal checker (the full profile lives in cryptovalid ≥ 0.11.3; this one is for self-tests)."""
     if not trusted_pubkey_hex:
         return {"ok": False, "error": "tip_untrusted: no trusted log key given"}
-    try:
-        _, Ed25519PublicKey, _ = _ed()
-    except ImportError:
-        return {"ok": False, "error": "tip_unchecked: a signed tip is present but cannot be checked here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
     if not isinstance(tip, dict) or tip.get("kind") != TIP_KIND:
         return {"ok": False, "error": "tip_invalid: not a cryptovalid_tip/1 document"}
     # field TYPES as the three independent verifiers require them (a string "3" is not an entry count, a bool is not an int)
@@ -147,6 +143,12 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
         return {"ok": False, "error": "tip_invalid: tip log key differs from the trusted log key"}
     if weak_ed25519_key(trusted_pubkey_hex):
         return {"ok": False, "error": "tip_invalid: weak log key (small order or non-canonical)"}
+    # 0.6.0 review: what needs no library is judged first — a tip that is not a well-formed cryptovalid_tip/1 is
+    # `tip_invalid` on every host; only the signature itself is unchecked without `cryptography`
+    try:
+        _, Ed25519PublicKey, _ = _ed()
+    except ImportError:
+        return {"ok": False, "error": "tip_unchecked: a signed tip is present but cannot be checked here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(trusted_pubkey_hex)).verify(
             bytes.fromhex(tip["signature_hex"]), tip_payload(n, tip["ledger_id"], tip["tip_sha256"], tip["ts"]))
@@ -243,6 +245,14 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         return {"status": "FAIL", "reason": "digest_mismatch", "detail": "content does not match pack_sha3 (modified after signing)"}
     if side.get("signed_pack_sha3") != digest:
         return {"status": "FAIL", "reason": "digest_mismatch", "detail": "pack changed after signature (digest differs from the signed one)"}
+    if not sidecar_fields_ok(side):   # the signed fields must exist as strings (a missing field is never signed "as null")
+        return {"status": "FAIL", "reason": "sidecar_malformed", "detail": "sidecar field missing or not a string (signed_pack_sha3, signer_id, signed_utc instant, public_key_hex, signature_hex; alg if present)"}
+    if not (_hex_ok(side.get("public_key_hex"), 64) and _hex_ok(side.get("signature_hex"), 128)):
+        return {"status": "FAIL", "reason": "signature_invalid", "detail": "signature invalid for the declared key (key/signature must be lower-case hex of exact length)"}
+    if weak_ed25519_key(side["public_key_hex"]):
+        return {"status": "FAIL", "reason": "signature_invalid", "detail": "signature invalid for the declared key (weak key: small order or non-canonical)"}
+    # 0.6.0 review: a sidecar whose fields are missing, mistyped or malformed is `sidecar_malformed` / `signature_invalid`
+    # on every host; only the signature itself is unchecked without `cryptography`
     try:
         _, Ed25519PublicKey, _ = _ed()
     except ImportError:
@@ -252,12 +262,6 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         # library reported with the value of a bad signature, on our own release artifact.
         return {"status": "FAIL", "assessed": False, "reason": "instrument_failure",
                 "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
-    if not sidecar_fields_ok(side):   # the signed fields must exist as strings (a missing field is never signed "as null")
-        return {"status": "FAIL", "reason": "sidecar_malformed", "detail": "sidecar field missing or not a string (signed_pack_sha3, signer_id, signed_utc instant, public_key_hex, signature_hex; alg if present)"}
-    if not (_hex_ok(side.get("public_key_hex"), 64) and _hex_ok(side.get("signature_hex"), 128)):
-        return {"status": "FAIL", "reason": "signature_invalid", "detail": "signature invalid for the declared key (key/signature must be lower-case hex of exact length)"}
-    if weak_ed25519_key(side["public_key_hex"]):
-        return {"status": "FAIL", "reason": "signature_invalid", "detail": "signature invalid for the declared key (weak key: small order or non-canonical)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001

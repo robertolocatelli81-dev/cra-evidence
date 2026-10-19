@@ -15,10 +15,14 @@
   exception is `not_evaluated` with no states.
 - `ok` is computed as in 0.5.1, never from the states; on every admitted receipt it equals "no subject contradicted,
   no element `instrument_failure` or `unreadable`, `policy.met`" — measured by `verifiers/states_bench.py` (below).
-- **Not additive (one case):** on a host without `cryptography`, `cra verify --log-pubkey` with a signed tip reported
-  the tip as a `FAIL` judged against the pack (`tip_unchecked`, exit 1); the layer now carries `assessed: false`, so the
-  run is `assessed: false` and exits 77 when no other layer judged against the pack. `ok` and `authenticity` unchanged.
+- **Not additive (two cases, both on a host without `cryptography`):** (1) `cra verify --log-pubkey` with a
+  well-formed signed tip reported the tip as a `FAIL` judged against the pack (`tip_unchecked`, exit 1); the layer now
+  carries `assessed: false`, so the run is `assessed: false` and exits 77 when no other layer judged against the pack.
   Measured on 0.5.1 (`7643845`): exit 1; test `test_tip_unchecked_without_cryptography_is_instrument_failure_exit_77`.
+  A tip that is not a well-formed `cryptovalid_tip/1` is `tip_invalid` on every host (exit 1, as in 0.5.1). (2) A
+  producer-signature sidecar with a field missing, mistyped or malformed was "not checkable here" (`assessed: false`,
+  exit 77); it is now judged as on a host with the library (`sidecar_malformed` / `signature_invalid`, exit 1).
+  `ok` and `authenticity` unchanged in both (tests in `tests/test_review_findings_20261019.py`).
 - **Where the giro-unico design does not fit (stopped, why):** (1) exit 74 with a complete receipt for a check that
   could not run is NOT applied — cra-evidence already exits 77 with the complete receipt for that case (since 0.3.3) and
   74 means "the receipt was not written" (since 0.5.1); moving it would change four verifiers' exit codes and merge two
@@ -32,10 +36,10 @@
   `cryptography` made unimportable. Controls: closed shape; the `ok` equation; `assessed`; no `verified` and no
   `contradicted` that the independent JS verifier's layers do not confirm; pins never change the set of contradicted
   subjects; an unknown top-level key is `unknown_member`; every 0.5.1 field equal to 0.5.1's on every input but the
-  declared case. Measured on 19/10/2026 (code of `c46a066`, the same `verify_pack`/`signing` as the release, with
+  declared cases. Measured on 19/10/2026 (the release's `verify_pack`/`signing`, with
   `--old` = `git archive 7643845`): 746 files, 41 776 receipts (32 536 admitted, 9 240 refused), 27 888 runs of the JS
-  verifier, **0 violations**; the 0.5.1 fields equal on 39 852 receipts, the declared case on 1 924, 0 other differences;
-  every one of the 32 reasons of the table produced at least once.
+  verifier, **0 violations**; the 0.5.1 fields equal on 39 620 receipts, the two declared cases on 2 156, 0 other differences;
+  every one of the 31 (subject, reason) cells of the table (22 distinct reason names) produced at least once.
   Each of 8 sabotages of the verifier (precedence reversed, self-asserted as verified, tip without key as verified,
   instrument failure as contradicted, not anchored as verified, hash-only as verified, a refused pack with states, an
   unknown key admitted) turns the bench red (quick mode, measured 19/10/2026). In CI: the quick bench without JS and one
@@ -57,7 +61,16 @@
   year horizons (13(8) five years, 13(9) and 13(13) ten years) follow Reg. 1182/71 Art. 3(1) and 3(2)(c) — the day of the
   event excluded, the period ends at the expiry of the same date (the draft ended it at the same clock time, up to a day
   early for an "at least" horizon) — under both readings, `latest_until_utc` the later; Art. 3(4) (weekend/holiday
-  extension) is not applied, stated. The guidance is cited as non-binding, Art. 71(2) as the norm.
+  extension) is not applied, stated. The guidance is cited as non-binding, Art. 71(2) as the norm. Two readings only:
+  the local time of the Member States at UTC+3 in September (Bulgaria, Cyprus, Estonia, Finland, Greece, Latvia,
+  Lithuania, Romania: 2026-09-10T21:00:00Z) and of the outermost regions (UTC−4 to UTC+4) is not computed, so a net
+  answer is net between these two readings, not across every local time of the Union. The 24 h, 72 h, 14-day and
+  one-month counts of Art. 14 (`cra vuln`) run from the instant itself, as before: they do not apply 1182/71 Art. 3
+  (which would not count the hour or the day of the event and would end them up to one hour, or one day, later).
+- `cra obligations` (review): for a product placed before 11 December 2027 and not substantially modified from that
+  date, the requirements — Art. 13 included — do not apply (Art. 69(2)); its support period, retention and update
+  horizons are still computed but carry `requirements_apply: false` and a short support period is not a finding
+  (exit 0).
 - New: the trigger is the awareness of the ACTIVE EXPLOITATION (or of the severe incident), separate from the awareness
   of the vulnerability (guidance §217): `art14_obligation()`, `cra obligations --exploitation-aware
   [--vulnerability-aware]` (`obligation` / `no_obligation` / `depends_on_time_zone_reading`); `--at`,
@@ -87,7 +100,8 @@
   CPython 3.9 and 3.11 write each `.pyc` with one raw write: from a copy without `__pycache__`, one run of
   `python -m cra_evidence.cli verify` under a limit smaller than a `.pyc` left it cut (13 `.pyc` written; 11 to 13 cut
   under limits of 512 B to 4 KiB; 5 on 3.9.25 and 9 on 3.11.2 still cut under 16 KiB — `sbom`'s is 37 527 and 72 230
-  bytes) — and every later run exited 1 with `EOFError: marshal data too short` (nothing on stdout: measured on 3.11.2). Exit 1 is also this tool's code for
+  bytes on 3.9.25 and 3.11.2 under the path measured — a `.pyc` holds its source path, so the size
+  varies with it) — and every later run exited 1 with `EOFError: marshal data too short` (nothing on stdout: measured on 3.11.2). Exit 1 is also this tool's code for
   a finding against the pack: the failure is loud (a traceback on stderr, no receipt), but its exit code alone does not
   tell it from a finding. It lasts until `cra_evidence/__pycache__` is removed (`python -B` on a later run does not end
   it: measured), and is avoided by running with `python -B` or `PYTHONDONTWRITEBYTECODE=1` from the start. Python
