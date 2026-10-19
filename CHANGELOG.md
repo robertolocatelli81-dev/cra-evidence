@@ -1,25 +1,99 @@
 # Changelog
 
-## Unreleased — 2026-10-17
+## 0.6.0 — 2026-10-19 — the receipt says one thing per question; who is bound from when; the Art. 14 trigger
 
-### Who is bound from when, and the horizons counted in years (`cra obligations`)
+### The receipt of `cra verify`: admission, states, policy (`spec/RECEIPT.md`, written before the code)
 
-- New module `cra_evidence/applicability.py`, pure functions on explicit instants (no clock read, nothing recorded):
-  `reporting_in_force(role, at, stream)` — manufacturer from 11/09/2026 (Art. 71(2)), also for products placed on the
-  market before 11/12/2027 (Art. 69(3)); open-source steward from 11/12/2027 (Art. 24(3), 71(2)) with its scope
-  condition recorded, `scope_condition_checked: false`; `legacy_product_scope()` (Art. 69(2)-(3)); `support_period()`
-  (Art. 13(8): `meets_minimum` / `shorter_declared` / `below_minimum`); `retention_until()` (13(13));
-  `update_available_until()` (13(9)); `user_information()` (14(8): the instant, never a computed deadline). A date of
-  the Regulation is read as 00:00:00 UTC of that day — a convention of this tool, stated in every result.
-- New subcommand `cra obligations --at <instant> [--role] [--stream] [--placed-on-market] [--substantially-modified]
-  [--support-period-end] [--shorter-use-reason] [--update-issued]`: exit 0, or 1 when a support period is below five
-  years with no declared shorter expected use; inconsistent options are usage errors (exit 2, nothing on stdout).
-- `tests/test_applicability_20261017.py`: every date boundary on both sides (one second, one day), 29 February, the
-  refusals, the CLI in process and as a real process. Written by Athena on 17/10/2026 in a session WITHOUT a shell: the
-  tests were NOT run when this entry was written — the first run is the measure.
-- Not changed: the ledger records, the pack, the verifiers. `VulnerabilityRecord.overdue()` still computes deadlines
-  for an awareness instant earlier than 11/09/2026 (by code reading); whether such an exploitation must be reported
-  from that date is a legal question left open, see `spec/LEGAL_BASIS.md`.
+- The Python verifier's receipt carries, beside the 0.5.1 fields: `admission` (`admitted` | `refused` |
+  `not_evaluated`), `refusal_class` (`format_unsupported`: `kind` is not `cra_evidence_pack/1`; `unknown_member`: a
+  top-level key outside the closed list; `malformed`: the file is not one JSON object, or `honest_scope`, the digest or
+  `ledger_file` is unusable — checked in that order), `states_vocabulary` (`cra-evidence/states-1`), `states` (five
+  subjects: `sealed_content`, `ledger_anchor`, `signed_tip`, `source_documents`, `producer_signature`; each `verified`,
+  `contradicted` or `not_evaluated` with closed reasons, precedence contradicted > instrument failure > other not
+  evaluated > verified, as ap2-evidence-pack 1.6.0) and `policy` (`met`, `unmet` ∈ `trusted_signer`, `ledger_required`,
+  `tip_required`, `sources_required`, `authenticity_basis`). A refused pack has no `states`/`policy`; the verifier's own
+  exception is `not_evaluated` with no states.
+- `ok` is computed as in 0.5.1, never from the states; on every admitted receipt it equals "no subject contradicted,
+  no element `instrument_failure` or `unreadable`, `policy.met`" — measured by `verifiers/states_bench.py` (below).
+- **Not additive (one case):** on a host without `cryptography`, `cra verify --log-pubkey` with a signed tip reported
+  the tip as a `FAIL` judged against the pack (`tip_unchecked`, exit 1); the layer now carries `assessed: false`, so the
+  run is `assessed: false` and exits 77 when no other layer judged against the pack. `ok` and `authenticity` unchanged.
+  Measured on 0.5.1 (`7643845`): exit 1; test `test_tip_unchecked_without_cryptography_is_instrument_failure_exit_77`.
+- **Where the giro-unico design does not fit (stopped, why):** (1) exit 74 with a complete receipt for a check that
+  could not run is NOT applied — cra-evidence already exits 77 with the complete receipt for that case (since 0.3.3) and
+  74 means "the receipt was not written" (since 0.5.1); moving it would change four verifiers' exit codes and merge two
+  meanings. (2) The Go, JS and Rust verifiers and the differential oracle do not carry `admission`/`states`/`policy` in
+  0.6.0 (three more implementations of the table and an oracle that compares them: not done).
+- The bench (`python verifiers/states_bench.py [--old <0.5.1 tree>]`): three base packs (signed with a signed tip and a
+  stored source document; unsigned and anchored; the committed example) mutated at every top-level key (removed, 12
+  values of another type), 6 unknown top-level keys, every sidecar key, the sidecar / ledger / tip / source document
+  removed, cut, retyped, a directory or `chmod 000`, a pack re-hashed after a change, a chain rewritten consistently;
+  each file under 48 verifier inputs (4 trust stores × 3 log keys × `--require-sources` × `--ledger`), a share with
+  `cryptography` made unimportable. Controls: closed shape; the `ok` equation; `assessed`; no `verified` and no
+  `contradicted` that the independent JS verifier's layers do not confirm; pins never change the set of contradicted
+  subjects; an unknown top-level key is `unknown_member`; every 0.5.1 field equal to 0.5.1's on every input but the
+  declared case. Measured on 19/10/2026 (code of `c46a066`, the same `verify_pack`/`signing` as the release, with
+  `--old` = `git archive 7643845`): 746 files, 41 776 receipts (32 536 admitted, 9 240 refused), 27 888 runs of the JS
+  verifier, **0 violations**; the 0.5.1 fields equal on 39 852 receipts, the declared case on 1 924, 0 other differences;
+  every one of the 32 reasons of the table produced at least once.
+  Each of 8 sabotages of the verifier (precedence reversed, self-asserted as verified, tip without key as verified,
+  instrument failure as contradicted, not anchored as verified, hash-only as verified, a refused pack with states, an
+  unknown key admitted) turns the bench red (quick mode, measured 19/10/2026). In CI: the quick bench without JS and one
+  sabotage (`tests/test_receipt_states_20261019.py`, 13 tests, each red on 0.5.1).
+
+### `cra obligations` and the Art. 14 trigger — contributed by Athena, the project's confined research agent, reviewed by Noûs
+
+- Athena's work of 17/10/2026 (module `cra_evidence/applicability.py`, subcommand `cra obligations`, 15 tests, entries
+  in `spec/LEGAL_BASIS.md` and here) was written in a session without a shell; it was applied unchanged (commit
+  `e9ac860`), its 15 tests then ran green on the first run, and it was reviewed against the primary texts, fetched on
+  19/10/2026: Regulation (EU) 2024/2847 from the Official Journal XHTML of the Publications Office (sha256
+  `fe0cca4a…71ed`; she had read a secondary reproduction), Regulation 1182/71, and the Commission guidance C(2026) 5252
+  annex (sha256 `fe209c25…8234`).
+- Corrected in review: Art. 24(3) extends to stewards Art. 14(3) **and 14(8)** for severe incidents (the draft named
+  14(3) only); a date of the Regulation was read as 00:00 UTC alone — now every threshold is computed at 00:00 UTC and at
+  00:00 Europe/Brussels (11/09/2026: 2026-09-10T22:00:00Z; 11/12/2027: 2027-12-10T23:00:00Z; the module's Brussels rule
+  equals the IANA zone on every day 2000–2040 and at every transition instant, tested) and between the two the result is
+  `depends_on_time_zone_reading` with both answers (Roberto's decision of 18/10/2026: never one picked in silence); the
+  year horizons (13(8) five years, 13(9) and 13(13) ten years) follow Reg. 1182/71 Art. 3(1) and 3(2)(c) — the day of the
+  event excluded, the period ends at the expiry of the same date (the draft ended it at the same clock time, up to a day
+  early for an "at least" horizon) — under both readings, `latest_until_utc` the later; Art. 3(4) (weekend/holiday
+  extension) is not applied, stated. The guidance is cited as non-binding, Art. 71(2) as the norm.
+- New: the trigger is the awareness of the ACTIVE EXPLOITATION (or of the severe incident), separate from the awareness
+  of the vulnerability (guidance §217): `art14_obligation()`, `cra obligations --exploitation-aware
+  [--vulnerability-aware]` (`obligation` / `no_obligation` / `depends_on_time_zone_reading`); `--at`,
+  `--placed-on-market` and `--update-issued` can each be given alone.
+- **Not additive:** `VulnerabilityRecord.overdue()` (and so `cra vuln` and the `overdue` block of new `cra_vuln`
+  records) carries `art14_obligation`; an actively exploited vulnerability whose exploitation was known before both
+  readings of 11/09/2026 is no longer overdue (`reporting_applicable: false`, `cra vuln` exit 0; 0.5.1: exit 1, measured
+  on `7643845` with an awareness of 2026-09-01). Between the readings `reporting_applicable` is `null`, `time_zone_reading`
+  gives both answers, and `any_overdue` is true when one reading is overdue (exit 1). Three earlier tests that used an
+  awareness of 1 January 2026 as "overdue" now use 15 September 2026. Ledger records already written are unchanged.
+- Not re-read in review: the ENISA SRP FAQ and the EN 40000 standardisation status Athena cites (secondary trackers);
+  the record format still holds one awareness instant (`awareness_utc`, read as the awareness of the exploitation for an
+  actively exploited vulnerability): a separate vulnerability-awareness field in the record is not added.
+
+### Mutants
+
+- 36 mutants on the changed lines (`verify_pack`, `signing`, `applicability`, `vuln`, `cli`) + an identity mutant: on
+  `005ed3f` 8 survived; tests were added for 7 (a ledger or sidecar that is a directory vs unreadable, an unknown entry
+  key in a consistent chain, a declared ledger state that is not the ledger's, the sources not looked at, the Brussels
+  transition instants, a support period below the minimum under one reading); on `631f80c` 35 of 36 are killed, the
+  identity mutant survives (null control), and the survivor (the order in which `day_start` tries the two offsets) is
+  equivalent: no two offsets can both fit a midnight, and the day-by-day test against the IANA zone passes with it.
+
+### Known limitations
+
+- A run under a file size limit can leave Python's own bytecode cache cut (measured 2026-10-19 on `005ed3f`).
+  CPython 3.9 and 3.11 write each `.pyc` with one raw write: from a copy without `__pycache__`, one run of
+  `python -m cra_evidence.cli verify` under a limit smaller than a `.pyc` left it cut (13 `.pyc` written; 11 to 13 cut
+  under limits of 512 B to 4 KiB; 5 on 3.9.25 and 9 on 3.11.2 still cut under 16 KiB — `sbom`'s is 37 527 and 72 230
+  bytes) — and every later run exited 1 with `EOFError: marshal data too short` (nothing on stdout: measured on 3.11.2). Exit 1 is also this tool's code for
+  a finding against the pack: the failure is loud (a traceback on stderr, no receipt), but its exit code alone does not
+  tell it from a finding. It lasts until `cra_evidence/__pycache__` is removed (`python -B` on a later run does not end
+  it: measured), and is avoided by running with `python -B` or `PYTHONDONTWRITEBYTECODE=1` from the start. Python
+  3.13.15 wrote no cut file in the same runs; a cut file put there stops it as well (exit 1). A wheel installed with
+  pip's default settings has its `.pyc` compiled at install time (measured: 15 of 15 modules; the `cra` console script
+  run under a 1 KiB limit and then normally gave the same exit both times).
 
 ## 0.5.1 — 2026-10-12
 
