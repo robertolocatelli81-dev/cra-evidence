@@ -432,6 +432,31 @@ def _cdx_generator(d: Dict[str, Any]) -> Tuple[str, str]:
     return "", ""
 
 
+# The top level of the official JSON schemas (`properties`, `required`, `additionalProperties`), read 04/11/2026 from
+# CycloneDX/specification bom-1.2 … bom-1.7.schema.json. 1.2 and 1.3 leave the top level open.
+_CDX_TOP_14 = frozenset({"$schema", "bomFormat", "specVersion", "serialNumber", "version", "metadata", "components", "services",
+                         "externalReferences", "dependencies", "compositions", "vulnerabilities", "signature"})
+_CDX_TOP_15 = _CDX_TOP_14 | {"annotations", "formulation", "properties"}
+_CDX_TOP_16 = _CDX_TOP_15 | {"declarations", "definitions"}
+_CDX_TOP_LEVEL: Dict[str, Optional[frozenset]] = {"1.2": None, "1.3": None, "1.4": _CDX_TOP_14, "1.5": _CDX_TOP_15, "1.6": _CDX_TOP_16,
+                                                  "1.7": _CDX_TOP_16 | {"citations"}}
+
+
+def _cdx_top_level_valid(d: Dict[str, Any]) -> None:
+    """A document without `components`: the only members that say it is a BOM are the ones around them, so they are read
+    as the schema of the declared version reads them. Raises ValueError (as a document with no `components` always did)
+    on what no schema of 1.2 … 1.7 admits: a `specVersion` outside them, `version` missing up to 1.4, an unknown member."""
+    spec = d.get("specVersion")
+    if not isinstance(spec, str) or spec not in _CDX_TOP_LEVEL:
+        raise ValueError("CycloneDX malformed: without 'components' the document needs a 'specVersion' from 1.2 to 1.7")
+    if spec in ("1.2", "1.3", "1.4") and "version" not in d:
+        raise ValueError(f"CycloneDX malformed: 'version' is required in {spec}")
+    known = _CDX_TOP_LEVEL[spec]
+    unknown = [] if known is None else sorted(k for k in d if k not in known)
+    if unknown:
+        raise ValueError(f"CycloneDX malformed: member outside the {spec} schema: " + ", ".join(unknown)[:120])
+
+
 def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: Optional[bytes] = None) -> SBOMRecord:
     """Ingest a CycloneDX JSON (1.2 … 1.7) from ANY generator: components are walked recursively (a generator may
     nest `components[].components`), a component without a name is skipped (an unknown `type` is indexed as
@@ -442,8 +467,19 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
     raw, d = _load_document(path, raw)
     if not isinstance(d, dict) or d.get("bomFormat") != "CycloneDX":
         raise ValueError("CycloneDX malformed: not a JSON object with bomFormat 'CycloneDX'")
+    md = d.get("metadata")
+    if isinstance(md, dict) and md.get("component") and not isinstance(md["component"], dict):
+        raise ValueError("CycloneDX malformed: 'metadata.component' must be an object")
     gen, gen_ver = _cdx_generator(d)
-    items = d.get("components")
+    # `components` is OPTIONAL in CycloneDX (bom-1.6.schema.json: "required": ["bomFormat", "specVersion"]): a BOM
+    # without it (e.g. only metadata.component) is valid and is read as no components, said in source.components_absent
+    # (fleet audit 04/11/2026: it was refused as malformed). What is left of the old refusal is the top level of the
+    # schemas, _cdx_top_level_valid: `{"bomFormat": "CycloneDX"}` or a misspelled `Components` is not such a BOM and
+    # gets no ledger line. Present and not a list is still malformed.
+    components_absent = "components" not in d
+    if components_absent:
+        _cdx_top_level_valid(d)
+    items = [] if components_absent else d.get("components")
     if not isinstance(items, list):
         raise ValueError("CycloneDX malformed: 'components' must be a list")
     comps: List[SBOMComponent] = []
@@ -508,6 +544,8 @@ def sbom_from_cyclonedx(path: str, product_id: str, product_version: str, raw: O
               "duplicates_merged": declared - len(dedup(comps)), "dependency_edges": len(edges),
               "dangling_edges": len(dangling), "dangling_refs": dangling[:10],
               "dependencies_declared": len(deps), "component_types": dict(sorted(types.items()))}
+    if components_absent:
+        source["components_absent"] = True
     source.update(_fingerprint_bytes(raw, path))
     md_comp = (d.get("metadata") or {}).get("component") if isinstance(d.get("metadata"), dict) else None
     ptype = _s(md_comp.get("type")) if isinstance(md_comp, dict) else ""

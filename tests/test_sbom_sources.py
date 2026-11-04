@@ -146,6 +146,61 @@ class TestIngestRules(unittest.TestCase):
         with self.assertRaises(ValueError):
             sbom_from_cyclonedx(p, "x", "1")
 
+    def test_components_absent_is_a_valid_bom(self):
+        # fleet audit 04/11/2026: bom-1.6.schema.json requires only bomFormat and specVersion; a BOM with only
+        # metadata.component was refused as "CycloneDX malformed". Absent = no components, said in the source
+        p = self._doc("m.json", {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+                                 "metadata": {"component": {"type": "application", "name": "prod", "bom-ref": "p"}},
+                                 "dependencies": [{"ref": "p", "dependsOn": []}]})
+        r = sbom_from_cyclonedx(p, "x", "1")
+        self.assertEqual(r.components, [])
+        self.assertIs(r.source["components_absent"], True)
+        self.assertEqual(r.source["components_declared"], 0)
+        self.assertEqual(r.product_type, "application")
+        # present and empty: no note (the document declared an empty list)
+        r = sbom_from_cyclonedx(self._doc("e.json", {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": []}), "x", "1")
+        self.assertNotIn("components_absent", r.source)
+        # present and not a list: still malformed
+        for bad in (None, {}, "x", 5):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                sbom_from_cyclonedx(self._doc("b.json", {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": bad}), "x", "1")
+
+    def test_metadata_component_not_an_object_is_malformed(self):
+        # NEMESIS 04/11/2026: with `components` absent this reached the md_ref line (AttributeError, traceback) instead of the
+        # refusal the old code gave; with `components: []` the same line crashed already.
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            for extra in ({}, {"components": []}):
+                for comp in (5, "x", [1]):
+                    p = os.path.join(d, "b.json")
+                    with open(p, "w") as f:
+                        json.dump({"bomFormat": "CycloneDX", "specVersion": "1.6", "metadata": {"component": comp}, **extra}, f)
+                    with self.assertRaisesRegex(ValueError, "metadata.component"):
+                        sbom_from_cyclonedx(p, "p", "1")
+
+    def test_without_components_the_top_level_is_read_as_the_schema_reads_it(self):
+        # what the refusal of an absent `components` also caught, and no schema of 1.2 ... 1.7 admits: these documents
+        # got no ledger line before the absent case was opened, and they get none now
+        comp = [{"type": "library", "name": "a", "version": "1"}]
+        for bad in ({}, {"specVersion": 1.6}, {"specVersion": ""}, {"specVersion": "9.9"}, {"specVersion": "1.1", "version": 1},
+                    {"specVersion": None}, {"specVersion": ["1.6"]},
+                    {"specVersion": "1.4"}, {"specVersion": "1.2"}, {"specVersion": "1.3"},
+                    {"specVersion": "1.6", "Components": comp}, {"specVersion": "1.6", "component": comp},
+                    {"specVersion": "1.4", "version": 1, "annotations": []}, {"specVersion": "1.5", "definitions": {}},
+                    {"specVersion": "1.6", "citations": []}):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                sbom_from_cyclonedx(self._doc("t.json", {"bomFormat": "CycloneDX", **bad}), "x", "1")
+        for good in ({"specVersion": "1.2", "version": 1}, {"specVersion": "1.3", "version": 1, "zz": 1},
+                     {"specVersion": "1.4", "version": 1, "vulnerabilities": []}, {"specVersion": "1.5"}, {"specVersion": "1.5", "formulation": []},
+                     {"specVersion": "1.6", "definitions": {}, "declarations": {}}, {"specVersion": "1.7", "citations": []}, {"specVersion": "1.4", "version": 1, "signature": {}},
+                     {"specVersion": "1.6", "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json"}):
+            r = sbom_from_cyclonedx(self._doc("t.json", {"bomFormat": "CycloneDX", **good}), "x", "1")
+            self.assertEqual(r.components, [], repr(good))
+            self.assertIs(r.source["components_absent"], True)
+        # the rule is the absent case only: with `components` a document reads as before
+        r = sbom_from_cyclonedx(self._doc("t.json", {"bomFormat": "CycloneDX", "components": comp}), "x", "1")
+        self.assertEqual(len(r.components), 1)
+
     def test_legacy_tools_list_still_names_the_generator(self):
         p = self._doc("l.json", {"bomFormat": "CycloneDX", "specVersion": "1.4", "metadata": {"tools": [{"vendor": "anchore", "name": "syft", "version": "0.90.0"}]},
                                  "components": [{"type": "library", "name": "a", "version": "1"}]})
