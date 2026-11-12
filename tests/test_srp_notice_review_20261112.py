@@ -167,6 +167,59 @@ class TestLedgerNegatives(_Tmp):
         self.assertFalse(check_notice(self.f, self.led)["verified"])
 
 
+    def _forged_ledger(self, change, rehash=True):
+        """A second, chain-valid ledger holding the same notice record with one change."""
+        from cra_evidence.ledger import Ledger
+        with open(self.led, encoding="utf-8") as f:
+            rec = [json.loads(x)["data"] for x in f if '"cra_srp_notice"' in x][0]
+        rec = dict(rec); change(rec)
+        if rehash:
+            rec["record_sha3"] = sha3_hex({k: v for k, v in rec.items() if k != "record_sha3"})
+        led2 = os.path.join(self.d, "l2.jsonl")
+        Ledger(led2).append(rec)
+        return led2
+
+    def test_forged_control(self):
+        self.assertTrue(check_notice(self.f, self._forged_ledger(lambda r: None))["verified"])
+
+    def test_record_that_disagrees_with_the_file(self):
+        r = check_notice(self.f, self._forged_ledger(lambda r: r.update(complete=False)))
+        self.assertFalse(r["verified"]); self.assertIn("ledger record complete", " ".join(r["reasons"]))
+
+    def test_record_digest_that_does_not_recompute(self):
+        r = check_notice(self.f, self._forged_ledger(lambda r: r.update(stage="notification"), rehash=False))
+        self.assertFalse(r["verified"]); self.assertIn("record_sha3", " ".join(r["reasons"]))
+
+    def test_unreadable_ledger(self):
+        with open(self.led, "a", encoding="utf-8") as f:
+            f.write("{not json\n")
+        r = check_notice(self.f, self.led)
+        self.assertFalse(r["verified"]); self.assertIn("ledger", " ".join(r["reasons"]))
+
+
+class TestMoreRefusals(_Tmp):
+    def test_unknown_schema_is_a_reason(self):
+        p = SRPNotice("vulnerability", "early_warning", dict(EW)).payload(); p["schema"] = "cra-srp/3"
+        r = check_notice(self.write("s.json", p))
+        self.assertFalse(r["verified"]); self.assertIn("not cra-srp/1 or cra-srp/2", r["reasons"][0])
+
+    def test_a_carried_value_missing_from_the_file_fields(self):
+        p = SRPNotice("vulnerability", "notification", {"general_information": "g"},
+                      previous_fields=dict(EW, vulnerability_occurred_datetime_utc="2026-10-30T00:00:00Z")).payload()
+        self.assertIn("vulnerability_occurred_datetime_utc", p["fields"])        # v26a copied (By default copied)
+        del p["fields"]["vulnerability_occurred_datetime_utc"]                 # notice_sha3 still covers it
+        r = check_notice(self.write("c.json", p))
+        self.assertFalse(r["verified"]); self.assertIn("fields change when rebuilt", " ".join(r["reasons"]))
+
+    def test_previous_datetimes_parsed_under_srp_notice_2_only(self):
+        with self.assertRaises(ValueError):
+            SRPNotice("vulnerability", "notification", {"general_information": "g"},
+                      previous_fields=dict(EW, corrective_available_date="yesterday"))
+        n72_0929 = {"general_information": "g", "vulnerability_occurred_datetime_utc": "2026-10-30T00:00:00Z"}
+        SRPNotice("vulnerability", "notification", n72_0929, previous_fields=dict(EW, corrective_available_date="yesterday"),
+                  glossary_version=G0929)                                      # srp-notice/1 frozen: not parsed there
+
+
 class TestCli(_Tmp):
     def test_a_new_notice_is_built_under_the_current_glossary_only(self):
         f = self.write("ew.json", EW)
