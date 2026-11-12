@@ -136,10 +136,23 @@ def diff(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     return out
 
 
-def fetch(url: str = URL, timeout: float = 60.0) -> str:
+def fetch(url: str = URL, timeout: float = 60.0, attempts: int = 3, wait: float = 30.0) -> str:
+    """The page, or the last error. HTTP 429 and 5xx and network errors are retried (`attempts` in all, `wait` x attempt
+    seconds apart): ENISA's site answered 429 to repeated fetches on 12/11/2026 (measured on its FAQ page)."""
+    import time
     req = urllib.request.Request(url, headers={"User-Agent": "cra-evidence glossary drift check (+https://github.com/robertolocatelli81-dev/cra-evidence)"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:   # nosec: a fixed https URL, read-only
-        body = r.read(MAX_PAGE + 1)
+    for i in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:   # nosec: a fixed https URL, read-only
+                body = r.read(MAX_PAGE + 1)
+            break
+        except urllib.error.HTTPError as e:
+            if i == attempts or not (e.code == 429 or e.code >= 500):
+                raise
+        except (urllib.error.URLError, OSError):
+            if i == attempts:
+                raise
+        time.sleep(wait * i)
     if len(body) > MAX_PAGE:
         raise ValueError(f"page larger than {MAX_PAGE} bytes")
     return body.decode("utf-8")
@@ -177,6 +190,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     c.add_argument("--html", help="a saved page instead of the live one (offline)")
     c.add_argument("--url", default=URL)
     c.add_argument("--snapshot", help="reference snapshot (default: the newest in spec/sources/)")
+    c.add_argument("--attempts", type=int, default=3, help="fetch attempts on HTTP 429/5xx or a network error (default 3, 30 s, 60 s apart)")
     a = ap.parse_args(argv)
     if a.cmd == "extract":
         with open(a.html, encoding="utf-8") as f:
@@ -192,7 +206,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             html = f.read()
     else:
         try:
-            html = fetch(a.url)
+            html = fetch(a.url, attempts=max(1, a.attempts))
         except (urllib.error.URLError, OSError, ValueError, UnicodeDecodeError) as ex:
             print(f"FETCH FAILED: {a.url}: {ex}")
             return 2

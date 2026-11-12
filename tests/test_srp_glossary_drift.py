@@ -71,7 +71,7 @@ class TestDriftCheck(unittest.TestCase):
             r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "srp_glossary.py"), "check", "--html", p],
                                capture_output=True, text=True, timeout=120)
             self.assertEqual(r.returncode, 1, r.stdout); self.assertIn("row v29.", r.stdout)
-            r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "srp_glossary.py"), "check", "--url", "http://127.0.0.1:9/"],
+            r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "srp_glossary.py"), "check", "--url", "http://127.0.0.1:9/", "--attempts", "1"],
                                capture_output=True, text=True, timeout=120)
             self.assertEqual(r.returncode, 2, r.stdout); self.assertIn("FETCH FAILED", r.stdout)
         finally:
