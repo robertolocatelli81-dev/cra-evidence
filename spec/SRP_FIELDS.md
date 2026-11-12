@@ -65,7 +65,7 @@ the drift check (`scripts/srp_glossary.py check`).
 
 ## Notice rules `srp-notice/2` (glossary `enisa_srp_glossary_20261112`)
 
-ENISA's FAQ (read 2026-11-12): "The fields displayed and their requirements may differ depending on the notification
+ENISA's FAQ (copy of 2026-11-12, sha256 dbe1d7d0…49cf8c): "The fields displayed and their requirements may differ depending on the notification
 type and reporting stage." A value the portal does not display at a stage cannot be entered there; a payload that
 carries it does not describe what the portal will hold. The rules, each a refusal with a reason (the notice is not
 built, `cra notice` exits 1 and writes nothing):

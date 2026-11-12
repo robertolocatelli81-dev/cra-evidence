@@ -96,7 +96,8 @@ Re-check of 12/11/2026 (what changed: the glossary, three new rows and the stage
   `spec/sources/enisa_srp_glossary_20261010.json`, kept for history.
 - ENISA SRP page (read 2026-11-12): "On 4 November 2026, the CRA SRP was upgraded to version 1.3. The documentation … is
   currently being updated". The platform version and the glossary version are numbered separately.
-- ENISA SRP FAQ (read 2026-11-12): "The fields displayed and their requirements may differ depending on the notification
+- ENISA SRP FAQ (copy fetched 2026-11-12T19:54:02Z, sha256 dbe1d7d019c46ef85c89ec292018929b5a8a5eeb6055d6a3d38b60284049cf8c;
+  two later fetches the same evening answered HTTP 429): "The fields displayed and their requirements may differ depending on the notification
   type and reporting stage"; still no API at the initial release. The Art. 14 deadlines are unchanged.
 
 | Obligation | What this tool does | Reference |
