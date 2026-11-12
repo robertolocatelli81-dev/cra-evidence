@@ -58,7 +58,9 @@ still present, in the same order):
 | Optional(after completion of v17), Optional (after completion of v17) | **O** + condition `user_measures` | may be present only when v17 is present in this payload or the previous one |
 | Optional upon PEC activation, Optional under PEC activation | **O** + condition `particular_exceptional_circumstances` | may be present only when v28 is present and non-empty in this payload |
 
-"Mandatory" is read as Required: the two rows that carry it (v26, i37: the awareness instant at the early warning)
+"Mandatory" is read as Required (ENISA's FAQ 16 itself calls the conditional category "mandatory if the information is
+available"; the same FAQ describes carried-forward fields as "carried forward from a previous reporting stage and, when
+applicable, updated", the reading of C above): the two rows that carry it (v26, i37: the awareness instant at the early warning)
 were "Required" in every earlier version, and the glossary spells the conditional category "Required if such
 information available". A cell text not in this table is not guessed: the derivation test fails on it, and so does
 the drift check (`scripts/srp_glossary.py check`).
@@ -66,8 +68,10 @@ the drift check (`scripts/srp_glossary.py check`).
 ## Notice rules `srp-notice/2` (glossary `enisa_srp_glossary_20261112`)
 
 ENISA's FAQ (copy of 2026-11-12, sha256 dbe1d7d0…49cf8c): "The fields displayed and their requirements may differ depending on the notification
-type and reporting stage." A value the portal does not display at a stage cannot be entered there; a payload that
-carries it does not describe what the portal will hold. The rules, each a refusal with a reason (the notice is not
+type and reporting stage." N/A is read as: the portal does not take the field at that stage, so a payload that
+carries it does not describe what the portal will hold. The glossary of 21/10/2026 predates the platform upgrade of
+04/11/2026, after which ENISA's SRP page says that "the documentation available on this site is currently being updated":
+the rules follow the published glossary, and the weekly drift check reports the next one. The rules, each a refusal with a reason (the notice is not
 built, `cra notice` exits 1 and writes nothing):
 
 1. **Unknown field.** A key of `fields` or of `previous_fields` that is not a field of the stream under the recorded
@@ -93,7 +97,9 @@ built, `cra notice` exits 1 and writes nothing):
    (undetermined, never invented). The final report deadline is unchanged (vulnerability: v22 + 14 days; incident:
    one calendar month from the submission of the 72 h notification, recorded in the vulnerability record).
 8. **Binding to the vulnerability record.** The awareness instant and the CVE/EUVD ids used to bind a notice to the
-   recorded vulnerability event are read from `fields`, else from `previous_fields`.
+   recorded vulnerability event are read from `fields`, else from `previous_fields`. A binding that is refused (an
+   awareness instant different from the recorded one, without `--divergence-reason`) is refused before the drop file is
+   written.
 
 ## Rules `srp-notice/1` (glossaries `enisa_srp_glossary_20260915`, `enisa_srp_glossary_20260929`)
 
@@ -117,6 +123,8 @@ no duplicate keys left): an unknown key in `previous_fields` is refused, and so 
   read 2026-09-29 — …" → `enisa_srp_glossary_20260929`. Any other string is refused, not guessed. Their `notice_sha3`
   was computed without `glossary_version`, and over `previous_fields` when `--previous` was used; those files do not
   carry `previous_fields`, so for them the hash is recomputed only when it was built without `--previous`.
+- A `cra-srp/2` file naming an `srp-notice/1` glossary is refused: `cra notice` builds a new notice under the newest
+  glossary only (the older ones are read, never written).
 - Old ledger records (no `glossary_version`): the version is the one of the drop file the record names
   (`drop.drop_file`) and binds (`drop.drop_sha3`).
 - `cra check-notice DROP [--ledger LEDGER]` rebuilds the notice under the RECORDED version and its rules, and compares

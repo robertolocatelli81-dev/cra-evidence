@@ -6,7 +6,7 @@
   repeats the early-warning fields was accepted by 0.6.0 and is refused now; a 72 h AEV notification without v26a was
   incomplete under 0.6.0 and is complete now. Notices recorded by 0.4.0–0.6.0 keep their verdict (below).
 - **The glossary of 21/10/2026, measured on 12/11/2026.** Page fetched 2026-11-12T20:06:53Z (sha256
-  fb24151b…20bd25), extracted with the new `scripts/srp_glossary.py` — the method of the earlier snapshots, which it
+  fb24151b…c2fbc33), extracted with the new `scripts/srp_glossary.py` — the method of the earlier snapshots, which it
   reproduces byte for byte from their raw pages (15/09 via the copy of 20/09, 29/09, and the page of 01/10/2026) — into
   `spec/sources/enisa_srp_glossary_20261112.json`: 49 rows, 43 numbered fields. Against the snapshot of 29/09/2026,
   row by row: rows 7a "Additional Information", 40 "AR Note", 41 "CSIRT Note" added; 8 labels renamed (1, 5, 11, v24,
@@ -25,13 +25,14 @@
   `--previous`. New fields: `additional_information` (7a), `ar_note` (40), `csirt_note` (41); `cra schema --template`
   leaves `csirt_note` out.
 - **The glossary is recorded, and old notices are checked under theirs.** Drop files are `cra-srp/2` with
-  `glossary_version` and `previous_fields`; the ledger record `cra_srp_notice` gains `glossary_version`. `cra notice
-  --glossary` and `cra schema --glossary` select a vendored glossary (default: the newest). New `cra check-notice DROP
+  `glossary_version` and `previous_fields`; the ledger record `cra_srp_notice` gains `glossary_version`. `cra notice`
+  builds a new notice under the newest glossary only; `cra schema --glossary` prints the schema of any vendored one. New `cra check-notice DROP
   [--ledger LEDGER]` rebuilds a notice under the recorded glossary and compares `complete`, `missing_required`,
   `deadline_utc`, `notice_sha3`; with the ledger, also the chain, the record and the file's `drop_sha3`. A `cra-srp/1`
   file is read under the glossary named by its exact `glossary_source` string; its rules (`srp-notice/1`) are frozen as
-  in 0.6.0. Verified: the repository's example (written by 0.4.0) and an early warning and a 72 h notification written
-  by 0.6.0 on 12/11/2026 (`tests/fixtures/srp_legacy_060/`). The 72 h one was built with `--previous`, whose payload
+  in 0.6.0. A `cra-srp/2` file naming an `srp-notice/1` glossary is refused (no release writes that combination). Verified: the repository's example (written by 0.4.0), an early warning and a 72 h notification written
+  by 0.6.0 on 12/11/2026 (`tests/fixtures/srp_legacy_060/`), and an early warning written by 0.3.3 and one by 0.6.0 that
+  carries an N/A field and integer values (`tests/fixtures/srp_legacy_nemesis/`). The 72 h one was built with `--previous`, whose payload
   0.6.0 hashed but did not write: its `notice_sha3` cannot be recomputed from the file and it verifies through the
   ledger's `drop_sha3` only. The external verifiers (JS, Go, Rust, Java) do not read notice fields: unchanged, and a
   record with the new key still verifies with them, since records are digested as written.
@@ -45,13 +46,22 @@
   against the snapshot of 29/09/2026: 1, 71 differences listed.
 - **Tests.** `tests/test_srp_glossary_16.py` (21 tests): the tables of each glossary derived from its snapshot (with
   controls: the old snapshot, the 1.4 page, an altered cell and an unknown cell text all fail), `spec/SRP_FIELDS.md`
-  tables equal to `scripts/gen_srp_fields.py`'s output, the rules over every stream × stage × field (86 N/A cells, 30
-  required fields, more than 500 wrong-type values, unknown keys in `fields` and `previous_fields`), `check-notice`
+  tables equal to `scripts/gen_srp_fields.py`'s output, the rules over every stream × stage × field (86 N/A cells, the 30
+  Required cells other than the two awareness ones, more than 500 wrong-type values, unknown keys in `fields` and `previous_fields`), `check-notice`
   round trips and tampering, the legacy fixtures. `tests/test_srp_glossary_drift.py` (6 tests): the extractor and the
   drift check, the workflow's pinning. On origin/master (f18097e) the first fails at import (no `notice_check`); a
   behaviour probe of 18 rules passes 3 there and 18 here. 30 mutants of the new lines, each disabling one rule: 30
   killed by the suites (a 31st, NBSP handling, is equivalent — Python's `\s` already matches NBSP — and is not counted). The tests that encode the rules of 0.4.0–0.6.0 now build their notices under
   `enisa_srp_glossary_20260929` explicitly and pass unchanged.
+- **Review of 12/11/2026** (`tests/test_srp_notice_review_20261112.py`): `cra check-notice` gives a reason, never a
+  traceback, for a value the canonical profile refuses (a float, an integer beyond 2^53−1) and refuses a `generated_utc`
+  that is not an instant; `complete`, `missing_required` and `deadline_utc` are compared as JSON (`1` is not `true`); a
+  notice whose awareness instant contradicts the recorded vulnerability event is refused before its drop file is written
+  (0.6.0 wrote the file, then refused the ledger record); the drift check also compares the page's version line and the
+  notes after the table (the pages of 10/09, 25/09 and 01/10/2026 qualified v26 and i37 in two footnotes there) and
+  exits 2, never 1, when a local file cannot be read. New tests for the paths the first ones left open: the frozen
+  `srp-notice/1` rules on a 0.6.0 notice, the ledger's negative answers, the submission statement, an unknown
+  `glossary_version`, the hash covering `glossary_version`, the fetch retry.
 - **Test hygiene.** `tests/test_tree_hygiene_20260929.py` skipped the `.git` directory but not the `.git` file of a git
   worktree, which names the main repository's path: the suite failed 1 of 261 on origin/master when run from a
   worktree. Fixed.

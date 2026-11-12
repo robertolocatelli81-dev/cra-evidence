@@ -207,7 +207,8 @@ The bound limits what is read, not what parsing a document within it costs (meas
   lists what is missing; a notice cannot carry an awareness instant different from the recorded vulnerability event
   without a declared reason. Each notice records the glossary it was built under (`glossary_version`) and
   `cra check-notice` re-checks it under that one: the notices recorded by 0.4.0–0.6.0 under the glossary of 25/09/2026
-  still verify (tested on the repository's example and on files written by 0.6.0). `scripts/srp_glossary.py check`
+  still verify with their ledger (tested on the repository's example and on files written by 0.3.3 and 0.6.0); one built
+  with `--previous` verifies through the ledger only, as its file does not carry the previous payload its hash covered. `scripts/srp_glossary.py check`
   re-extracts the live page and exits 1 with a field-by-field diff when it differs from the newest snapshot; the
   workflow `.github/workflows/srp-glossary-drift.yml` is scheduled to run it every Monday.
 - The CycloneDX index export written into the record (1.6 by default, `cra sbom --spec-version 1.7` or `to_cyclonedx_min("1.7")`) validates against the official 1.6 and 1.7 JSON schemas
