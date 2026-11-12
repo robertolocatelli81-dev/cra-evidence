@@ -190,8 +190,10 @@ class CRAEvidenceLocker:
         """The notice's awareness instant is bound to the vulnerability record already in the chain for the same id
         (cve_id / euvd_id ↔ vuln_id): a different value is refused unless `divergence_reason` declares why — the legal
         clock cannot be moved in a notice without touching the record that started it."""
-        bound_to, aw = [], notice.fields.get("awareness_datetime_utc")
-        ids = {str(notice.fields.get(k)).strip().upper() for k in ("cve_id", "euvd_id") if notice.fields.get(k)}
+        # read from the payload, else from the previous stage's payload: since the glossary of 21/10/2026 the awareness
+        # instant and the CVE/EUVD ids are early-warning fields only (spec/SRP_FIELDS.md, srp-notice/2 rule 8)
+        bound_to, aw = [], notice.case_value("awareness_datetime_utc")
+        ids = {str(notice.case_value(k)).strip().upper() for k in ("cve_id", "euvd_id") if notice.case_value(k)}
         latest: Dict[str, Dict[str, Any]] = {}     # the LAST record per vuln_id is the current legal state
         if ids:
             for e in self.ledger.entries():
@@ -209,6 +211,7 @@ class CRAEvidenceLocker:
                     raise ValueError(f"awareness_datetime_utc {aw} differs from the recorded awareness {d.get('awareness_utc')} "
                                      f"of {d.get('vuln_id')} (record {d.get('record_id')}): give divergence_reason or fix the notice")
         return self._append({"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
+                             "glossary_version": notice.glossary_version,
                              "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
                              "complete": notice.complete(), "missing_required": notice.missing(),
                              "deadline_utc": notice.deadline_utc(), "drop": drop_result or {"status": "not_written"},

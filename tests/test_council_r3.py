@@ -7,7 +7,13 @@ from cra_evidence.ledger import Ledger
 from cra_evidence.locker import CRAEvidenceLocker
 from cra_evidence.longterm import AlgorithmPolicy, LongTermEvidence, Signer, register_algorithm
 from cra_evidence.sbom import SBOMComponent, SBOMRecord, is_spdx_id, sbom_from_installed
-from cra_evidence.srp_notice import SRPNotice
+import functools
+from cra_evidence.srp_notice import SRPNotice as _SRPNotice
+# Pinned to the glossary of 25/09/2026 (snapshot enisa_srp_glossary_20260929, rules srp-notice/1): since 12/11/2026 a notice
+# is built by default under the glossary of 21/10/2026; these tests keep proving the 0.4.0-0.6.0 rules, which a notice
+# recorded then is still checked under (tests/test_srp_glossary_16.py covers the new glossary).
+G0929 = "enisa_srp_glossary_20260929"
+SRPNotice = functools.partial(_SRPNotice, glossary_version=G0929)
 from cra_evidence.verify_pack import verify_pack
 from cra_evidence.vuln import VulnerabilityRecord
 from cra_evidence import feeds

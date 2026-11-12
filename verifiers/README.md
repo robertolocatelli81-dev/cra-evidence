@@ -19,6 +19,12 @@ node verifiers/js/cra-verify.mjs pack.json [--ledger l.jsonl] [--trust-store tru
 ./cra-verify pack.json …                      # Go / Rust binaries
 ```
 
+**Notices (2026-11-12).** The three verifiers check the chain, the record digests, the anchor, the signatures and the tip;
+none of them reads the SRP fields of a notice or the glossary it was built under — `cra check-notice` (Python) does
+that. A `cra_srp_notice` record is digested as written, so the `glossary_version` key added on 2026-11-12 needs no
+change here: measured the same day, `differential.py --require js,rust` 186 cases, 0 divergences (Go not measured
+locally: no Go toolchain on the machine).
+
 **Closed schema (2026-10-10, aligned in the three on 2026-10-11).** The pack's top level (`pack-schema` layer), every ledger
 entry's top level (`ledger-schema` layer) and the signature sidecar (`producer-signature` detail) are closed objects — the same
 lists as the reference (`PACK_KEYS`, `ENTRY_KEYS`, `SIDECAR_KEYS` in CHANGELOG), the same words, a key nobody defined NAMED.

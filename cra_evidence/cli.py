@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """`cra` command line. Exit 0 only on a verified positive outcome: `vuln` exits 1 when an applicable deadline is
-overdue, `seal` when the seal does not verify, `notice` when required fields are missing, `verify` when authenticity
+overdue, `seal` when the seal does not verify, `notice` when required fields are missing or the glossary refuses a field,
+`check-notice` when a drop file does not re-check under the glossary it records, `verify` when authenticity
 is FAIL (77 when it could not judge), `obligations` when a support period is below the five-year minimum with no
 declared shorter expected use (under one reading of the day, at least) for a product the requirements reach (Art. 69(2)). Exit 74 when the JSON outcome (also the text of `--help` and `--version`) could
 not be written whole to stdout (full disk, closed pipe, closed or read-only stdout, a file size limit, also under -u /
@@ -26,7 +27,8 @@ from .applicability import ROLES, STREAMS
 from .locker import CRAEvidenceLocker
 from .sbom import resolved_components, sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx
 from .signing import keygen, load_key, sign_pack
-from .srp_notice import DryRunDrop, SRPNotice, schema
+from .notice_check import check_notice, load_json_object   # a duplicate key in --fields/--previous is refused, never last-wins
+from .srp_notice import CURRENT_GLOSSARY, GLOSSARIES, DryRunDrop, SRPNotice, schema, template
 from .verify_pack import verify_pack
 from .vuln import STATUSES, VulnerabilityRecord
 from .longterm import LongTermEvidence
@@ -271,8 +273,12 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--fields", required=True, help="JSON file with the SRP fields (see `cra schema --template`)"); s.add_argument("--drop", required=True, help="drop folder")
     s.add_argument("--previous", help="JSON file with the previous stage's fields: carried-forward fields are copied from it")
     s.add_argument("--divergence-reason", help="why this notice's awareness differs from the recorded vulnerability event")
+    s.add_argument("--glossary", default=CURRENT_GLOSSARY, choices=sorted(GLOSSARIES), help="ENISA glossary snapshot the notice is built under (recorded in it; default: the newest)")
+    s = sub.add_parser("check-notice", help="re-check a notice drop file under the glossary it records (and, with --ledger, against its ledger record)")
+    s.add_argument("drop", help="the drop file written by `cra notice`"); s.add_argument("--ledger", help="the ledger the notice was recorded in")
     s = sub.add_parser("schema", help="print the SRP field schema for a stream, or a fillable template for a stage"); s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"])
     s.add_argument("--template", choices=["early_warning", "notification", "final_report"], help="print {field: \"\"} for the fields of this stage (R/C/O/A), ready for `cra notice --fields`")
+    s.add_argument("--glossary", default=CURRENT_GLOSSARY, choices=sorted(GLOSSARIES), help="ENISA glossary snapshot (default: the newest)")
     s = sub.add_parser("pack", help="write the evidence pack and anchor it in the ledger"); common(s); s.add_argument("--out", required=True)
     s = sub.add_parser("sign", help="sign a pack (Ed25519 sidecar) with a seed file or an AWS KMS Ed25519 key (the key never leaves the HSM)"); s.add_argument("pack")
     s.add_argument("--key", help="Ed25519 seed file"); s.add_argument("--signer-id", required=True)
@@ -311,9 +317,8 @@ def _main(argv: List[str] = None) -> int:
         _p(r); return 0
     if a.cmd == "schema":
         if a.template:
-            sch = schema(a.stream)
-            _p({k: ("" if spec["format"] not in ("list", "enum-list") else []) for k, spec in sch.items() if spec["stages"][a.template] != "-"}); return 0
-        _p({"stream": a.stream, "fields": schema(a.stream)}); return 0
+            _p(template(a.stream, a.template, a.glossary)); return 0
+        _p({"stream": a.stream, "glossary_version": a.glossary, "fields": schema(a.stream, a.glossary)}); return 0
     if a.cmd == "sbom":
         lk = _locker(a)
         if sum(1 for x in (a.from_cyclonedx, a.from_spdx, a.installed is not None) if x) > 1:
@@ -354,12 +359,14 @@ def _main(argv: List[str] = None) -> int:
         return 0 if (not od["any_overdue"] or a.allow_overdue) else 1
     if a.cmd == "notice":
         lk = _locker(a)
-        with open(a.fields, encoding="utf-8") as f:
-            fields = json.load(f)
-        prev = _load_json(a.previous) if a.previous else None
-        n = SRPNotice(stream=a.stream, stage=a.stage, fields=fields, previous_fields=prev)
+        fields = load_json_object(a.fields)
+        prev = load_json_object(a.previous) if a.previous else None
+        n = SRPNotice(stream=a.stream, stage=a.stage, fields=fields, previous_fields=prev, glossary_version=a.glossary)
         r = DryRunDrop(a.drop).prepare(n); lk.record_notice(n, r, divergence_reason=a.divergence_reason); _p(r)
         return 0 if r["complete"] else 1
+    if a.cmd == "check-notice":
+        r = check_notice(a.drop, a.ledger); _p(r)
+        return 0 if r["verified"] else 1
     if a.cmd == "pack":
         lk = _locker(a); pk = lk.evidence_pack(a.out); _p({"pack": a.out, "pack_sha3": pk["pack_sha3"], "verification": pk["verification"]})
         return 0 if pk["verification"]["chain_ok"] else 1

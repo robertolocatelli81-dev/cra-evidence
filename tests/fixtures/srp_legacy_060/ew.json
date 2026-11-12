@@ -1,0 +1,1 @@
+{"notification_type": "Vulnerability", "title": "legacy fixture (not a real report)", "summary": "built by cra-evidence 0.6.0 (origin/master f18097e) on 12/11/2026", "manufacturer_name": "example manufacturer", "member_states_available": ["IT"], "product_name": "example", "product_version": "1.0", "awareness_datetime_utc": "2026-11-01T08:00:00Z", "cve_id": "CVE-2026-0001"}
