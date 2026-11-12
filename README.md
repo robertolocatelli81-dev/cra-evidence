@@ -40,7 +40,8 @@ cra vuln  ... --ew-sent 2026-09-12T20:00:00Z --notified 2026-09-14T09:00:00Z    
 cra schema --stream vulnerability --template early_warning > ew.json         # fillable template for that stage
 cra notice --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key \
           --stage early_warning --fields ew.json --drop ./srp_drop             # exit 1 while required fields are missing
-cra notice ... --stage notification --fields n72.json --previous ew.json ...  # carried-forward fields copied from the previous stage
+cra notice ... --stage notification --fields n72.json --previous ew.json ...  # n72.json: the 72 h fields only; the awareness instant comes from ew.json
+cra check-notice ./srp_drop/<drop file>.json --ledger cra.ledger.jsonl       # re-checks a notice under the glossary it records; exit 1 if it does not
 cra pack  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --out cra_pack.json \
           --support-period-end 2031-12-31T00:00:00Z                           # retention = 10 years or support period, whichever is longer
 cra sign  cra_pack.json --key ~/.cra/log.key --signer-id myapp-ci
@@ -199,12 +200,16 @@ The bound limits what is read, not what parsing a document within it costs (meas
   the CHANGELOG, each re-measured and turned into an oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
   cryptography only, none); the legal points were re-read on EUR-Lex
   and ENISA, and the OSV API behaviour checked live, before the fix.
-- The SRP schema is the 40-field ENISA glossary (45 table rows in the vendored snapshot of 29/09/2026: 3 section headers,
-  2 unnumbered continuation rows, 40 numbered fields; the page dated 25/09/2026 added one row, v26a, to the 39 fields of
-  15/09/2026 — measured row by row, nothing else changed), stage by stage, derived by a test from the dated snapshot vendored in
-  `spec/sources/` (`spec/SRP_FIELDS.md`); "complete" is never declared by silence — the payload lists what is
-  missing; a notice cannot carry an awareness instant different from the recorded vulnerability event without a
-  declared reason.
+- The SRP schema is ENISA's glossary "Version 1.6" of 21/10/2026 (43 numbered fields; 49 table rows in the snapshot
+  vendored on 12/11/2026), stage by stage, derived by a test from the dated snapshots in `spec/sources/`
+  (`spec/SRP_FIELDS.md`). A field the glossary marks N/A at a stage, a field entered by the CSIRT, an unknown key, a
+  wrong JSON type or a duplicate key is refused with its reason; "complete" is never declared by silence — the payload
+  lists what is missing; a notice cannot carry an awareness instant different from the recorded vulnerability event
+  without a declared reason. Each notice records the glossary it was built under (`glossary_version`) and
+  `cra check-notice` re-checks it under that one: the notices recorded by 0.4.0–0.6.0 under the glossary of 25/09/2026
+  still verify (tested on the repository's example and on files written by 0.6.0). `scripts/srp_glossary.py check`
+  re-extracts the live page and exits 1 with a field-by-field diff when it differs from the newest snapshot; the
+  workflow `.github/workflows/srp-glossary-drift.yml` is scheduled to run it every Monday.
 - The CycloneDX index export written into the record (1.6 by default, `cra sbom --spec-version 1.7` or `to_cyclonedx_min("1.7")`) validates against the official 1.6 and 1.7 JSON schemas
   (vendored in `spec/schemas/`, checked by the tests) and against the official CycloneDX CLI 0.33.1 with
   `--fail-on-errors` (checked in CI, with a positive control that the CLI rejects a broken document). SPDX 2.2/2.3
@@ -230,7 +235,8 @@ Syft 1.52.0, Trivy 0.74.0 and cdxgen 12.8.4 emit it by default (measured 20/09/2
 exports 1.6 or 1.7, both validated; the SRP has no machine interface today (ENISA's FAQ, re-read 20/09/2026: "no Application Programming Interface (API)
 will be provided at the initial release of the SRP … API functionality may be considered in a future phase"; the
 39-field glossary re-downloaded the same day was identical to the snapshot of 15/09/2026; re-read on 29/09/2026, the page
-dated 25/09/2026 adds one field, v26a, adopted in the schema — see the CHANGELOG) and this tool will adopt one if it
+dated 25/09/2026 adds one field, v26a, adopted in the schema; re-read on 12/11/2026, the page "Version 1.6" of 21/10/2026
+adds rows 7a, 40 and 41 and moves most 72 h and final-report cells to N/A, adopted — see the CHANGELOG) and this tool will adopt one if it
 appears — the Digital Omnibus proposal (COM, 19/11/2025, procedure 2025/0360(COD), not adopted) would build a single
 entry point for incident reporting on the CRA platform; NIST IR 8547 — an initial public draft, not a final standard —
 proposes deprecating the quantum-vulnerable signatures (Ed25519 included) after 2030 and disallowing them after

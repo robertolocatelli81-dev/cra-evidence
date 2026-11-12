@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased — ENISA SRP glossary "Version 1.6" (21/10/2026); the glossary recorded in every notice; drift check
+
+- **Why a minor version when released.** The same input gets a different verdict: a 72 h or final-report payload that
+  repeats the early-warning fields was accepted by 0.6.0 and is refused now; a 72 h AEV notification without v26a was
+  incomplete under 0.6.0 and is complete now. Notices recorded by 0.4.0–0.6.0 keep their verdict (below).
+- **The glossary of 21/10/2026, measured on 12/11/2026.** Page fetched 2026-11-12T20:06:53Z (sha256
+  fb24151b…20bd25), extracted with the new `scripts/srp_glossary.py` — the method of the earlier snapshots, which it
+  reproduces byte for byte from their raw pages (15/09 via the copy of 20/09, 29/09, and the page of 01/10/2026) — into
+  `spec/sources/enisa_srp_glossary_20261112.json`: 49 rows, 43 numbered fields. Against the snapshot of 29/09/2026,
+  row by row: rows 7a "Additional Information", 40 "AR Note", 41 "CSIRT Note" added; 8 labels renamed (1, 5, 11, v24,
+  v25, v26, i37, v28); at 72 h, 17 cells pass from "By default copied from previous step, or updated" to N/A, at the
+  final report 25; i38 at 72 h from Required to Optional; v26a at 72 h from Required to "By default copied from previous
+  step"; v22, v29, v30 become conditional; v26 and i37 read "Mandatory"; i31 becomes free text (max 255). The page of
+  01/10/2026 ("Version 1.4", saved 10/10/2026) is vendored too: it already had rows 40 and 41. ENISA numbered two
+  different tables "Version 1.3" (10/09 and 25/09/2026): a version is therefore named by its snapshot.
+- **Rules written in `spec/SRP_FIELDS.md` before the code (`srp-notice/2`).** Refused with a reason, nothing written,
+  exit 1: a key that is not a field of the stream (also in `previous_fields`; an old label is unknown); a field present
+  at a stage where the glossary says N/A (the earlier-stage fields go in `--previous`, and N/A fields are never copied
+  forward); v22 without v17, v29/v30 without v28; `csirt_note` (row 41 is "entered by the designated CSIRT"); a JSON
+  type other than a string (text, date) or a list of strings (lists); a duplicate key in `--fields`/`--previous`. A
+  missing required field keeps the notice incomplete (written, `complete: false`, exit 1), as before. At 72 h the
+  deadline and the binding to the vulnerability record read the awareness instant and the CVE/EUVD ids from
+  `--previous`. New fields: `additional_information` (7a), `ar_note` (40), `csirt_note` (41); `cra schema --template`
+  leaves `csirt_note` out.
+- **The glossary is recorded, and old notices are checked under theirs.** Drop files are `cra-srp/2` with
+  `glossary_version` and `previous_fields`; the ledger record `cra_srp_notice` gains `glossary_version`. `cra notice
+  --glossary` and `cra schema --glossary` select a vendored glossary (default: the newest). New `cra check-notice DROP
+  [--ledger LEDGER]` rebuilds a notice under the recorded glossary and compares `complete`, `missing_required`,
+  `deadline_utc`, `notice_sha3`; with the ledger, also the chain, the record and the file's `drop_sha3`. A `cra-srp/1`
+  file is read under the glossary named by its exact `glossary_source` string; its rules (`srp-notice/1`) are frozen as
+  in 0.6.0. Verified: the repository's example (written by 0.4.0) and an early warning and a 72 h notification written
+  by 0.6.0 on 12/11/2026 (`tests/fixtures/srp_legacy_060/`). The 72 h one was built with `--previous`, whose payload
+  0.6.0 hashed but did not write: its `notice_sha3` cannot be recomputed from the file and it verifies through the
+  ledger's `drop_sha3` only. The external verifiers (JS, Go, Rust, Java) do not read notice fields: unchanged, and a
+  record with the new key still verifies with them, since records are digested as written.
+- **Drift check.** `scripts/srp_glossary.py check` (standard library only) fetches the page, extracts it and compares it
+  with the newest snapshot: exit 0 identical, 1 different (field-by-field diff), 2 not fetched or no glossary table.
+  HTTP 429/5xx and network errors are retried (3 attempts): ENISA answered 429 to repeated fetches of its FAQ on
+  12/11/2026. `.github/workflows/srp-glossary-drift.yml` is scheduled every Monday at 06:17 UTC and runs on demand
+  (`permissions: contents: read`, no secrets, `actions/checkout` pinned by commit SHA). Tested offline on the saved page
+  (equal: 0; a cell, a label, a length or a removed row changed: 1, with the row named; no table, another table or two
+  tables: 2; an unreachable URL: 2). Run live on 12/11/2026 at 20:35:14Z: 0 against the new snapshot; at 20:35:22Z
+  against the snapshot of 29/09/2026: 1, 71 differences listed.
+- **Tests.** `tests/test_srp_glossary_16.py` (21 tests): the tables of each glossary derived from its snapshot (with
+  controls: the old snapshot, the 1.4 page, an altered cell and an unknown cell text all fail), `spec/SRP_FIELDS.md`
+  tables equal to `scripts/gen_srp_fields.py`'s output, the rules over every stream × stage × field (86 N/A cells, 30
+  required fields, more than 500 wrong-type values, unknown keys in `fields` and `previous_fields`), `check-notice`
+  round trips and tampering, the legacy fixtures. `tests/test_srp_glossary_drift.py` (6 tests): the extractor and the
+  drift check, the workflow's pinning. On origin/master (f18097e) the first fails at import (no `notice_check`); a
+  behaviour probe of 18 rules passes 3 there and 18 here. 30 mutants of the new lines, each disabling one rule: 30
+  killed by the suites (a 31st, NBSP handling, is equivalent — Python's `\s` already matches NBSP — and is not counted). The tests that encode the rules of 0.4.0–0.6.0 now build their notices under
+  `enisa_srp_glossary_20260929` explicitly and pass unchanged.
+- **Test hygiene.** `tests/test_tree_hygiene_20260929.py` skipped the `.git` directory but not the `.git` file of a git
+  worktree, which names the main repository's path: the suite failed 1 of 261 on origin/master when run from a
+  worktree. Fixed.
+
 ## 0.6.0 — 2026-10-19 — the receipt says one thing per question; who is bound from when; the Art. 14 trigger
 
 ### The receipt of `cra verify`: admission, states, policy (`spec/RECEIPT.md`, written before the code)
