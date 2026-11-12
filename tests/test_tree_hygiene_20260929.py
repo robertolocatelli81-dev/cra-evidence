@@ -30,6 +30,8 @@ def repository_files():
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for f in sorted(filenames):
+            if f in SKIP_DIRS:      # a git worktree's `.git` is a file naming the main repository's path: not repository content
+                continue
             if not f.endswith(SKIP_SUFFIXES):
                 yield os.path.join(dirpath, f)
 
