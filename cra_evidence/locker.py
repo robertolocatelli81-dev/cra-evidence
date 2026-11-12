@@ -187,7 +187,17 @@ class CRAEvidenceLocker:
 
     def record_notice(self, notice: SRPNotice, drop_result: Optional[Dict[str, Any]] = None,
                       divergence_reason: Optional[str] = None) -> Dict[str, Any]:
-        """The notice's awareness instant is bound to the vulnerability record already in the chain for the same id
+        bound_to = self.bind_notice(notice, divergence_reason)
+        return self._append({"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
+                             "glossary_version": notice.glossary_version,
+                             "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
+                             "complete": notice.complete(), "missing_required": notice.missing(),
+                             "deadline_utc": notice.deadline_utc(), "drop": drop_result or {"status": "not_written"},
+                             "bound_vuln_records": bound_to, "awareness_divergence_reason": divergence_reason})
+
+    def bind_notice(self, notice: SRPNotice, divergence_reason: Optional[str] = None) -> List[Any]:
+        """The vulnerability records the notice is bound to (called by `cra notice` BEFORE the drop file is written, so a
+        refused binding leaves no file behind). The notice's awareness instant is bound to the vulnerability record already in the chain for the same id
         (cve_id / euvd_id ↔ vuln_id): a different value is refused unless `divergence_reason` declares why — the legal
         clock cannot be moved in a notice without touching the record that started it."""
         # read from the payload, else from the previous stage's payload: since the glossary of 21/10/2026 the awareness
@@ -210,12 +220,7 @@ class CRAEvidenceLocker:
                 if parse_utc(str(aw)) != parse_utc(str(d.get("awareness_utc"))) and not divergence_reason:
                     raise ValueError(f"awareness_datetime_utc {aw} differs from the recorded awareness {d.get('awareness_utc')} "
                                      f"of {d.get('vuln_id')} (record {d.get('record_id')}): give divergence_reason or fix the notice")
-        return self._append({"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
-                             "glossary_version": notice.glossary_version,
-                             "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
-                             "complete": notice.complete(), "missing_required": notice.missing(),
-                             "deadline_utc": notice.deadline_utc(), "drop": drop_result or {"status": "not_written"},
-                             "bound_vuln_records": bound_to, "awareness_divergence_reason": divergence_reason})
+        return bound_to
 
     # ── verification with content-binding ────────────────────────────────
     def verify(self) -> Dict[str, Any]:
