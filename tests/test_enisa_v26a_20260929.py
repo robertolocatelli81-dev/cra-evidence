@@ -1,6 +1,6 @@
 """ENISA CRA SRP glossary, page dated 25/09/2026 (read 29/09/2026): one row added, v26a. Each measurement below is
 made against the two vendored snapshots (15/09 and 29/09); the bench proves it can fail (positive controls)."""
-import json, os, re, shutil, sys, tempfile, unittest
+import contextlib, io, json, os, re, shutil, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,10 +115,15 @@ class TestV26aInNotices(unittest.TestCase):
                 json.dump(N72, f)
             with open(f_ok, "w", encoding="utf-8") as f:
                 json.dump({**N72, "vulnerability_occurred_datetime_utc": "2026-08-24T09:15:00Z"}, f)
+            # `cra notice` builds new notices under the current glossary only (review 12/11/2026); the 0.4.0-0.6.0 verdicts
+            # are kept by the API under the recorded glossary
+            self.assertFalse(SRPNotice("vulnerability", "notification", dict(N72), glossary_version=G0929).complete())
+            self.assertTrue(SRPNotice("vulnerability", "notification", {**N72, "vulnerability_occurred_datetime_utc": "2026-08-24T09:15:00Z"},
+                                      glossary_version=G0929).complete())
             base = ["notice", "--ledger", led, "--product", "p", "--version", "1", "--stage", "notification", "--drop", drop, "--glossary", G0929]
-            self.assertEqual(main(base + ["--fields", f_missing]), 1)
-            self.assertEqual(main(base + ["--fields", f_ok]), 0)
-            import io, contextlib
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+                main(base + ["--fields", f_ok])
+            self.assertEqual(cm.exception.code, 2)
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 main(["schema", "--stream", "vulnerability", "--template", "notification", "--glossary", G0929])

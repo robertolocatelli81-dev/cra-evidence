@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from .canonical import sha3_hex
 from .ledger import Ledger, read_regular
 from .srp_notice import GLOSSARIES, LEGACY_SOURCES, SRPNotice
+from .vuln import parse_utc
 
 _V1_KEYS = frozenset({"schema", "glossary_source", "stream", "stage", "notice_id", "generated_utc", "deadline_utc", "fields",
                       "complete", "missing_required", "notice_sha3", "submission"})
@@ -43,6 +44,11 @@ def load_json_object(path: str, cap: int = MAX_DROP_BYTES) -> Dict[str, Any]:
     if not isinstance(v, dict):
         raise ValueError(f"{os.path.basename(path)}: not a JSON object")
     return v
+
+
+def _same(a: Any, b: Any) -> bool:
+    """JSON equality: 1 is not true, 1.0 is not 1 (Python's == would say they are)."""
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
 
 
 def check_notice(drop_path: str, ledger_path: Optional[str] = None) -> Dict[str, Any]:
@@ -83,6 +89,9 @@ def check_notice(drop_path: str, ledger_path: Optional[str] = None) -> Dict[str,
         if not isinstance(v, str) or v not in GLOSSARIES:
             reasons.append(f"glossary_version {v!r} unknown to this release")
             return out
+        if GLOSSARIES[v]["rules"] == "srp-notice/1":   # cra-srp/2 files are written under srp-notice/2 glossaries only
+            reasons.append(f"glossary_version {v!r} ({GLOSSARIES[v]['rules']}) in a cra-srp/2 file: no release writes that combination")
+            return out
         if p["glossary_source"] != GLOSSARIES[v]["source"]:
             reasons.append(f"glossary_source does not match glossary_version {v}")
             return out
@@ -102,12 +111,21 @@ def check_notice(drop_path: str, ledger_path: Optional[str] = None) -> Dict[str,
         return out
     if legacy:
         object.__setattr__(n, "_unversioned", True)
+    try:
+        if not isinstance(p["generated_utc"], str):
+            raise ValueError("generated_utc is not a string")
+        parse_utc(p["generated_utc"])
+        rebuilt = (("complete", n.complete()), ("missing_required", n.missing()), ("deadline_utc", n.deadline_utc()))
+        own_hash = n.canonical_hash()
+    except (ValueError, TypeError, OverflowError, RecursionError) as e:   # e.g. a float the canonical profile refuses
+        reasons.append(f"not rebuildable under {v}: {type(e).__name__}: {str(e)[:200]}")
+        return out
     if n.fields != fields:
         reasons.append("fields change when rebuilt (a carried-forward field was not copied into the file)")
-    for k, got in (("complete", n.complete()), ("missing_required", n.missing()), ("deadline_utc", n.deadline_utc())):
-        if p[k] != got:
+    for k, got in rebuilt:
+        if not _same(p[k], got):
             reasons.append(f"{k}: the file says {p[k]!r}, rebuilt under {v} it is {got!r}")
-    hash_ok = n.canonical_hash() == p["notice_sha3"]
+    hash_ok = own_hash == p["notice_sha3"]
     out["notice_sha3"] = "recomputed" if hash_ok else "differs"
     if not hash_ok and legacy:
         notes.append("notice_sha3 is not recomputable from a cra-srp/1 file built with --previous (previous_fields was hashed "
@@ -125,7 +143,7 @@ def check_notice(drop_path: str, ledger_path: Optional[str] = None) -> Dict[str,
             if d.get("drop_file") != os.path.basename(drop_path):
                 notes.append(f"file name differs from the recorded drop_file {d.get('drop_file')!r}")
             for k in ("stream", "stage", "notice_sha3", "complete", "missing_required", "deadline_utc"):
-                if rec.get(k) != p[k]:
+                if not _same(rec.get(k), p[k]):
                     reasons.append(f"ledger record {k} {rec.get(k)!r} differs from the file {p[k]!r}")
             if "glossary_version" in rec:
                 if rec["glossary_version"] != v:

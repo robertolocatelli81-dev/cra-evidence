@@ -273,7 +273,6 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--fields", required=True, help="JSON file with the SRP fields (see `cra schema --template`)"); s.add_argument("--drop", required=True, help="drop folder")
     s.add_argument("--previous", help="JSON file with the previous stage's fields: carried-forward fields are copied from it")
     s.add_argument("--divergence-reason", help="why this notice's awareness differs from the recorded vulnerability event")
-    s.add_argument("--glossary", default=CURRENT_GLOSSARY, choices=sorted(GLOSSARIES), help="ENISA glossary snapshot the notice is built under (recorded in it; default: the newest)")
     s = sub.add_parser("check-notice", help="re-check a notice drop file under the glossary it records (and, with --ledger, against its ledger record)")
     s.add_argument("drop", help="the drop file written by `cra notice`"); s.add_argument("--ledger", help="the ledger the notice was recorded in")
     s = sub.add_parser("schema", help="print the SRP field schema for a stream, or a fillable template for a stage"); s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"])
@@ -361,7 +360,8 @@ def _main(argv: List[str] = None) -> int:
         lk = _locker(a)
         fields = load_json_object(a.fields)
         prev = load_json_object(a.previous) if a.previous else None
-        n = SRPNotice(stream=a.stream, stage=a.stage, fields=fields, previous_fields=prev, glossary_version=a.glossary)
+        n = SRPNotice(stream=a.stream, stage=a.stage, fields=fields, previous_fields=prev)   # a new notice: the current glossary only
+        lk.bind_notice(n, a.divergence_reason)   # a refused binding writes nothing (no drop file without its record)
         r = DryRunDrop(a.drop).prepare(n); lk.record_notice(n, r, divergence_reason=a.divergence_reason); _p(r)
         return 0 if r["complete"] else 1
     if a.cmd == "check-notice":
