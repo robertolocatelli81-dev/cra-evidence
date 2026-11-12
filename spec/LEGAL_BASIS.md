@@ -1,4 +1,4 @@
-# Legal basis — as read from primary sources on 15/09/2026, re-checked on 20/09/2026, 29/09/2026 and 19/10/2026
+# Legal basis — as read from primary sources on 15/09/2026, re-checked on 20/09/2026, 29/09/2026, 19/10/2026 and 12/11/2026
 
 Regulation (EU) 2024/2847 (Cyber Resilience Act). Sources consulted on 15/09/2026:
 - European Commission, "Cyber Resilience Act — Reporting obligations": https://digital-strategy.ec.europa.eu/en/policies/cra-reporting
@@ -84,6 +84,20 @@ the provisions are newly used by `cra_evidence/applicability.py`, `cra obligatio
 - Not re-read on 19/10/2026: the ENISA SRP FAQ ("Updated: 15 October 2026" per Athena: steward reporting from 11/12/2027,
   no API at the initial release, voluntary notifications not implemented) and the EN 40000 standardisation status
   (secondary trackers only).
+
+Re-check of 12/11/2026 (what changed: the glossary, three new rows and the stage cells; nothing in the obligations):
+- CRA SRP Glossary page "Version 1.6. Last update: 21 October 2026", fetched 2026-11-12T20:06:53Z (HTTP 200, 66 023 bytes,
+  sha256 fb24151b894277d03cc3c745b6d5c29c57de72cbfc7e9b1b356f6af4bc2fbc33), extracted with `scripts/srp_glossary.py`
+  (positive control: on the raw page of 29/09/2026 it reproduces `spec/sources/enisa_srp_glossary_20260929.json` byte for
+  byte). New snapshot `spec/sources/enisa_srp_glossary_20261112.json`: 49 rows, 43 numbered fields; rows 7a, 40, 41 added;
+  the 72 h and final-report cells of most fields pass to N/A; i38 is Optional at 72 h. Field by field in
+  `spec/SRP_FIELDS.md`. A page of 01/10/2026 ("Version 1.4", saved 10/10/2026, sha256
+  c50437b206ae17f801ea7db49a23df954f81c455c4bbd571635d3f48c35efd98) already had rows 40 and 41: snapshot
+  `spec/sources/enisa_srp_glossary_20261010.json`, kept for history.
+- ENISA SRP page (read 2026-11-12): "On 4 November 2026, the CRA SRP was upgraded to version 1.3. The documentation … is
+  currently being updated". The platform version and the glossary version are numbered separately.
+- ENISA SRP FAQ (read 2026-11-12): "The fields displayed and their requirements may differ depending on the notification
+  type and reporting stage"; still no API at the initial release. The Art. 14 deadlines are unchanged.
 
 | Obligation | What this tool does | Reference |
 |---|---|---|
