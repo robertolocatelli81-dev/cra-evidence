@@ -178,8 +178,8 @@ v0.1 vectors, CHANGELOG 0.9.0).
 
 The statement payload is the JSON text of the statement with keys sorted, separators `,` `:`, strings in UTF-8 (not
 ASCII-escaped). Every member name of a statement that `cra attest` writes is ASCII, so this text is the RFC 8785 (JCS)
-serialisation of the statement (measured on every vector of v0.1 and v0.2; the DSSE signature covers these exact
-bytes, and a verifier never re-serialises them).
+serialisation of the statement (measured on the 101 vectors of v0.1 and v0.2 whose payload is a JSON document without
+a duplicate key or a float; the DSSE signature covers these exact bytes, and a verifier never re-serialises them).
 
 ## 7. Confidentiality
 
