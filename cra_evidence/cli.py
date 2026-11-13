@@ -303,6 +303,27 @@ def _main(argv: List[str] = None) -> int:
     s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp); --tip-key = the sealing identity"); common(s)
     s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted"); s.add_argument("--token-b64", help="RFC 3161 / OTS token (required when --ts-source is not 'asserted')")
     s.add_argument("--renew", help="JSON file with the previous seal (lte dict) to extend the chain")
+    s = sub.add_parser("attest", help="sign an in-toto statement (predicate art14-filing v0.1, DSSE, Ed25519) about a cra-srp/3 drop file and its ledger entry",
+                       description="Writes a DSSE envelope (payloadType application/vnd.in-toto+json) whose Statement names the drop file's "
+                       "bytes (sha256 and sha3_256) and states its stage, glossary, completeness, awareness instant, filing as declared by "
+                       "the source tool, source document and ledger entry (spec/art14-filing/v0.1/README.md). Refused (exit 1, nothing "
+                       "written) unless the drop file is cra-srp/3 and `cra check-notice DROP --ledger L` verifies it. The keyid is "
+                       "--signer-id: the name of the key in the verifier's trust store. Not a proof of submission to ENISA's platform.")
+    s.add_argument("drop", help="the cra-srp/3 drop file"); s.add_argument("--ledger", required=True)
+    s.add_argument("--product", required=True, help="product id stated in the predicate (drop files do not carry it)")
+    s.add_argument("--version", dest="version", required=True, help="product version stated in the predicate")
+    s.add_argument("--key", help="Ed25519 seed file"); s.add_argument("--signer-id", required=True)
+    s.add_argument("--aws-kms-key-id", help="KMS key id/ARN (key spec ECC_NIST_EDWARDS25519)")
+    s.add_argument("--aws-region"); s.add_argument("--aws-creds-file", help="KEY=VALUE file with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY [/ AWS_SESSION_TOKEN]")
+    s.add_argument("--out", required=True, help="the envelope file to write (e.g. notice.intoto.json)")
+    s = sub.add_parser("verify-attestation", help="verify an art14-filing v0.1 DSSE envelope against a trust store (and, if given, the drop file and the ledger)",
+                       description="Exit 0: a signature verifies with a trusted key, the statement and its closed predicate are accepted, and "
+                       "every check that could be run passed; 1: refused or not verified (reasons in the receipt); 2: usage (e.g. an "
+                       "unreadable trust store). Without --drop the subject's bytes are not compared (drop: not_evaluated); without "
+                       "--ledger the receipt says ledger: not_evaluated. Unrecognized Statement fields are listed "
+                       "(statement_unrecognized), never refused; signatures that do not verify and unknown keyids are listed.")
+    s.add_argument("envelope"); s.add_argument("--trust-store", required=True, help="JSON {signer_id: public_key_hex}")
+    s.add_argument("--drop", help="the drop file the statement names"); s.add_argument("--ledger", help="the ledger the notice was recorded in")
     s = sub.add_parser("verify", help="verify a pack offline (exit 0 only if authenticity is not FAIL)"); s.add_argument("pack")
     s.add_argument("--ledger"); s.add_argument("--trust-store", help="JSON {signer_id: public_key_hex}")
     s.add_argument("--log-pubkey", help="trusted public key (hex) of the ledger's signed tip: detects a truncated tail")
@@ -392,6 +413,38 @@ def _main(argv: List[str] = None) -> int:
         except ImportRefused as e:
             _p({"imported": False, "tool": a.source_tool, "reasons": [str(e)], "written": "nothing"}); return 1
         _p(r); return 0
+    if a.cmd == "attest":
+        import hashlib
+        from .art14_attest import AttestRefused, build_statement, sign_envelope
+        from .outputs import write_file
+        if a.aws_kms_key_id:
+            from .kms import KMSSigner, load_creds_file
+            if not a.aws_region:
+                p.error("attest: --aws-region is required with --aws-kms-key-id")
+            creds = load_creds_file(a.aws_creds_file) if a.aws_creds_file else {}
+            key = KMSSigner(a.aws_kms_key_id, a.aws_region, creds.get("AWS_ACCESS_KEY_ID"), creds.get("AWS_SECRET_ACCESS_KEY"),
+                            creds.get("AWS_SESSION_TOKEN")).as_key()
+        elif a.key:
+            key = load_key(a.key)
+        else:
+            p.error("attest: give --key or --aws-kms-key-id")
+        try:
+            payload = build_statement(a.drop, a.ledger, a.product, a.version)
+        except (AttestRefused, ValueError, OSError) as e:
+            _p({"attested": False, "reasons": [str(e)[:400]]}); return 1
+        env = sign_envelope(payload, key, a.signer_id)
+        write_file(a.out, json.dumps(env, indent=1, sort_keys=True))   # whole or OutputNotWritten (74)
+        _p({"attested": True, "out": a.out, "keyid": a.signer_id, "public_key_hex": key[1],
+            "payload_sha256": hashlib.sha256(payload).hexdigest()}); return 0
+    if a.cmd == "verify-attestation":
+        from .art14_attest import verify_envelope
+        from .ledger import load_trust_store, read_regular
+        try:
+            ts = load_trust_store(read_regular(a.trust_store).decode("utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            _say(f"trust store unreadable: {e}\n"); return 2
+        r = verify_envelope(a.envelope, ts, a.drop, a.ledger); _p(r)
+        return 0 if r["verified"] else 1
     if a.cmd == "pack":
         lk = _locker(a); pk = lk.evidence_pack(a.out); _p({"pack": a.out, "pack_sha3": pk["pack_sha3"], "verification": pk["verification"]})
         return 0 if pk["verification"]["chain_ok"] else 1
