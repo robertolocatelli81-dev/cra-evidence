@@ -7,7 +7,8 @@
 - a v0.1 statement keeps the receipt of cra-evidence 0.8.0 byte for byte (receipts of 0.8.0 on the v0.1 vectors,
   vendored in tests/fixtures/art14_v01_receipts_080/);
 - `cra attest` writes v0.2 by default, with the identifiers of the notice, and the same bytes as the vectors (built
-  without the v0.2 producer); `--predicate v0.1` writes what 0.8.0 wrote; `--case-reference` is checked;
+  without the v0.2 producer); `--predicate v0.1` writes what 0.8.0 wrote but `source.toolVersion` (the version that
+  writes it); `--case-reference` is checked;
 - generative: an unknown key in every new object, every wrong JSON type on every new leaf, and random identifier and
   reference strings against an oracle written without regular expressions."""
 import contextlib, importlib.util, io, json, os, random, shutil, sys, tempfile, unittest
@@ -61,6 +62,17 @@ def payload_of(env_path):
     from cra_evidence.art14_attest import b64decode
     with open(env_path, encoding="utf-8") as f:
         return b64decode(json.load(f)["payload"])
+
+
+def as_vectors_tool_version(payload):
+    """`source.toolVersion` of a statement this package writes is the package version (spec v0.1 §4); the vectors were
+    written by 0.8.0 (scripts/gen_art14_vectors.py VECTORS_TOOL_VERSION). The payload with that one value replaced,
+    the other bytes kept: what the package of the vectors would have written."""
+    from cra_evidence import __version__
+    from gen_art14_vectors import VECTORS_TOOL_VERSION
+    old = ('"toolVersion":"%s"' % __version__).encode()
+    assert payload.count(old) == 1, payload
+    return payload.replace(old, ('"toolVersion":"%s"' % VECTORS_TOOL_VERSION).encode())
 
 
 @unittest.skipUnless(HAVE_CRYPTO, "the vectors are signed: cryptography needed to check them")
@@ -234,7 +246,7 @@ class TestAttestV02(unittest.TestCase):
             with self.subTest(vector=name):
                 got = build_statement(os.path.join(self.v, drop), os.path.join(self.v, "ledger.jsonl"), attested_at=at,
                                       predicate="v0.2", case_reference=case)
-                self.assertEqual(got, payload_of(os.path.join(V2, vs[name]["envelope"])))
+                self.assertEqual(as_vectors_tool_version(got), payload_of(os.path.join(V2, vs[name]["envelope"])))
 
     def test_predicate_v01_writes_what_080_wrote(self):
         from datetime import datetime, timezone
@@ -245,7 +257,11 @@ class TestAttestV02(unittest.TestCase):
             kw = {} if p is None else {"predicate": p}
             got = build_statement(os.path.join(V1, "drop_native_early_warning.json"), os.path.join(V1, "ledger.jsonl"),
                                   attested_at=at, **kw)
-            self.assertEqual(got, payload_of(os.path.join(V1, vs["valid_native_early_warning"]["envelope"])))
+            # the bytes of 0.8.0 but `source.toolVersion`, which names the version that writes the statement
+            want = payload_of(os.path.join(V1, vs["valid_native_early_warning"]["envelope"]))
+            self.assertEqual(as_vectors_tool_version(got), want)
+            from cra_evidence import __version__
+            self.assertEqual(json.loads(got)["predicate"]["source"]["toolVersion"], __version__)
         rc, r, out = self.attest("drop_cve_euvd.json", "--predicate", "v0.1")
         self.assertEqual(rc, 0, r)
         st = self.predicate(out)

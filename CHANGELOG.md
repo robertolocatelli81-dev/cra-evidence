@@ -25,7 +25,8 @@ Specification written before the code: `spec/art14-filing/v0.2/README.md` (a del
 - **`cra attest`** writes v0.2 by default, with the identifiers read from the notice (an identifier out of its form is
   refused, nothing written; there is no option to type others: rule 5 would refuse them as soon as the notice is
   given), `--case-reference ISSUER ID` (given twice: usage error, exit 2), and `--predicate v0.1` for the statement
-  of 0.8.0 (the same bytes; for a verifier of 0.8.0, or to say nothing about identifiers, e.g. under embargo). A
+  of 0.8.0 (the same bytes but `source.toolVersion`, the version that writes it, spec v0.1 §4; for a verifier of
+  0.8.0, or to say nothing about identifiers, e.g. under embargo). A
   notice whose `cve_id` / `euvd_id` is not in its form (e.g. lower case, which `cra notice` records) was attested by
   0.8.0 and is now refused by default; `--predicate v0.1` attests it as before. The library default of
   `build_statement` stays v0.1.

@@ -35,6 +35,10 @@ FIX = os.path.join(ROOT, "tests", "fixtures", "sbomify_4ef6128")
 NOW = datetime(2026, 11, 13, 6, 0, 0, tzinfo=timezone.utc)
 ATTESTED = datetime(2026, 11, 13, 6, 5, 0, tzinfo=timezone.utc)
 SMALL_ORDER_KEY = "0100000000000000000000000000000000000000000000000000000000000000"   # the identity point (order 1)
+# The cra-evidence version written in `source.toolVersion` of the statements built here (spec v0.1 §4: the version that
+# writes the statement). The vectors were written by 0.8.0; the version is fixed here so that a release does not
+# change them (13/11/2026, release of 0.9.0: with the package version the vectors would have changed at every release).
+VECTORS_TOOL_VERSION = "0.8.0"
 
 
 def test_key(s):
@@ -83,6 +87,12 @@ def build_notices(work):
 
 
 def generate(out):
+    import cra_evidence
+    with mock.patch.object(cra_evidence, "__version__", VECTORS_TOOL_VERSION):
+        _generate(out)
+
+
+def _generate(out):
     k1, k2 = test_key(TEST_KEY_STRING), test_key(OTHER_KEY_STRING)
     work = tempfile.mkdtemp()
     try:

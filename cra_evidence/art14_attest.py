@@ -161,9 +161,9 @@ def build_statement(drop_path: str, ledger_path: str, product_id: Optional[str] 
     product: from the ledger record when it carries it (0.8.0 on; a different --product/--version is refused), else
     from the arguments (required then). filing (cra-srp/2 only): {"srp_reference", "filed_at", "filed_by"} declared
     by the operator of cra-evidence; for cra-srp/3 the filing is the one of the drop file.
-    predicate: "v0.1" (the library default, the bytes of 0.8.0) or "v0.2" (`cra attest`'s default): v0.2 carries the
-    notice's CVE / EUVD identifiers (read from the drop file, v0.2 §6; one out of form is refused) and, if given,
-    case_reference {"issuer", "id"} (v0.2 §2.2)."""
+    predicate: "v0.1" (the library default, the bytes of 0.8.0 but source.toolVersion) or "v0.2" (`cra attest`'s
+    default): v0.2 carries the notice's CVE / EUVD identifiers (read from the drop file, v0.2 §6; one out of form is
+    refused) and, if given, case_reference {"issuer", "id"} (v0.2 §2.2)."""
     from . import __version__
     from .notice_check import check_notice, load_json_object
     if predicate not in TYPE_OF:

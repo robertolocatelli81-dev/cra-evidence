@@ -25,8 +25,8 @@ from cra_evidence import art14_attest as A                     # noqa: E402
 from cra_evidence import ledger as L                            # noqa: E402
 from cra_evidence.locker import CRAEvidenceLocker               # noqa: E402
 from cra_evidence.srp_notice import DryRunDrop, SRPNotice        # noqa: E402
-from gen_art14_vectors import (OTHER_KEY_STRING, SIGNER, TEST_KEY_STRING, dumps, envelope,   # noqa: E402
-                               test_key)
+from gen_art14_vectors import (OTHER_KEY_STRING, SIGNER, TEST_KEY_STRING, VECTORS_TOOL_VERSION, dumps,   # noqa: E402
+                               envelope, test_key)
 
 TYPE_V01 = "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.1"
 TYPE_V02 = "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.2"
@@ -92,6 +92,12 @@ def to_v02(payload, ids=None, case=None, type_uri=TYPE_V02):
 
 
 def generate(out):
+    import cra_evidence
+    with mock.patch.object(cra_evidence, "__version__", VECTORS_TOOL_VERSION):   # the version of the v0.1 vectors
+        _generate(out)
+
+
+def _generate(out):
     k1, k2 = test_key(TEST_KEY_STRING), test_key(OTHER_KEY_STRING)
     work = tempfile.mkdtemp()
     try:
