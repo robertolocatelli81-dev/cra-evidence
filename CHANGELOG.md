@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased — ENISA SRP glossary "Version 1.6" (21/10/2026); the glossary recorded in every notice; drift check
+## 0.7.0 — 2026-11-13 — ENISA SRP glossary "Version 1.6" (21/10/2026); the glossary recorded in every notice; drift check
 
-- **Why a minor version when released.** The same input gets a different verdict: a 72 h or final-report payload that
+- **Why a minor version.** The same input gets a different verdict: a 72 h or final-report payload that
   repeats the early-warning fields was accepted by 0.6.0 and is refused now; a 72 h AEV notification without v26a was
   incomplete under 0.6.0 and is complete now. Notices recorded by 0.4.0–0.6.0 keep their verdict (below).
 - **The glossary of 21/10/2026, measured on 12/11/2026.** Page fetched 2026-11-12T20:06:53Z (sha256
