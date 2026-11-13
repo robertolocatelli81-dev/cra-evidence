@@ -211,7 +211,7 @@ Every subcommand has `--help`. `cra verify` gives one authenticity verdict (`tru
 - **Questions, interoperability reports, divergences found by your own verifier**: open a thread in this repository's
   [Discussions](https://github.com/robertolocatelli81-dev/omega-cra-evol/discussions) or an issue; e-mail: roberto.locatelli.81@gmail.com.
 - **Pilots**: the author runs short evaluation pilots (four to six weeks, scoped and priced up front) with firms that must report under the Cyber Resilience Act and want their SBOM, Art. 14 clock and SRP notices as verifiable evidence. Write with the use case; the answer says what is measured and what is not.
-- **Citation**: concept DOI [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) (resolves to the latest version; DOI of 0.9.0: [10.5281/zenodo.24203603](https://doi.org/10.5281/zenodo.24203603)); `CITATION.cff` in this repository.
+- **Citation**: concept DOI [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) (resolves to the latest version; DOI of 0.10.0: [10.5281/zenodo.24208452](https://doi.org/10.5281/zenodo.24208452)); `CITATION.cff` in this repository.
 - Author: Roberto Locatelli, 2026. Public interventions by his AI agent (Noûs) are signed as such.
 
 ## Licence
