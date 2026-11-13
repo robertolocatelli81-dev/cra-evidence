@@ -6,12 +6,15 @@ The source is the JSON of sbomify's API, kept byte for byte: the report (`GET /a
 one document per filing (`.../filings/{filing_id}`, whose `snapshot` holds the report's SRP fields and dates when the
 filing was recorded). Every object is closed (an unknown key, a wrong JSON type, a duplicate key is refused), every
 non-empty (field, value) pair of a snapshot ends up in exactly one place (fields, previous_fields, later_stage,
-readings) or in the list of unmapped pairs, and an import with an unmapped pair, a value that does not convert, a
+readings) or in the list of unmapped pairs (a date id inside `srp_fields` is refused: it would be a second pair for one
+field), and an import with an unmapped pair, a value that does not convert, a
 filing recorded before the glossary of 21/10/2026 or a filing that its report does not list writes nothing.
 
 What the import does NOT do: it does not prove that a notice reached ENISA's platform. `filing` is what sbomify
-recorded (reference, instant, person): a declaration of that tool. Rows sbomify does not carry (1, 4, 7a, 41) are
-listed in `absent_at_source`, never filled in, so an imported early warning is incomplete until they are given.
+recorded (reference, instant, person): a declaration of that tool. Rows no pair of a filing document carries (1, 4,
+7a, 41) are listed in `absent_at_source`, never filled in; rows 1 and 4 are required at the early warning, so an imported
+early warning is recorded as incomplete. A failure while appending to the ledger leaves the records already appended
+(append-only) and raises ImportStopped naming them; the drop files of the notices not recorded are removed.
 """
 from __future__ import annotations
 
@@ -86,6 +89,14 @@ class ImportRefused(ValueError):
     """The import is refused with a reason; nothing was written."""
 
 
+class ImportStopped(Exception):
+    """Appending to the ledger failed after `recorded` notices were appended (the ledger is append-only: they stay). The
+    drop files of the notices not recorded were removed; `not_recorded` lists their filings, to import again alone."""
+    def __init__(self, cause: BaseException, event: Any, recorded: List[Dict[str, Any]], not_recorded: List[str]):
+        super().__init__(f"{type(cause).__name__}: {cause}")
+        self.cause, self.event, self.recorded, self.not_recorded = cause, event, recorded, not_recorded
+
+
 def lookup(kind: str, sid: str) -> Optional[str]:
     return MAPPING.get(("both", sid)) or MAPPING.get((kind, sid))
 
@@ -128,6 +139,10 @@ def _instant(v: Any, where: str, nullable: bool = False) -> Optional[str]:
     from .signing import is_instant
     if not is_instant(v):
         raise ImportRefused(f"{where}: {v!r} is not an existing instant")
+    try:
+        parse_utc(v)
+    except (ValueError, OverflowError):
+        raise ImportRefused(f"{where}: {v!r} has no UTC instant between years 1 and 9999") from None
     return v
 
 
@@ -192,6 +207,8 @@ def check_filing(f: Any, name: str) -> None:
     if not isinstance(s["srp_fields"], dict):
         raise ImportRefused(f"{name}.snapshot.srp_fields: not a JSON object")
     for k, v in s["srp_fields"].items():
+        if k in DATE_IDS:      # the dates are the snapshot's own keys: the same id here would be a second pair for one field
+            raise ImportRefused(f"{name}.snapshot.srp_fields: {k!r} is a date of the snapshot, not an SRP field (unmapped)")
         if v is not None:
             _string(v, f"{name}.snapshot.srp_fields.{k}")
 
@@ -211,7 +228,7 @@ def _utc(sid: str, raw: str, norms: List[Dict[str, Any]]) -> str:
     if raw.endswith("Z") or raw.endswith("+00:00"):
         return raw
     d = datetime.fromisoformat(raw).astimezone(timezone.utc)
-    out = d.strftime("%Y-%m-%dT%H:%M:%S") + (f".{d.microsecond:06d}" if d.microsecond else "") + "Z"
+    out = f"{d.year:04d}-" + d.strftime("%m-%dT%H:%M:%S") + (f".{d.microsecond:06d}" if d.microsecond else "") + "Z"
     norms.append({"sbomify_id": sid, "from": raw, "to": out, "conversion": "utc_offset"})
     return out
 
@@ -284,8 +301,8 @@ def place_filing(filing: Dict[str, Any], kind: str, name: str = "filing") -> Dic
                 norms.append({"sbomify_id": sid, "from": raw, "to": value, "conversion": "product_type"})
         elif sid == "member_states":
             parts = [p.strip() for p in raw.split(",")]
-            if len(set(parts)) != len(parts):
-                raise ImportRefused(f"{where}: a Member State code repeated in {raw!r} (refused, never de-duplicated)")
+            if len({"GR" if x == "EL" else x for x in parts}) != len(parts):   # GR and EL both name Greece
+                raise ImportRefused(f"{where}: a Member State repeated in {raw!r} (GR and EL are one; refused, never de-duplicated)")
             for p in parts:
                 if p not in EU_MEMBER_STATES:
                     raise ImportRefused(f"{where}: {p!r} is not an EU Member State code (ISO 3166-1 alpha-2, or EL)"
@@ -462,25 +479,41 @@ def run_import(report_path: str, filing_paths: List[str], locker: Any, drop_dir:
             except OSError:
                 pass
         raise
-    if existing_event is None:
-        ev = locker.record_vulnerability(event)
-        event_out = {"recorded": ev["idx"], "vuln_id": event.vuln_id, "record_id": event.record_id}
-    else:
-        event_out = {"already_recorded": existing_event["idx"], "vuln_id": existing_event["data"].get("vuln_id")}
-    out = []
-    for n, r in zip(p["notices"], results):
-        f, placed, notice = n["filing"], n["placed"], n["notice"]
-        e = locker.record_notice(notice, r, imported={
-            "tool": TOOL, "tool_version": p["tool_version"], "sbomify_report_id": rep["id"], "sbomify_filing_id": f["id"],
-            "filing_document_sha256": notice.source["document_sha256"], "report_document_sha256": p["report_sha256"]})
-        out.append({"filing_id": f["id"], "stage": f["stage"], "filed_at": f["filed_at"], "drop_file": r["drop_file"],
-                    "recorded": e["idx"], "glossary_version": placed["glossary_version"],
-                    "complete": r["complete"], "missing_required": r["missing_required"], "deadline_utc": r["deadline_utc"],
-                    "counts": {"fields": len(notice.fields), "previous_fields": len(notice.previous_fields or {}),
-                               "later_stage": len(placed["later_stage"]), "readings": len(placed["readings"])},
-                    "later_stage": placed["later_stage"], "readings": placed["readings"],
-                    "normalisations": placed["normalisations"], "empty_at_source": placed["empty_at_source"]})
+    out: List[Dict[str, Any]] = []
+    event_out: Dict[str, Any] = {}
+    done = 0
+    try:
+        if existing_event is None:
+            ev = locker.record_vulnerability(event)
+            event_out = {"recorded": ev["idx"], "vuln_id": event.vuln_id, "record_id": event.record_id}
+        else:
+            event_out = {"already_recorded": existing_event["idx"], "vuln_id": existing_event["data"].get("vuln_id")}
+        for n, r in zip(p["notices"], results):
+            _record_one(locker, p, rep, n, r, out)
+            done += 1
+    except Exception as e:               # the ledger is append-only: what was appended stays, the rest is undone and named
+        for r in results[done:]:
+            try:
+                os.remove(os.path.join(drop_dir, r["drop_file"]))
+            except OSError:
+                pass
+        raise ImportStopped(e, event_out or None, out, [n["filing"]["id"] for n in p["notices"][done:]]) from e
     return {"imported": True, "tool": TOOL, "tool_version": p["tool_version"], "report_id": rep["id"], "kind": rep["kind"],
             "report_document_sha256": p["report_sha256"], "event": event_out, "notices": out,
             "absent_at_source": list(ABSENT_AT_SOURCE),
             "filing": "declared by sbomify: what it recorded about each filing, not a proof of submission"}
+
+
+def _record_one(locker: Any, p: Dict[str, Any], rep: Dict[str, Any], n: Dict[str, Any], r: Dict[str, Any],
+                out: List[Dict[str, Any]]) -> None:
+    f, placed, notice = n["filing"], n["placed"], n["notice"]
+    e = locker.record_notice(notice, r, imported={
+        "tool": TOOL, "tool_version": p["tool_version"], "sbomify_report_id": rep["id"], "sbomify_filing_id": f["id"],
+        "filing_document_sha256": notice.source["document_sha256"], "report_document_sha256": p["report_sha256"]})
+    out.append({"filing_id": f["id"], "stage": f["stage"], "filed_at": f["filed_at"], "drop_file": r["drop_file"],
+                "recorded": e["idx"], "glossary_version": placed["glossary_version"],
+                "complete": r["complete"], "missing_required": r["missing_required"], "deadline_utc": r["deadline_utc"],
+                "counts": {"fields": len(notice.fields), "previous_fields": len(notice.previous_fields or {}),
+                           "later_stage": len(placed["later_stage"]), "readings": len(placed["readings"])},
+                "later_stage": placed["later_stage"], "readings": placed["readings"],
+                "normalisations": placed["normalisations"], "empty_at_source": placed["empty_at_source"]})

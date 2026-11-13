@@ -23,7 +23,7 @@ class TestFeedsOffline(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("verifier") is not None, "cryptovalid-opencore not installed")
 class TestInteropCryptovalid(unittest.TestCase):
-    """A ledger written here must verify with the INDEPENDENT cryptovalid reference (pip install the wheel)."""
+    """A ledger written here must verify with the cryptovalid reference verifier (same author, separate implementation; pip install the wheel)."""
     def test_cryptovalid_verifies_our_ledger_and_tip(self):
         import verifier
         from cra_evidence import CRAEvidenceLocker, SBOMComponent, SBOMRecord

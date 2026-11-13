@@ -1,4 +1,4 @@
-# Independent verifiers
+# Verifiers in other languages (by the same author as cra-evidence)
 
 Three re-implementations of `cra verify`, written from the profile (not from each other), so that an auditor can
 check a pack without running the producer's code:

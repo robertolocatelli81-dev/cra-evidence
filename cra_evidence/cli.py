@@ -285,7 +285,9 @@ def _main(argv: List[str] = None) -> int:
                         "shape, a duplicate key, a pair of a snapshot that the mapping does not place, a value that does not "
                         "convert (product type, Member State code, PEC text, a date without offset), a filing recorded before "
                         "2026-10-21T00:00:00Z, a filing its report does not list (or lists differently), a filing already imported. "
-                        "Exit 0 once imported (an incomplete notice is recorded as incomplete, see `complete`); spec/SRP_FIELDS.md, "
+                        "Exit 0 once imported (an incomplete notice is recorded as incomplete, see `complete`). If appending to the "
+                        "ledger fails midway (e.g. a full disk: exit 74), the records already appended stay (the ledger is append-only), "
+                        "the receipt lists them and the filings not recorded, whose drop files are removed. spec/SRP_FIELDS.md, "
                         "\"Importing from sbomify\". The filing data are sbomify's declaration, not a proof of submission.")
     common(s)
     s.add_argument("--report", required=True, help="the JSON of GET /api/v1/compliance/cra-reports/{id}, as received")
@@ -327,7 +329,8 @@ def _main(argv: List[str] = None) -> int:
                        "every check that could be run passed; 1: refused or not verified (reasons in the receipt); 2: usage (e.g. an "
                        "unreadable trust store). Without --drop the subject's bytes are not compared (drop: not_evaluated); without "
                        "--ledger the receipt says ledger: not_evaluated. Unrecognized Statement fields are listed "
-                       "(statement_unrecognized), never refused; signatures that do not verify and unknown keyids are listed.")
+                       "(statement_unrecognized), never refused; signatures that do not verify and unknown keyids are listed; a signature "
+                       "without keyid is tried with every key of the trust store.")
     s.add_argument("envelope"); s.add_argument("--trust-store", required=True, help="JSON {signer_id: public_key_hex}")
     s.add_argument("--drop", help="the drop file the statement names"); s.add_argument("--ledger", help="the ledger the notice was recorded in")
     s = sub.add_parser("verify", help="verify a pack offline (exit 0 only if authenticity is not FAIL)"); s.add_argument("pack")
@@ -412,12 +415,18 @@ def _main(argv: List[str] = None) -> int:
         r = check_notice(a.drop, a.ledger); _p(r)
         return 0 if r["verified"] else 1
     if a.cmd == "import":
-        from .sbomify_import import ImportRefused, run_import
+        from .sbomify_import import ImportRefused, ImportStopped, run_import
         lk = _locker(a)
         try:
             r = run_import(a.report, a.filing, lk, a.drop_dir, a.source_version)
         except ImportRefused as e:
             _p({"imported": False, "tool": a.source_tool, "reasons": [str(e)], "written": "nothing"}); return 1
+        except ImportStopped as e:      # the ledger is append-only: the records appended before the failure stay
+            _p({"imported": "partial", "tool": a.source_tool, "reasons": [str(e)[:400]], "event": e.event,
+                "recorded": e.recorded, "not_recorded_filings": e.not_recorded,
+                "written": "the records listed in `recorded`; the drop files of the filings not recorded were removed: "
+                           "import those filings again (with the same --report)"})
+            return 74 if isinstance(e.cause, OSError) else 1
         _p(r); return 0
     if a.cmd == "attest":
         import hashlib

@@ -48,7 +48,7 @@ class TestVectors(unittest.TestCase):
                 r = run(v)
                 codes = [x["code"] for x in r["reasons"]]
                 self.assertEqual(r["verified"], v["expect"]["verified"], codes)
-                self.assertTrue(set(v["expect"]["codes"]) <= set(codes), (v["expect"]["codes"], codes))
+                self.assertEqual(sorted(set(codes)), sorted(set(v["expect"]["codes"])), codes)   # exactly the expected codes
                 if r["verified"]:
                     self.assertEqual(codes, [])
                     self.assertTrue(r["trusted"])

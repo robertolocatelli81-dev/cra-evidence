@@ -11,7 +11,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install (with signing extra) + the INDEPENDENT cryptovalid verifier for the interop test
+      - name: Install (with signing extra) + the cryptovalid verifier (same author, separate implementation) for the interop test
         run: |
           pip install ".[sign]" jsonschema referencing
           pip install https://github.com/robertolocatelli81-dev/cryptovalid-opencore/releases/download/v0.15.0/cryptovalid_opencore-0.15.0-py3-none-any.whl
@@ -93,7 +93,7 @@ jobs:
       - uses: actions/setup-go@v7
         with: {go-version: "1.24"}
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build the independent verifiers (Go std-only; Rust with ed25519-dalek)
+      - name: Build the verifiers in other languages (Go std-only; Rust with ed25519-dalek)
         run: |
           pip install ".[sign]"
           (cd verifiers/go && go vet ./... && go build -o /tmp/cra-verify-go .)

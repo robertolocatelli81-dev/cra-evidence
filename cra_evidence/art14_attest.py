@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Predicate type `art14-filing` v0.1 (spec/art14-filing/v0.1/README.md): an in-toto Statement v1 in a DSSE envelope,
-signed with Ed25519, about one Art. 14 notice drop file (cra-srp/3) — its stage and glossary, what the tool recorded
+signed with Ed25519, about one Art. 14 notice drop file (cra-srp/2 or cra-srp/3) — its stage and glossary, what the tool recorded
 about its filing (a declaration), its source, and its place in the ledger.
 
 `build_statement` + `sign_envelope` (`cra attest`) and `verify_envelope` (`cra verify-attestation`). The verifier checks
-the envelope first (DSSE: decode, payload type, signatures over PAE with the trust store key selected by keyid), then
+the envelope first (DSSE: decode, payload type, signatures over PAE with the trust store key a keyid names, or every
+trusted key for a signature without keyid), then
 parses the exact bytes it verified: the Statement (unrecognized fields ignored for the verdict and listed), the closed
 predicate, and, when given, the drop file (§4.2 rules 1-2) and the ledger (rule 3). What a statement does NOT prove:
 that the notice reached ENISA's platform, that the awareness instant is true, conformity with the Regulation.
@@ -56,7 +57,7 @@ def pae(payload_type: str, body: bytes) -> bytes:
 def z(d: datetime) -> str:
     """RFC 3339 UTC with Z, at most 6 fractional digits (none when the instant has no fraction)"""
     d = d.astimezone(timezone.utc)
-    return d.strftime("%Y-%m-%dT%H:%M:%S") + (f".{d.microsecond:06d}" if d.microsecond else "") + "Z"
+    return f"{d.year:04d}-" + d.strftime("%m-%dT%H:%M:%S") + (f".{d.microsecond:06d}" if d.microsecond else "") + "Z"
 
 
 def _strict_json(raw: bytes, what: str) -> Any:
@@ -65,6 +66,12 @@ def _strict_json(raw: bytes, what: str) -> Any:
         for k, v in pairs:
             if k in d:
                 raise ValueError(f"duplicate key {k!r}")
+            for t in (k, v):
+                if type(t) is str:
+                    try:
+                        t.encode("utf-8")
+                    except UnicodeEncodeError:
+                        raise ValueError("lone surrogate in a JSON string (it has no UTF-8 encoding)") from None
             d[k] = v
         return d
 
@@ -347,8 +354,12 @@ def _check_predicate(pr: Dict[str, Any], reasons: List[Dict[str, str]]) -> None:
     if bad:
         _r(reasons, "predicate_rule", f"missingRequired names fields not of stream {pr['stream']}: {bad[:5]}")
     aw = parse_utc(pr["awareAt"])
-    want = {"early_warning": z(aw + timedelta(hours=EARLY_WARNING_HOURS)),
-            "notification": z(aw + timedelta(hours=NOTIFICATION_HOURS))}.get(pr["stage"])
+    hours = {"early_warning": EARLY_WARNING_HOURS, "notification": NOTIFICATION_HOURS}.get(pr["stage"])
+    try:
+        want = None if hours is None else z(aw + timedelta(hours=hours))
+    except OverflowError:
+        _r(reasons, "predicate_timestamp", f"awareAt {pr['awareAt']!r}: its deadline falls after year 9999")
+        return
     if (pr["deadlineAt"] is None) != (want is None) or (want is not None and parse_utc(pr["deadlineAt"]) != parse_utc(want)):
         _r(reasons, "deadline", f"deadlineAt {pr['deadlineAt']!r}: computed from awareAt it is {want!r} at stage {pr['stage']}")
     if fil is not None and parse_utc(pr["attestedAt"]) < parse_utc(fil["filedAt"]):
@@ -416,34 +427,52 @@ def verify_envelope(env_path: str, trust_store: Dict[str, str], drop_path: Optio
             res["result"] = "bad_encoding"
             _r(reasons, "base64", f"signatures[{i}].sig: {e}")
             continue
-        pub = trust_store.get(kid) if kid else None
-        if pub is None:
+        # a keyid narrows the keys tried to the one it names; unset or empty (DSSE envelope.md: the same) is no hint, and
+        # every key of the trust store is tried (DSSE protocol.md: the keyid "may only be used to narrow the selection")
+        names = [kid] if kid else sorted(trust_store)
+        if kid and kid not in trust_store:
             res["result"] = "unknown_keyid"
             _r(listed, "unknown_keyid", f"signatures[{i}]: keyid {kid[:80]!r} is not in the trust store")
             continue
-        if not isinstance(pub, str) or not _HEX64.fullmatch(pub):
-            res["result"] = "trusted_key_malformed"
-            _r(reasons, "trusted_key_malformed", f"trust store key of {kid[:80]!r}: 64 lower-case hex required")
+        if not names:
+            res["result"] = "unknown_keyid"
+            _r(listed, "unknown_keyid", f"signatures[{i}]: no keyid and an empty trust store")
             continue
-        if weak_ed25519_key(pub):
-            res["result"] = "weak_key"
-            _r(reasons, "weak_key", f"trust store key of {kid[:80]!r}: small order or non-canonical Ed25519 key, refused")
+        hit = None
+        for name in names:
+            pub = trust_store[name]
+            if not isinstance(pub, str) or not _HEX64.fullmatch(pub):
+                res["result"] = "trusted_key_malformed"
+                _r(reasons, "trusted_key_malformed", f"trust store key of {name[:80]!r}: 64 lower-case hex required")
+                break
+            if weak_ed25519_key(pub):
+                res["result"] = "weak_key"
+                _r(reasons, "weak_key", f"trust store key of {name[:80]!r}: small order or non-canonical Ed25519 key, refused")
+                break
+            if len(sig) != 64:
+                res["result"] = "failed"
+                _r(listed, "signature_failed", f"signatures[{i}]: an Ed25519 signature is 64 bytes, got {len(sig)}")
+                break
+            if Ed25519PublicKey is None:
+                res["result"] = "not_checkable"
+                break
+            try:
+                Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub)).verify(sig, msg)
+            except Exception:  # noqa: BLE001 — InvalidSignature or a key the library refuses: the signature does not verify
+                continue
+            hit = name
+            break
+        if "result" in res:
             continue
-        if len(sig) != 64:
+        if hit is None:
             res["result"] = "failed"
-            _r(listed, "signature_failed", f"signatures[{i}]: an Ed25519 signature is 64 bytes, got {len(sig)}")
-            continue
-        if Ed25519PublicKey is None:
-            res["result"] = "not_checkable"
-            continue
-        try:
-            Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub)).verify(sig, msg)
-        except Exception:  # noqa: BLE001 — InvalidSignature or a key the library refuses: the signature does not verify
-            res["result"] = "failed"
-            _r(listed, "signature_failed", f"signatures[{i}] (keyid {kid[:80]!r}) does not verify")
+            _r(listed, "signature_failed", f"signatures[{i}] (keyid {kid[:80]!r}) does not verify"
+                                           + ("" if kid else " with any key of the trust store"))
             continue
         res["result"] = "verified"
-        trusted_by.append(kid)
+        if not kid:
+            res["verified_with"] = hit
+        trusted_by.append(hit)
     out["trusted"] = bool(trusted_by)
     out["trusted_by"] = trusted_by
     if not trusted_by:

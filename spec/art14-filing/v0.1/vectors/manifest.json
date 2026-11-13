@@ -1,6 +1,6 @@
 {
  "generated_by": "scripts/gen_art14_vectors.py (deterministic: fixed clock, fixed ids, Ed25519 signatures)",
- "how_to_run": "cra verify-attestation <envelope> --trust-store <trust_store> [--drop <drop>] [--ledger <ledger>]; the exit code and the reason codes must be the expected ones",
+ "how_to_run": "cra verify-attestation <envelope> --trust-store <trust_store> [--drop <drop>] [--ledger <ledger>]; the exit code must be the expected one and the set of reason codes in `reasons` must equal the expected codes",
  "payload_type": "application/vnd.in-toto+json",
  "predicate_type": "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.1",
  "test_keys": {
@@ -270,7 +270,8 @@
    "envelope": "signature_bad_base64.intoto.json",
    "expect": {
     "codes": [
-     "base64"
+     "base64",
+     "not_trusted"
     ],
     "exit": 1,
     "verified": false
@@ -784,14 +785,15 @@
    "envelope": "aware_at_differs_from_notice.intoto.json",
    "expect": {
     "codes": [
-     "drop_mismatch"
+     "drop_mismatch",
+     "rule2"
     ],
     "exit": 1,
     "verified": false
    },
    "ledger": "ledger.jsonl",
    "name": "aware_at_differs_from_notice",
-   "rule": "§4.4 the recorded awareness instant",
+   "rule": "§4.4 the recorded awareness instant (and the deadline computed from it)",
    "trust_store": "trust_store.json"
   }
  ]

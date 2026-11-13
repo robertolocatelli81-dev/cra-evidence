@@ -54,8 +54,9 @@ cra verify-attestation    "verified": true, "trusted": true, "statement": "accep
                           "drop": "PASS", "ledger": "PASS", "product": "PASS", "reasons": []      (exit 0)
 ```
 
-The imported early warning is recorded as incomplete because sbomify does not carry glossary rows 1, 4, 7a and 41;
-they are listed, never filled in. Change one byte of the drop file and `cra verify-attestation` exits 1 with
+The imported early warning is recorded as incomplete: glossary rows 1 (notification type) and 4 (manufacturer name),
+required at the early warning, are not in sbomify's filing document (sbomify keeps the type as the report's `kind`,
+which becomes the notice's `stream`); they are listed in `absent_at_source` with rows 7a and 41, never filled in. Change one byte of the drop file and `cra verify-attestation` exits 1 with
 `"drop": "FAIL"` and reason `subject_digest`.
 
 The same attestation for a notice built here, without sbomify:
@@ -81,7 +82,7 @@ Same folder, same key → `"complete": true`,
   (in-toto Statement v1 in a DSSE envelope, Ed25519, closed predicate); the notice rules and the sbomify mapping are in
   [`spec/SRP_FIELDS.md`](spec/SRP_FIELDS.md); the receipt of `cra verify` in [`spec/RECEIPT.md`](spec/RECEIPT.md).
 - **Attestation vectors:** [`spec/art14-filing/v0.1/vectors/`](spec/art14-filing/v0.1/vectors/) — 52 envelopes,
-  `manifest.json` gives each one's expected exit code and reason codes, for any other implementation to run.
+  `manifest.json` gives each one's expected exit code and exact set of reason codes, for any other implementation to run.
 - **Verifiers in other languages, by the same author:** [`verifiers/`](verifiers/README.md) re-implements `cra verify`
   in JavaScript (Node, no dependencies), Go (standard library) and Rust; `verifiers/differential.py` builds intact and
   tampered packs and requires the same verdict and the same failing layers from all of them. The ledger also follows
@@ -101,9 +102,9 @@ Same folder, same key → `"complete": true`,
 
 Re-run on 13/11/2026 on this release's code (cra-evidence 0.8.0, fresh virtual environment):
 
-- The test suite: 379 tests, OK on Python 3.11.2 with `[sign]`, jsonschema and referencing; 2 skipped (the live feeds
+- The test suite: 400 tests, OK on Python 3.11.2 with `[sign]`, jsonschema and referencing; 2 skipped (the live feeds
   check, which needs the network; the interop test against cryptovalid, whose wheel was not installed).
-- The 52 attestation vectors (10 valid, 42 each breaking one rule): 52 of 52 give the exit code and the reason codes
+- The 52 attestation vectors (10 valid, 42 each breaking one rule): 52 of 52 give the exit code and exactly the set of reason codes
   `manifest.json` expects.
 - The vendored sbomify documents (3 reports, 9 filings, all five stages: early warning, notification, intermediate,
   final report, users informed): every filing imports, and each of the 9 notices is attested and verifies with its drop

@@ -82,7 +82,7 @@ Field names are lowerCamelCase; every timestamp is RFC 3339 with `Z` and says in
     "tool": "sbomify",                            // "cra-evidence" | "sbomify"
     "toolVersion": "4ef61281e69d693e3560185bf81ec5474179ea98",
     "documentSha256": "<64 hex>",                 // the exact bytes received from the source (export file), or of the notice file when tool = cra-evidence
-    "absentAtSource": ["1", "4", "7a", "41"]      // glossary row numbers the source does not carry (never invented, §4.3)
+    "absentAtSource": ["1", "4", "7a", "41"]      // glossary rows that no pair of the source document carries (never filled in, §4.3)
   },
   "ledger": {
     "entryIndex": 7,                              // the ledger entry's `idx` (0-based) holding the cra_srp_notice record
@@ -131,7 +131,9 @@ whose `source.tool` is `"cra-evidence"` with another `documentSha256` or a non-e
   `previous_fields`, or the importer's list of unmapped pairs. An import whose unmapped list is not empty is refused
   (nothing written). A value that does not convert (e.g. a product type outside the glossary's three) is refused,
   never replaced by a default.
-- Glossary rows the source does not carry are listed in `absentAtSource`; they are not filled in.
+- Glossary rows that no pair of the source document carries are listed in `absentAtSource`; they are not filled in,
+  not even from another document of the same tool (for sbomify, row 1 is the report's `kind`, recorded as the notice's
+  `stream`, not copied into the field: every field of an imported notice comes from a pair of its own source document).
 - `filing` reproduces what the source recorded. It is a **declaration of that tool**, not a proof of submission.
 
 ### 4.4 The awareness instant
@@ -145,8 +147,10 @@ is true.
 - A statement is signed with the manufacturer's Ed25519 key (a local key or AWS KMS, as `cra sign`). The trust store is
   the one of `cra verify` (`{signer_id: public_key_hex}`).
 - **Verification:** the envelope decodes (base64 either alphabet, else refused); `payloadType` equals
-  `application/vnd.in-toto+json`; for each signature the trust store key named by `keyid` is used (`keyid` selects a
-  candidate key only; it decides nothing, DSSE `protocol.md`); the statement is **trusted** if at least one signature
+  `application/vnd.in-toto+json`; for each signature, a `keyid` narrows the keys tried to the trust store key it names
+  (DSSE `protocol.md`: the keyid "may only be used to narrow the selection of possible keys to try"; a `keyid` absent
+  from the trust store: no key is tried), and a signature without `keyid` or with an empty one (the same, DSSE
+  `envelope.md`) is tried with every key of the trust store; the statement is **trusted** if at least one signature
   verifies with a trusted key. Every signature that does not verify, and every `keyid` absent from the trust store, is
   listed in the receipt. The payload checked by §3–§4 is the exact verified byte string (DSSE: never re-parse the
   envelope after verification).
@@ -161,4 +165,6 @@ the expected refusal reason. Every verifier of this format MUST give the expecte
 
 - v0.1 (13/11/2026): first draft. Same day, before any release: rule 1 compares stream, stage and glossary only
   (drop files carry no product and no rules); `product` checked against the ledger entry; `cra-srp/2` drop files (notices
-  built by cra-evidence) admitted as subjects.
+  built by cra-evidence) admitted as subjects. Before any release, after review: a signature without `keyid` (or with an
+  empty one) is tried with every trusted key, as DSSE reads an unset keyid (§5); `absentAtSource` defined as the rows no
+  pair of the source document carries (§4, §4.3).

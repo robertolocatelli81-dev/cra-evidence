@@ -131,11 +131,17 @@ The source is the JSON of sbomify's API, kept byte for byte: `GET /api/v1/compli
 `GET /api/v1/compliance/cra-reports/{id}/filings/{filing_id}` (one filing: `stage`, `srp_reference`, `filed_at`,
 `filed_by`, and `snapshot` = the report's `srp_fields` and dates when the filing was recorded). Measured on real
 responses (3 reports, 9 filings, all five stages; fixtures in `tests/fixtures/sbomify_4ef6128/`):
-- sbomify carries 39 of the glossary's rows: all except 1 (the stream is the report's `kind`), 4 (system-generated in
-  the portal), 7a (new in 1.6) and 41 (the CSIRT's). These are `absent_at_source`.
+- sbomify's filing documents carry 39 of the glossary's rows: all except 1 (sbomify records the notification type as
+  the report's `kind`, which becomes the notice's `stream`; it is not copied into the field, so that every field of an
+  imported notice comes from a pair of its own filing document), 4 (system-generated in the portal), 7a (new in 1.6)
+  and 41 (the CSIRT's). These are `absent_at_source`. Rows 1 and 4 are required at the early warning: an imported early
+  warning is therefore recorded with `complete` false and both in `missing_required`.
 - The snapshot is **cumulative**: every filing holds every value of the report, whatever the stage (sbomify's model,
   "copied from previous step", is the one of the glossaries before 1.6).
 - Dates are RFC 3339 with an offset (`+00:00` measured); a date without a zone is refused by sbomify itself (HTTP 422).
+  They are the snapshot's own keys (`aware_at`, `occurred_at`, `measure_available_at`): the same id inside
+  `srp_fields` would be a second pair for one field, and is refused. A date whose UTC instant falls outside the years
+  1-9999 is refused.
 
 Mapping (sbomify id → field, row): title→`title` 2; summary→`summary` 3; member_states→`member_states_available` 5;
 product_name→`product_name` 6; product_version→`product_version` 7; product_type→`product_type` 8; product_class→
@@ -156,8 +162,8 @@ Conversions — closed lists; any other value refuses the import with the field 
 - `product_type`: "Default"→"Default", "Important Product with Digital Elements"→"Important", "Critical Product with
   Digital Elements"→"Critical".
 - `member_states`: split on commas, each part stripped, each an EU Member State code (the 27 ISO 3166-1 alpha-2 codes,
-  "EL" accepted for Greece as in EU usage); empty parts refused; a code given twice ("AT, AT") refused, never
-  de-duplicated.
+  "EL" accepted for Greece as in EU usage); empty parts refused; a Member State given twice ("AT, AT", or "GR, EL":
+  two codes of Greece) refused, never de-duplicated.
 - dates: an offset other than `Z`/`+00:00` is converted to the same instant in UTC (listed as a normalisation);
   no offset is refused.
 - `pec`, `pec_delay_reason` (free text in sbomify, a set of three checkboxes in the glossary): the exact text of one

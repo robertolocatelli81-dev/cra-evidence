@@ -186,7 +186,7 @@ def generate(out):
     e = envelope(ew, k1); e["payload"] = "!!not base64!!"
     add("payload_bad_base64", e, bad("base64"), rule="§5 envelope decodes")
     e = envelope(ew, k1); e["signatures"][0]["sig"] = "@@@@"
-    add("signature_bad_base64", e, bad("base64"), rule="§5 envelope decodes")
+    add("signature_bad_base64", e, bad("base64", "not_trusted"), rule="§5 envelope decodes")
     e = envelope(ew, k1); e["payload"] = b64(mut(pset(["predicate", "complete"], True)))
     add("payload_tampered", e, bad("not_trusted", "signature_failed"), rule="§5 signature over PAE")
     add("signed_by_untrusted_key", envelope(ew, k2), bad("not_trusted", "signature_failed"), rule="§5 trusted key")
@@ -245,14 +245,14 @@ def generate(out):
     add("rule3_entry_index_beyond_ledger", envelope(mut(pset(["predicate", "ledger", "entryIndex"], 99)), k1), bad("rule3"), rule="§4.2 rule 3")
     add("rule4_attested_before_filed", envelope(mut(pset(["predicate", "attestedAt"], "2026-11-09T17:00:00Z")), k1), bad("rule4"), rule="§4.2 rule 4")
     add("aware_at_differs_from_notice", envelope(mut(lambda st: st["predicate"].update(awareAt="2026-11-09T08:30:00Z", deadlineAt="2026-11-10T08:30:00Z")), k1),
-        bad("drop_mismatch"), rule="§4.4 the recorded awareness instant")
+        bad("drop_mismatch", "rule2"), rule="§4.4 the recorded awareness instant (and the deadline computed from it)")
     manifest = {"predicate_type": A.TYPE_URI, "payload_type": A.PAYLOAD_TYPE,
                 "test_keys": {"warning": "TEST-ONLY keys: seed = SHA-256 of the UTF-8 string below; public by design, never a real key",
                               SIGNER: {"seed_string": TEST_KEY_STRING, "public_key_hex": k1[1]},
                               "not-in-trust-store": {"seed_string": OTHER_KEY_STRING, "public_key_hex": k2[1]}},
                 "generated_by": "scripts/gen_art14_vectors.py (deterministic: fixed clock, fixed ids, Ed25519 signatures)",
                 "how_to_run": "cra verify-attestation <envelope> --trust-store <trust_store> [--drop <drop>] [--ledger <ledger>]; the exit "
-                              "code and the reason codes must be the expected ones",
+                              "code must be the expected one and the set of reason codes in `reasons` must equal the expected codes",
                 "vectors": vectors}
     with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8") as f:
         f.write(json.dumps(manifest, indent=1, sort_keys=True, ensure_ascii=False) + "\n")

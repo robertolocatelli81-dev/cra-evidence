@@ -17,8 +17,11 @@ Specifications written before the code: `spec/art14-filing/v0.1/README.md` and, 
   Member State code, PEC text, a date without offset), a filing recorded before 2026-10-21T00:00:00Z, a filing its
   report does not list or lists differently, a filing already imported. A refusal exits 1 and writes nothing (no
   ledger line, no drop file, no stored source). The report and filing documents are kept byte for byte in
-  `<ledger>.sources/` and in the drop folder. Rows 1, 4, 7a and 41 are not carried by sbomify: they are listed in
-  `absent_at_source` and never filled in, so an imported early warning is recorded as incomplete. `filing` is what
+  `<ledger>.sources/` and in the drop folder. Rows 1, 4, 7a and 41 are in no pair of sbomify's filing documents (the
+  notification type is the report's `kind`, recorded as the notice's `stream`): they are listed in `absent_at_source`
+  and never filled in; rows 1 and 4 are required at the early warning, so an imported early warning is recorded as
+  incomplete. A date id inside `srp_fields` (a second pair for one field) and a date outside the years 1-9999 are
+  refused. `filing` is what
   sbomify recorded: a declaration, not a proof of submission.
 - **`cra check-notice`** reads `cra-srp/3` (closed `source` and `filing` blocks; with `--ledger`, the kept source
   document must hash to `document_sha256` and re-derive the same notice). `cra-srp/1` and `cra-srp/2` files are read as
@@ -31,20 +34,28 @@ Specifications written before the code: `spec/art14-filing/v0.1/README.md` and, 
   The `cra_srp_notice` ledger record now carries `product_id` and `product_version`: `cra attest` takes the product
   from it (`--product`/`--version` only for records written before) and the verifier compares the statement's
   `product` with it (`product: PASS` / `FAIL`; `not_evaluated` without a ledger or for an older record). Exit 0 trusted
-  and every check run passed, 1 refused or not verified (reason codes in the receipt), 2 usage. Without `--ledger` the
+  and every check run passed, 1 refused or not verified (reason codes in the receipt), 2 usage. A `keyid` narrows the
+  keys tried to the one it names; a signature without `keyid` (or with an empty one) is tried with every key of the
+  trust store (DSSE). Without `--ledger` the
   receipt says `ledger: not_evaluated`.
 - **Vectors** `spec/art14-filing/v0.1/vectors/`: 52 (10 valid, 42 each breaking one rule of §2-§5), from
   `scripts/gen_art14_vectors.py` with two test-only keys derived from fixed public strings; `manifest.json` gives each
-  expected verdict, exit code and reason code.
-- **Tests:** 379 (44 new: the zero-loss test, committed before the importer and failing then, with a positive control
+  expected verdict, exit code and exact set of reason codes.
+- **Tests:** 400 (65 new: the zero-loss test, committed before the importer and failing then, with a positive control
   that removes one mapping entry; the vectors; generative refusals — an unknown key in every object, a wrong type on
-  every leaf, a duplicate key in every object of the real documents). Measured 13/11/2026: OK on Python 3.9.25, 3.11.2
+  every leaf, a duplicate key in every object of the real documents; 21 from the review before the release). Measured 13/11/2026: OK on Python 3.9.25, 3.11.2
   and 3.12.15 with `[sign]`, jsonschema and referencing (2 skipped: live feeds, cryptovalid wheel absent), and on 3.12.15
-  with no optional dependency (53 skipped). 23 hand mutants of the new code, each failing at least one test. The
+  with no optional dependency (66 skipped). 23 hand mutants of the new code, each failing at least one test; a random
+  sample of 75 line mutants of `sbomify_import.py` (35) and `art14_attest.py` (40): 60 failed the suite before the
+  review, 12 fail the tests the review added, 2 are equivalent (a docstring; base64 `validate`, which the alphabet check
+  before it leaves nothing to reject), 1 changes only the length of a message. The
   checker of 0.7.1 and this one give byte-identical receipts on the 5 `cra-srp/1` / `cra-srp/2` drop files of the
-  repository (2 of them also against their ledger).
-- **sbomify `member_states`:** a code given twice ("AT, AT") is refused, never de-duplicated.
-- **Limits.** Drop files carry no product: a notice recorded by 0.7.1 or earlier can be attested only with a declared
+  repository (3 of them also against their ledger).
+- **sbomify `member_states`:** a Member State given twice ("AT, AT", or "GR, EL": two codes of Greece) is refused,
+  never de-duplicated.
+- **Limits.** The ledger is append-only: if appending fails midway through an import (a full disk: exit 74), the
+  records already appended stay; the receipt lists them and the filings not recorded, whose drop files are removed, to
+  import again alone (the event already recorded is reused). Drop files carry no product: a notice recorded by 0.7.1 or earlier can be attested only with a declared
   `--product`/`--version`, which no record confirms (`product: not_evaluated`). An event with no CVE or EUVD id
   (sbomify incidents, a report whose `cve_id` was cleared) is recorded under `sbomify-report:<id>`, and rule 8 binds no
   notice to it.
