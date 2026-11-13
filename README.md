@@ -1,26 +1,117 @@
 # cra-evidence
 
-Firm-side, offline-verifiable evidence for the EU **Cyber Resilience Act** (Regulation (EU) 2024/2847):
-the SBOM record, the Art. 14 clock (24 h / 72 h / final report), notices aligned with ENISA's Single Reporting
-Platform field schema, and a crypto-agile seal for the retention window — all in one hash-chained ledger that the
-**cryptovalid** verifiers (four independent re-implementations, Python/JS/Go/Rust, by the same author) also accept.
+**Manufacturers of products with digital elements on the EU market now report in hours.** Under the Cyber Resilience
+Act (Regulation (EU) 2024/2847), Article 14 applies since **11 September 2026**, also to products placed on the market
+before 11 December 2027 (Art. 69(3)), and open-source software stewards report from 11 December 2027 (Art. 24(3), 71(2)).
+On becoming aware of an actively exploited vulnerability or a severe incident, the manufacturer sends, through ENISA's
+Single Reporting Platform (SRP):
 
-Reporting obligations for manufacturers apply since **11 September 2026**; the ENISA Single Reporting Platform is
-operational since the same day (sources in `spec/LEGAL_BASIS.md`). Full application, including the SBOM in the
-technical documentation, on 11 December 2027; open-source stewards report from that date.
+- an **early warning within 24 hours**,
+- a **notification within 72 hours**,
+- a **final report** — no later than 14 days after a corrective or mitigating measure is available (vulnerability),
+  within one month after the submission of the incident notification (severe incident).
 
-## What it proves, and what it does not
+The technical documentation stays at the disposal of market surveillance authorities for **at least 10 years** after
+the product is placed on the market, or for the support period if longer (Art. 13(13)). Sources and re-reading dates:
+[`spec/LEGAL_BASIS.md`](spec/LEGAL_BASIS.md).
 
-It proves that these records — SBOMs, vulnerability-handling events, the notice payloads with their deadlines,
-the seals — existed in this order and have not changed since (SHA-256 hash chain, content-bound record digests,
-pack anchored into the chain, optional Ed25519 signature covering signer and time, signed chain tip that exposes a
-truncated tail), and it lets anyone verify that **offline**, with this tool or with cryptovalid's verifiers.
+The SRP is a web portal. What was notified, under which ENISA field glossary, how complete, when the clock started and
+when it was filed lives in the firm's own tools — and may have to be shown, years later, to someone who does not run them.
+**cra-evidence** keeps it in one hash-chained ledger (SBOMs byte for byte, the Art. 14 clock, notices in the ENISA SRP
+field vocabulary, signed evidence packs and renewable seals) and signs a notice as an in-toto attestation that
+anyone can verify **offline**.
 
-It is **not** a conformity assessment, **not** CE marking, **not** the official CSIRT/ENISA channel (the SRP is a
-human web portal with EU Login; no machine API was documented on 15/09/2026, nor on 20/09/2026 — this tool prepares and validates the
-payload and records it, a person submits it), and **not** an objective time anchor unless you attach an RFC 3161 /
-OpenTimestamps token. Whether a vulnerability is "actively exploited" is your determination; CISA KEV and the ENISA
-EUVD known-exploited lists are surfaced as a signal, not as the decision.
+## Demo: from sbomify to a verified attestation
+
+[sbomify](https://github.com/sbomify/sbomify) records CRA Art. 14 reports and their filings. The two documents below
+are real responses of its API (`GET /api/v1/compliance/cra-reports/{id}` and `…/filings/{filing_id}`) at commit
+4ef6128, on synthetic data, vendored byte for byte in `tests/fixtures/sbomify_4ef6128/`. From a checkout, after
+`pip install ".[sign]"`:
+
+```bash
+F=tests/fixtures/sbomify_4ef6128
+cra keygen psirt.key > psirt.pub.json
+python3 -c 'import json; print(json.dumps({"acme-psirt": json.load(open("psirt.pub.json"))["public_key_hex"]}))' > trust.json
+cra import sbomify --ledger cra.ledger.jsonl --product acme-d1 --version 1.0.7 \
+    --report $F/report_JBuMp9bYI2aN.json --filing $F/filing_JBuMp9bYI2aN_early_warning_1.json \
+    --drop-dir ./srp_drop --source-version 4ef61281e69d693e3560185bf81ec5474179ea98
+cra attest srp_drop/vulnerability_early_warning_*.json --ledger cra.ledger.jsonl \
+    --key psirt.key --signer-id acme-psirt --out ew.intoto.json
+cra verify-attestation ew.intoto.json --trust-store trust.json \
+    --drop srp_drop/vulnerability_early_warning_*.json --ledger cra.ledger.jsonl
+```
+
+Output (trimmed):
+
+```
+cra import sbomify        "imported": true,  "absent_at_source": ["1", "4", "7a", "41"],
+                          "stage": "early_warning", "complete": false,
+                          "missing_required": ["notification_type", "manufacturer_name"],
+                          "deadline_utc": "2026-11-14T01:00:00+00:00",
+                          "filing": "declared by sbomify: what it recorded about each filing, not a proof of submission"
+cra attest                "attested": true, "keyid": "acme-psirt"
+cra verify-attestation    "verified": true, "trusted": true, "statement": "accepted",
+                          "drop": "PASS", "ledger": "PASS", "product": "PASS", "reasons": []      (exit 0)
+```
+
+The imported early warning is recorded as incomplete because sbomify does not carry glossary rows 1, 4, 7a and 41;
+they are listed, never filled in. Change one byte of the drop file and `cra verify-attestation` exits 1 with
+`"drop": "FAIL"` and reason `subject_digest`.
+
+The same attestation for a notice built here, without sbomify:
+
+```bash
+cat > ew.json <<'EOF'
+{"notification_type": "Vulnerability", "title": "Auth bypass in Acme D1", "summary": "Exploitation observed.",
+ "manufacturer_name": "Acme", "member_states_available": ["IT"], "product_name": "Acme D1",
+ "product_version": "1.0.7", "awareness_datetime_utc": "2026-11-12T08:00:00Z"}
+EOF
+cra notice --ledger cra.ledger.jsonl --product acme-d1 --version 1.0.7 --stage early_warning --fields ew.json --drop native_drop
+cra attest native_drop/vulnerability_early_warning_*.json --ledger cra.ledger.jsonl --key psirt.key --signer-id acme-psirt --out native.intoto.json
+cra verify-attestation native.intoto.json --trust-store trust.json --drop native_drop/vulnerability_early_warning_*.json --ledger cra.ledger.jsonl
+```
+
+Same folder, same key → `"complete": true`,
+`"deadline_utc": "2026-11-13T08:00:00+00:00"`, `"status": "prepared_not_sent"`; then `"verified": true`, exit 0.
+`cra schema --stream vulnerability --template early_warning` prints a fillable template of a stage.
+
+## Proofs
+
+- **Specification before code:** the attestation format is [`spec/art14-filing/v0.1/`](spec/art14-filing/v0.1/README.md)
+  (in-toto Statement v1 in a DSSE envelope, Ed25519, closed predicate); the notice rules and the sbomify mapping are in
+  [`spec/SRP_FIELDS.md`](spec/SRP_FIELDS.md); the receipt of `cra verify` in [`spec/RECEIPT.md`](spec/RECEIPT.md).
+- **Attestation vectors:** [`spec/art14-filing/v0.1/vectors/`](spec/art14-filing/v0.1/vectors/) — 52 envelopes,
+  `manifest.json` gives each one's expected exit code and reason codes, for any other implementation to run.
+- **Verifiers in other languages, by the same author:** [`verifiers/`](verifiers/README.md) re-implements `cra verify`
+  in JavaScript (Node, no dependencies), Go (standard library) and Rust; `verifiers/differential.py` builds intact and
+  tampered packs and requires the same verdict and the same failing layers from all of them. The ledger also follows
+  the profile of cryptovalid's verifiers (same author).
+- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): the suites on Python 3.9, 3.11 and 3.12, with
+  cryptography only and with no optional dependency; the differential oracle across Python, JS, Go and Rust; the
+  official CycloneDX CLI and SPDX tools on the SBOM fixtures; gitleaks on the whole history. A weekly workflow
+  re-reads ENISA's SRP glossary page and fails on any difference from the vendored snapshot.
+- **Public demo:** [cra-evidence-demo](https://github.com/robertolocatelli81-dev/cra-evidence-demo) installs a release
+  three ways (index, attested image, GitHub Action) on clean GitHub-hosted runners, every week, and verifies the
+  release's signed evidence pack with each (the index job also requires a tampered copy to fail).
+- **Attested container image and GitHub Action:** below, under Install.
+- **Archived:** Zenodo concept DOI [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) (resolves to the
+  latest version); `CITATION.cff`.
+
+## What is measured
+
+Re-run on 13/11/2026 on this release's code (cra-evidence 0.8.0, fresh virtual environment):
+
+- The test suite: 379 tests, OK on Python 3.11.2 with `[sign]`, jsonschema and referencing; 2 skipped (the live feeds
+  check, which needs the network; the interop test against cryptovalid, whose wheel was not installed).
+- The 52 attestation vectors (10 valid, 42 each breaking one rule): 52 of 52 give the exit code and the reason codes
+  `manifest.json` expects.
+- The vendored sbomify documents (3 reports, 9 filings, all five stages: early warning, notification, intermediate,
+  final report, users informed): every filing imports, and each of the 9 notices is attested and verifies with its drop
+  file and ledger.
+- The differential oracle: 186 intact and tampered cases, Python and JavaScript verifiers, 0 divergences (Go and Rust
+  run in CI).
+- The notice schema follows ENISA's SRP glossary "Version 1.6" of 21/10/2026: 49 table rows, 43 numbered fields, in
+  `spec/sources/enisa_srp_glossary_20261112.json`.
 
 ## Install
 
@@ -29,281 +120,69 @@ pip install --index-url https://robertolocatelli81-dev.github.io/pypi/ cra-evide
 pip install ".[sign]"    # from a checkout; no runtime dependency, [sign] adds Ed25519 signatures / signed tips / seals
 ```
 
-Container image (Linux x86_64, `[sign]` included, provenance attested by the release workflow):
+Container image (Linux x86_64, `[sign]` included, build provenance attested by the release workflow):
 
 ```
-gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.7.1 --repo robertolocatelli81-dev/cra-evidence \
-  --signer-workflow robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml --source-ref refs/tags/v0.7.1
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/cra-evidence:0.7.1 verify pack.json --ledger cra.ledger.jsonl
+gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.8.0 --repo robertolocatelli81-dev/cra-evidence \
+  --cert-identity https://github.com/robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml@refs/tags/v0.8.0 \
+  --source-ref refs/tags/v0.8.0 --deny-self-hosted-runners
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/cra-evidence:0.8.0 verify pack.json --ledger cra.ledger.jsonl
 ```
 
-GitHub Action (verifies the image's provenance, then runs `cra` in the workspace, without network by default):
+GitHub Action (verifies the provenance of the image digest it pulled, then runs `cra` in the workspace, without
+network by default):
 
 ```yaml
-- uses: robertolocatelli81-dev/cra-evidence@v0.7.1
+- uses: robertolocatelli81-dev/cra-evidence@v0.8.0
   with:
     args: verify dist/pack.json --ledger evidence/cra.ledger.jsonl --trust-store evidence/trust.json
 ```
 
-## Ten minutes, end to end
+## Commands
 
-```
-cra keygen ~/.cra/log.key                                                    # once
-cra sbom  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --from-cyclonedx syft.cdx.json   # or --from-spdx sbom.spdx.json
-cra vuln  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key \
-          --id CVE-2026-32202 --aware 2026-09-12T08:00:00Z --exploited --source cisa_kev   # checked against KEV now
-cra vuln  ... --ew-sent 2026-09-12T20:00:00Z --notified 2026-09-14T09:00:00Z                # exit 1 while a deadline is overdue
-cra schema --stream vulnerability --template early_warning > ew.json         # fillable template for that stage
-cra notice --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key \
-          --stage early_warning --fields ew.json --drop ./srp_drop             # exit 1 while required fields are missing
-cra notice ... --stage notification --fields n72.json --previous ew.json ...  # n72.json: the 72 h fields only; the awareness instant comes from ew.json
-cra check-notice ./srp_drop/<drop file>.json --ledger cra.ledger.jsonl       # re-checks a notice under the glossary it records; exit 1 if it does not
-cra pack  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --out cra_pack.json \
-          --support-period-end 2031-12-31T00:00:00Z                           # retention = 10 years or support period, whichever is longer
-cra sign  cra_pack.json --key ~/.cra/log.key --signer-id myapp-ci
-cra seal  --ledger cra.ledger.jsonl --product myapp --version 2.3 --tip-key ~/.cra/log.key --pack-sha3 <pack_sha3>
-cra verify cra_pack.json --trust-store trust.json --log-pubkey <hex> --require-sources   # exit 0 only if authenticity is not FAIL (and every stored SBOM document re-hashes)
-cra feeds CVE-2026-32202                                                     # OSV positive control (with CVE alias) + KEV/EUVD signal; exit 1 if any feed fails
-cra obligations --exploitation-aware 2026-09-10T23:00:00Z --vulnerability-aware 2026-08-01T00:00:00Z   # does the Art. 14 obligation arise? (here: depends on the time-zone reading, both answers)
-cra obligations --at 2026-10-17T00:00:00Z --role manufacturer --placed-on-market 2025-03-01T00:00:00Z \
-          --support-period-end 2031-03-01T00:00:00Z --update-issued 2026-10-01T00:00:00Z   # Art. 14 in force? Art. 69 legacy scope, support period (exit 1 below 5 years undeclared, for a product the requirements reach: Art. 69(2)), retention, update availability
-```
+| Command | What it does |
+|---|---|
+| `cra sbom --from-cyclonedx F` / `--from-spdx F` | records an SBOM; the generator's document is hashed and stored byte for byte |
+| `cra vuln --id ID --aware T [--exploited] [--incident]` | records a vulnerability or severe-incident event and computes the Art. 14 deadlines from the declared awareness instant |
+| `cra schema --stream S --template STAGE` | prints the fields of a stage in the ENISA glossary vocabulary |
+| `cra notice --stage STAGE --fields F --drop D` | builds the notice payload, lists missing required fields, records it; never submits it |
+| `cra import sbomify --report R --filing F …` | imports the notices recorded in sbomify, documents kept byte for byte |
+| `cra check-notice DROP [--ledger L]` | re-checks a notice under the glossary it records |
+| `cra attest DROP` / `cra verify-attestation ENV` | signs / verifies the `art14-filing` v0.1 attestation of a notice |
+| `cra pack`, `cra sign`, `cra seal`, `cra verify` | evidence pack anchored in the ledger, Ed25519 signature (seed file or AWS KMS), renewable seal, offline verification |
+| `cra feeds ID` | read-only network checks: OSV positive control, CISA KEV / ENISA EUVD exploitation signal |
+| `cra obligations` | which obligations are in force for a role at an instant, and the horizons counted in years (Art. 13, 14, 24(3), 69, 71); both readings of a start date, 00:00 UTC and 00:00 Brussels; never reads the clock |
 
-`cra obligations` (0.6.0; contributed by Athena, the project's confined research agent, reviewed by Noûs) reads no clock
-and records nothing. For the instant at which you became aware of the ACTIVE EXPLOITATION of a vulnerability (or of a
-severe incident) it says whether the Art. 14 obligation arises — not for an exploitation known before 11/09/2026, yes for
-a vulnerability known before that date whose exploitation becomes known after it (Commission guidance C(2026) 5252,
-annex §217, non-binding; Art. 71(2) is the norm). For an instant you give it says whether Art. 14 binds a manufacturer
-(from 11/09/2026, products placed before 11/12/2027 included, Art. 69(3)) or an open-source steward (from 11/12/2027,
-Art. 24(3): 14(1), and 14(3) and (8) for severe incidents, its scope condition recorded and not checked), and it computes
-the horizons the Regulation counts in years (Art. 13(8), 13(9), 13(13), with Reg. 1182/71 Art. 3). No text names the
-time zone of "11 September 2026": every threshold is computed at 00:00 UTC and at 00:00 Europe/Brussels
-(2026-09-10T22:00:00Z), and between the two the answer is `depends_on_time_zone_reading` with both answers (other local
-times of the Union — UTC+3 in September in eight Member States, the outermost regions — are not computed: "net" means net
-between these two). For a product placed before 11/12/2027 and not substantially modified from that date the
-horizons carry `requirements_apply: false` and are never a finding (Art. 69(2)). `cra vuln`
-applies the same rule: an exploitation known before 11/09/2026 is no longer reported as overdue (0.5.1: exit 1).
+Every subcommand has `--help`. `cra verify` gives one authenticity verdict (`trusted-signed` > `signed` > `anchored` >
+`FAIL`) and exits 0 verified, 1 a finding against the pack, 77 not assessed, 2 unusable input, 74 receipt not written
+([`spec/RECEIPT.md`](spec/RECEIPT.md)).
 
-`cra verify` reports layers (pack JSON, kind, declared limits, pack digest, the pack's own verification snapshot,
-ledger chain + record binding + anchor, declared ledger state, stored SBOM source documents, signed tip, producer
-signature, trust store) and one
-authenticity verdict: `trusted-signed` > `signed` > `anchored` > `FAIL`. Without the trusted log key the tip is not
-checked and the verdict says so; with a trust store an unsigned pack is a FAIL.
+## Guarantees and assumptions
 
-Since 0.6.0 the Python verifier's receipt also carries one closed field per question (`spec/RECEIPT.md`): `admission`
-(`admitted`, `refused` with a `refusal_class` — `format_unsupported`, `unknown_member`, `malformed` — or `not_evaluated`
-when the verifier itself failed), `states` (vocabulary `cra-evidence/states-1`: `sealed_content`, `ledger_anchor`,
-`signed_tip`, `source_documents`, `producer_signature`, each `verified`, `contradicted` or `not_evaluated` with its
-reasons, e.g. `self_asserted` for a signature that verifies with no trust store) and `policy` (`met`, `unmet`). The 0.5.1
-fields and exit codes keep their values (two declared exceptions, both on a host without `cryptography`: below and
-`spec/RECEIPT.md` §6). The Go, JS and Rust verifiers do not carry
-these fields in 0.6.0.
-
-Every result also carries `assessed`. It is false when the verifier could not judge and no layer judged against the
-pack: the run ended in the verifier's own exception, or (Python) this host lacks `cryptography` to check a producer
-signature or (since 0.6.0; exit 1 before) a well-formed signed tip; a malformed tip or sidecar is judged there too
-(0.6.0: exit 1; a malformed sidecar was 77 before). `ok` and `authenticity` stay `FAIL` there (fail-closed), but a caller can tell "this verifier could not
-judge" from "this pack is bad". The field is present on every return, so its absence means an older build rather than
-"assessed". Measured 24/09/2026: with an internal error injected, a genuinely signed pack that verifies as
-`authenticity: signed` came back `FAIL`, indistinguishable from a tampered one. Since 0.3.2 the Go, JS and Rust
-verifiers carry the same field on their own internal errors (the Go and JS `verifier-exception` layer already existed
-in 0.3.1, without the field; Rust gained both in 0.3.2), and the differential oracle compares `assessed` too.
-
-Exit codes of `cra verify` and of the three other verifiers, since 0.3.3 (27/09/2026): 0 verified, 1 a finding
-against the pack, 77 not assessed, 2 unusable input or arguments. Until 0.3.2 a run that could not judge exited 1, the
-same as a bad pack. 77 is the value omega-evidence already uses for the same case (`omega_evidence/verifier.py`); it is
-not meant in its sysexits sense.
-
-Since 0.5.1 (12/10/2026), every `cra` subcommand and the three other verifiers exit 74 (sysexits `EX_IOERR`) when the
-JSON outcome they computed could not be written whole to stdout — a full disk, a reader that closed the pipe, a closed
-stdout — whatever the outcome was, with a `receipt not written: <reason>` line on stderr; still 74 when stderr cannot
-take that line either (closed, or a full disk too). 0, 1, 2 and 77 are unchanged when the receipt is written. What
-`sbom`, `vuln`, `notice`, `pack` and `seal` record in the ledger is recorded before the outcome is printed, so after a
-74 for the printed outcome the record is there and only that outcome is lost (since 13/10/2026, below, a 74 can also
-mean that the ledger line itself or the stored copy of an ingested SBOM could not be written: then nothing was
-recorded, and the line on stderr says so). Measured on 0.5.0: the same runs exited with the
-outcome's code and nothing on stderr (Python with stdout closed, the JS verifier on a full disk or a closed pipe, Go on
-a full disk), or with 120 (Python), 101 (Rust) or 141 (Go, SIGPIPE), codes that meant nothing here; the JS verifier
-also cut a receipt above 64 KiB at 65 536 bytes on a pipe, and on a regular file that stops growing (`ulimit -f`) the JS and Go
-verifiers kept the verdict's code with the receipt cut and the Rust verifier was killed by `SIGXFSZ` (153). One case no program can see: started with stdout closed
-(`>&-`), Node, Go and Rust reopen it on `/dev/null` before the verifier runs, so for them that run is the same as
-`>/dev/null` (the verdict's code, no receipt); the Python CLI sees it and exits 74.
-
-The files a subcommand promises follow the same rule — the pack of `pack --out`, the sidecar of `sign`, the drop file
-of `notice`, the seed of `keygen`: one that cannot be written exits 74 with the same line, the pack, the sidecar and
-the drop file are renamed into place only once complete (nothing half-written is left at the path), and the ledger is
-unchanged. Measured: a path under a regular file for the pack, the drop file and the seed, a directory in the place
-of the pack and of the sidecar, the pack's bytes on a full disk. On 0.5.0 each of these was a traceback with exit 1, and `pack --out <a
-directory>` had already appended the pack's anchor to the ledger. One exception, not reproduced: if renaming the pack
-failed after its anchor was appended, the ledger would hold the anchor; the line says so and names the `.tmp` file
-that holds the complete pack. A ledger line is written whole or not at all (a full disk or a file size limit leaves
-the ledger as it was). With `--tip-key`, a signed tip that cannot be replaced exits 74 too: the record is in the ledger
-and the line says so, the tip still names the previous entry, and `pack` keeps the pack its anchor names.
-
-The same rule, measured again on 13/10/2026 over the cases the first 0.5.1 commits did not reach (a generative bench:
-every subcommand that prints an outcome, `--help`, `--version`, usage errors and refusals, the four verifiers, × stdout
-to a file, `/dev/null`, a slow pipe, a non-blocking pipe read late or never, `| head -c 100`, `/dev/full`, a pipe
-without reader, closed, read-only, a file size limit part-way and at 0 × stderr working, full, closed or without
-reader × Python buffered and unbuffered: 1 564 runs on Python 3.11.2 and 1 380 on 3.9.25 and on 3.13.15 (3.11 has
-`cryptography`, so `keygen`, `seal` and `sign` run there only), Node 22 and 24, Go and Rust; 0 departures from the rule
-on this code; with Python 3.11, 814 on 0.5.0 and 198 on the first 0.5.1 commits). The Python CLI writes the receipt in a loop that sees
-the count, also under `-u` / `PYTHONUNBUFFERED`, with the bytes and byte order mark its stdout text layer would write as the first thing written (in process,
-after text the caller wrote to a `utf-8-sig` pipe, the receipt carries a second one);
-stdout open read-only is 74 in the four (the Rust verifier exited with the verdict's code there). A non-blocking stdout
-that is full is waited for, as a blocking one — the process sleeps until a reader takes the bytes, the receipt arrives
-whole with the verdict's code; it is never 74 for a slow reader (measured on Linux; macOS not measured; on Windows Python's
-`select` waits on sockets only, so there it would be 74: not measured). Usage errors exit 2 and refusals keep their code with stderr full, closed or gone, and write
-nothing to stdout; `cra --help` and `cra --version` exit 74 when their text is lost. A ledger line or the stored copy
-of an ingested SBOM that cannot be written (also when the folder of the copies cannot be created) exits 74 with
-nothing recorded, and the line says so. The temporary file of a promised file has a
-name nobody can predict (`<path>.<16 random hex>.tmp`, `O_EXCL`), so a symlink or FIFO planted at `<path>.tmp` is
-neither followed nor waited on. `keygen` on an existing seed is one line, `keygen refused: …`, exit 1; the refusals
-raised as exceptions (`seal` of a digest no pack anchored, an SBOM file that does not exist) are still a traceback
-with exit 1, while an unreadable trust store (exit 2) and a `vuln --source` feed that is unavailable or does not list
-the id (exit 1) are one line, as before.
-
-Every file a verifier reads must be a regular file — decided on the opened descriptor, without blocking on a FIFO — of
-at most 64 MiB (67108864 bytes) for a JSON document (pack, sidecar, tip, trust store, one ledger line) and 256 MiB for a
-stored generator document; anything else is refused unread, with the outcome of an unreadable file in that position.
-The bound limits what is read, not what parsing a document within it costs (measured peaks in `verifiers/README.md`).
-
-## Measured, not promised
-
-- Every tamper the tests can build — a pack field, a ledger record with a stale digest, a re-chained record, a
-  pack from another ledger, a pack re-hashed after signing, a wrong key pinned, a truncated tail (with the signed
-  tip), a torn last line — is a named FAIL; four processes appending at once produce one valid chain (exclusive
-  flock; a filesystem without it refuses to append unless `allow_unlocked=True`); the tests are red on the previous
-  behaviour before each guard was added.
-- The generator's SBOM is the evidence, not our re-encoding of it (0.3.0). `cra sbom --from-cyclonedx/--from-spdx`
-  hashes the exact bytes of the document (SHA-256) into the record and stores a copy in `<ledger>.sources/`; the
-  record keeps a normalised index (name, version, type, purl, CPE, SHA-256, the first licence entry; nested components walked;
-  duplicates counted, never hidden) and what the document declared (generator and version, spec version,
-  components, dependency edges, component types). All four verifiers re-hash the stored bytes (`source-documents`
-  layer: mismatch = FAIL, absent = SKIP or FAIL with `--require-sources`). Measured on 20/09/2026 with the real
-  generators on a 419-component npm tree — Syft 1.52.0, Trivy 0.74.0, cdxgen 12.8.4, all three emitting CycloneDX
-  1.7 by default now — and scored with sbomqs 2.1.2: the 0.2.0 re-encoding scored *below* every original
-  (Syft 5.3 → 4.2, cdxgen 6.6 → 4.4, Trivy 4.8 → 3.7 out of 10), which is why the original is kept; the 0.3.0 index
-  export scores 5.3 / 5.5 / 4.8 (re-measured on the final code, interpreter cache cleared) on the same inputs (bom-ref, serialNumber, tools, component type, CPE, licence
-  expressions, and a dependency graph only from edges the producer knows: the installed floor's Requires-Dist graph with PEP 508 markers evaluated for this interpreter — a `dependsOn` list is a positive statement, so it is emitted only for a component whose metadata was actually read AND whose every declared child is a component of the product (a declared-but-not-installed name is recorded in a property, never as a component, and its parent's composition is declared `unknown` instead — `incomplete` would assert that more exist); never re-invented for an ingested document).
-  Six unmodified generator documents are vendored as fixtures (`tests/fixtures/real_tools/`; the Syft and cdxgen ones
-  re-run on 29/09/2026 with the same tool versions on the same lockfile from a neutral directory, see the CHANGELOG): the tests read the
-  same dependency with the same purl, version and licence from every one of them and validate the exports with
-  jsonschema; CI validates the four CycloneDX fixtures and every export with the official CycloneDX CLI 0.33.1, and the two SPDX
-  fixtures with the official `pyspdxtools` 0.8.5, each with a positive control.
-- Interoperability is measured: a ledger written here verifies unchanged with cryptovalid v0.15.0's reference
-  verifier, and the truncated tail is seen through the signed tip (`tests/test_feeds_and_interop.py`, run in CI
-  against the published wheel; re-measured 20/09/2026).
-- The Art. 14 clock is computed and tested on explicit instants (the deadline arithmetic never reads the wall clock): early warning and notification from
-  awareness; final report 14 days after the corrective measure is available, undetermined until it exists; severe
-  incident (`--incident`) final report one calendar month after the *submission* of the incident notification
-  (Art. 14(4)(c)), undetermined until that submission is recorded; overdue is computed from the recorded submission
-  instants, never from a status word; no obligation for a non-exploited vulnerability, nor (0.6.0) for an exploitation
-  known before 11/09/2026 (both readings of that day, above).
-- Standard documents travel with the record: a CycloneDX VEX, CSAF 2.0 or OpenVEX document is embedded verbatim and
-  content-bound next to the vulnerability event, so the vendor-neutral exchange format is what the auditor sees.
-- OSV pagination is followed and batches are chunked; a truncated answer is an explicit error, never a shorter list.
-  The batch endpoint returns condensed records (id + modified — verified live), so aliases (GHSA ↔ CVE ↔ PYSEC) are
-  resolved per id and the positive control passes only when a CVE alias comes back: KEV and EUVD key on CVEs.
-- A `--source cisa_kev|enisa_euvd` provenance is stored only after the catalogue confirms the id now (or is labelled
-  `asserted:` on request), and a confirmed catalogue hit sets the exploitation flag: provenance and clock cannot diverge.
-- The seal signs its own time, time-source and token together with the whole previous chain; the verifier's policy
-  is applied to the signature and to the hash alike, its default carries the NIST IR 8547 draft date for Ed25519 and
-  no expiry for SHA3-256 (the verdict then says so: "their trust is NOT bounded in time"), and it says when a renewal
-  is due.
-- Pre-publication review: for 0.1.0, five models (two providers) in three rounds, plus the author — 44 findings turned
-  into tests (`tests/test_council_r1.py` … `r3.py`), each red before its fix; for 0.3.0, further rounds on 20–21/09/2026
-  (independent AI reviewers 1, 2 and 3; reviewer 4 in rounds 6–9 until its use was revoked; reviewer 5 out of credits — numbered as in the CHANGELOG) — every finding of every round is listed in
-  the CHANGELOG, each re-measured and turned into an oracle case or a test; the last round's outcome is recorded there, dated; CI runs the suites in three dependency configurations (all optional dependencies,
-  cryptography only, none); the legal points were re-read on EUR-Lex
-  and ENISA, and the OSV API behaviour checked live, before the fix.
-- The SRP schema is ENISA's glossary "Version 1.6" of 21/10/2026 (43 numbered fields; 49 table rows in the snapshot
-  vendored on 12/11/2026), stage by stage, derived by a test from the dated snapshots in `spec/sources/`
-  (`spec/SRP_FIELDS.md`). A field the glossary marks N/A at a stage, a field entered by the CSIRT, an unknown key, a
-  wrong JSON type or a duplicate key is refused with its reason; "complete" is never declared by silence — the payload
-  lists what is missing; a notice cannot carry an awareness instant different from the recorded vulnerability event
-  without a declared reason. Each notice records the glossary it was built under (`glossary_version`) and
-  `cra check-notice` re-checks it under that one: the notices recorded by 0.4.0–0.6.0 under the glossary of 25/09/2026
-  still verify with their ledger (tested on the repository's example and on files written by 0.3.3 and 0.6.0); one built
-  with `--previous` verifies through the ledger only, as its file does not carry the previous payload its hash covered. `scripts/srp_glossary.py check`
-  re-extracts the live page and exits 1 with a field-by-field diff when it differs from the newest snapshot; the
-  workflow `.github/workflows/srp-glossary-drift.yml` is scheduled to run it every Monday.
-- The CycloneDX index export written into the record (1.6 by default, `cra sbom --spec-version 1.7` or `to_cyclonedx_min("1.7")`) validates against the official 1.6 and 1.7 JSON schemas
-  (vendored in `spec/schemas/`, checked by the tests) and against the official CycloneDX CLI 0.33.1 with
-  `--fail-on-errors` (checked in CI, with a positive control that the CLI rejects a broken document). SPDX 2.2/2.3
-  JSON and 3.0 JSON-LD are ingested (`--from-spdx`, since 0.2.0); there is no SPDX export.
-- Feeds: OSV.dev is only believed after its positive control (a version with public CVEs) lights up; network
-  failures are explicit errors, never empty results.
-
-## Where it stands against the field (read on 15/09/2026, re-measured with the tools on 20/09/2026)
-
-Syft/Trivy/cdxgen generate better SBOMs than any Python-only floor — so this tool ingests their CycloneDX or SPDX
-instead of competing with them, and since 0.3.0 keeps their document byte-exact as the evidence (0.2.0 re-encoded
-it and lost bom-refs, the dependency graph, CPEs and the tool provenance: measured, above). Dependency-Track, Mend, Snyk, Cloudsmith, Anchore track vulnerabilities and licences at scale
-— this tool does not replace them; their VEX/CSAF documents can be embedded verbatim, content-bound, next to the
-event. Sigstore/cosign, in-toto and SLSA already give signed, tamper-evident, offline-verifiable attestations of
-artefacts and SBOMs. Dedicated CRA products (e.g. "CRA Evidence") draft the notices and track the deadlines as a
-SaaS with an audit trail and "SRP-ready when the API launches". What this tool adds to that field is narrower and
-specific: **the Art. 14 clock and the ENISA SRP field schema as evidence**, in one hash-chained record whose
-verification does not depend on the producer — the chain, the anchor, the signature and the tip are checked by
-independent re-implementations in four languages, and the seal is designed to be renewed across the 10-year window.
-
-Next decade, as far as the sources go: CycloneDX 1.7 (ECMA-424, released 2025-10-21) is the current specification —
-Syft 1.52.0, Trivy 0.74.0 and cdxgen 12.8.4 emit it by default (measured 20/09/2026) — and this tool ingests it and
-exports 1.6 or 1.7, both validated; the SRP has no machine interface today (ENISA's FAQ, re-read 20/09/2026: "no Application Programming Interface (API)
-will be provided at the initial release of the SRP … API functionality may be considered in a future phase"; the
-39-field glossary re-downloaded the same day was identical to the snapshot of 15/09/2026; re-read on 29/09/2026, the page
-dated 25/09/2026 adds one field, v26a, adopted in the schema; re-read on 12/11/2026, the page "Version 1.6" of 21/10/2026
-adds rows 7a, 40 and 41 and moves most 72 h and final-report cells to N/A, adopted — see the CHANGELOG) and this tool will adopt one if it
-appears — the Digital Omnibus proposal (COM, 19/11/2025, procedure 2025/0360(COD), not adopted) would build a single
-entry point for incident reporting on the CRA platform; NIST IR 8547 — an initial public draft, not a final standard —
-proposes deprecating the quantum-vulnerable signatures (Ed25519 included) after 2030 and disallowing them after
-2035 (https://csrc.nist.gov/pubs/ir/8547/ipd), inside the retention window that starts today. That is why the seal
-is a renewable chain, its verification policy defaults to those dates instead of "valid forever", the signer
-registry is pluggable (a hybrid ML-DSA-65 signer plugs in with three functions) and the hash of the seal chain is
-named per record and replaceable too. A time token (RFC 3161 / OpenTimestamps) is stored with a seal when you have
-one; this tool does not verify it — your verifier's temporal oracle does.
-
-## Independent verifiers (JavaScript, Go, Rust — and a JDK-only Java verifier for the ledger)
-
-The ledger next to every pack follows the cryptovalid profile, so it can also be re-verified by cryptovalid's
-single-file Java verifier (`verifiers/java/CvVerify.java` in cryptovalid-opencore ≥ 0.13.0, JDK standard library
-only: hash chain, Ed25519 and — from JDK 24 — ML-DSA-65 signatures, signed chain tip). Measured on 20/09/2026 on
-`tests/fixtures/signed_pack/l.jsonl` by two reviewers (PASS with the tip; a truncated tail and a tampered record
-refused) — not run in this repository's CI. For a firm whose toolchain is the JVM this means the CRA evidence is
-checkable with nothing but a JDK; the pack layers above the ledger (sidecar signature, trust store, seal) are checked
-by the four verifiers of this repository.
-
-`verifiers/` holds three re-implementations of `cra verify` written from the profile — Node (no dependencies), Go
-(standard library only), Rust (pure-Rust JSON/SHA-256/SHA3-256, `ed25519-dalek` for signatures) — with the same
-command line and the same verdict, plus a differential oracle that CI runs on 160 intact and tampered fixtures: the
-four verifiers must agree on every one, verdict, `assessed` and failing layers alike, and 21 of them must also meet a
-declared outcome (measured 25/09/2026: 0 divergences). An auditor can therefore verify a pack,
-its ledger, its signature and its signed tip without executing the producer's code. Details in `verifiers/README.md`.
-
-## Signing with AWS KMS
-
-`cra sign pack.json --signer-id <id> --aws-kms-key-id <id> --aws-region <region>` signs the sidecar with an Ed25519
-key held in AWS KMS (key spec ECC_NIST_EDWARDS25519): the private key never leaves the HSM, the request is SigV4 over
-HTTPS with the standard library only, and the public key goes into your trust store for `trusted-signed`. The
-release packs of this repository are signed that way.
-
+- **What a verified attestation guarantees** (with `--drop` and `--ledger`): these exact notice bytes, under this glossary and these rules, with this
+  completeness and deadline, sit at this entry of an intact ledger, and a key in your trust store signed the statement.
+- **Not a conformity assessment, not CE marking**, not legal advice.
+- **Not the official CSIRT/ENISA channel.** The SRP is a web portal; ENISA's FAQ (re-read 12/11/2026) says no API is
+  provided at its initial release. A person submits the notice; this tool prepares, records and verifies it.
+- **The awareness instant is the manufacturer's declaration** (glossary rows v26 / i37): the evidence shows that it was
+  recorded, and when, not that it is true. Whether a vulnerability is actively exploited is the manufacturer's
+  determination; KEV and EUVD are surfaced as signals.
+- **An imported filing record is the source tool's declaration, not proof of submission.** The same holds for a
+  filing declared with `cra attest --filed-at`.
+- **Time:** the ledger orders records; it is an objective time anchor only with an attached RFC 3161 / OpenTimestamps
+  token, which this tool stores and does not verify.
+- **Verifiers:** the JavaScript, Go and Rust verifiers and cryptovalid's are by the same author as this tool; they are
+  separate implementations of a written profile, not separate parties.
 
 ## Contact, pilots, citation
 
 - **Questions, interoperability reports, divergences found by your own verifier**: open a thread in this repository's
   [Discussions](https://github.com/robertolocatelli81-dev/cra-evidence/discussions) or an issue; e-mail: roberto.locatelli.81@gmail.com.
 - **Pilots**: the author runs short evaluation pilots (four to six weeks, scoped and priced up front) with firms that must report under the Cyber Resilience Act and want their SBOM, Art. 14 clock and SRP notices as verifiable evidence. Write with the use case; the answer says what is measured and what is not.
-- **Licence**: AGPL-3.0-or-later: study, test and use it freely; a service built on it must share its changes; a **commercial licence of the same code** is available from the author for organisations that cannot adopt AGPL.
-- **Citation**: archived on Zenodo — DOI [10.5281/zenodo.24184561](https://doi.org/10.5281/zenodo.24184561) for 0.7.1, concept DOI
-  [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) for the latest version; `CITATION.cff` in this repository.
+- **Citation**: concept DOI [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) (latest version); `CITATION.cff` in this repository.
 - Author: Roberto Locatelli, 2026. Public interventions by his AI agent (Noûs) are signed as such.
 
 ## Licence
 
 AGPL-3.0-or-later for this repository; a commercial licence of the same code is available from the author for
 organisations that cannot adopt AGPL (roberto.locatelli.81@gmail.com). Copyright Roberto Locatelli, 2026.
-
-## Provenance of this work
-
-Written by Noûs, an AI agent under a revocable mandate from the author, who reviews and is accountable for what is
-published; every claim above is backed by a test or a cited source, and the limits are stated where they apply.

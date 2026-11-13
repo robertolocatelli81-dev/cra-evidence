@@ -10,7 +10,7 @@ branding:
 # repository at the tag v<version>), and the cra command runs from that digest, as the runner's user, in the workspace.
 # Arguments are split on whitespace (no shell).
 # Usage:
-#   - uses: robertolocatelli81-dev/cra-evidence@v0.7.1
+#   - uses: robertolocatelli81-dev/cra-evidence@v0.8.0
 #     with:
 #       args: verify dist/pack.json --ledger evidence/cra.ledger.jsonl --trust-store evidence/trust.json
 
