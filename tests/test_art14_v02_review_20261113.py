@@ -11,7 +11,7 @@ import base64, importlib.util, json, os, sys, tempfile, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-from cra_evidence import art14_attest as A  # noqa: E402
+from omega_cra_evol import art14_attest as A  # noqa: E402
 from gen_art14_vectors import TEST_KEY_STRING, envelope, test_key  # noqa: E402
 
 VD = os.path.join(ROOT, "spec", "art14-filing", "v0.2", "vectors")

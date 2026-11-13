@@ -1,9 +1,9 @@
 """2026-10-05 — no shipped module leaves a file or URL handle to the garbage collector: every open()/urlopen() in
-cra_evidence/ is a `with` item. `cra notice --previous` and `cra seal --renew` read their JSON through an unclosed
+omega_cra_evol/ is a `with` item. `cra notice --previous` and `cra seal --renew` read their JSON through an unclosed
 open(); this test was RED on that code (cli.py lines 135 and 155) and is GREEN after the fix."""
 import ast, os, unittest
 
-PKG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cra_evidence")
+PKG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "omega_cra_evol")
 
 
 def unclosed(path):

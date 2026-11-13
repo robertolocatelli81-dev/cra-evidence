@@ -16,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "verifiers"))
-AP = importlib.import_module("cra_evidence.applicability")
+AP = importlib.import_module("omega_cra_evol.applicability")
 try:
     import cryptography  # noqa: F401
     HAVE_CRYPTO = True
@@ -28,7 +28,7 @@ def cli(args, env_extra=None):
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "CRA_VERIFY_INJECT_FAULT")}
     env["PYTHONPATH"] = ROOT
     env.update(env_extra or {})
-    return subprocess.run([sys.executable, "-B", "-m", "cra_evidence.cli"] + args, capture_output=True, text=True, env=env)
+    return subprocess.run([sys.executable, "-B", "-m", "omega_cra_evol.cli"] + args, capture_output=True, text=True, env=env)
 
 
 class TestObligationsLegacyScope(unittest.TestCase):

@@ -6,26 +6,26 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-from cra_evidence import ledger as ledger_mod
-from cra_evidence.canonical import canonical_bytes, floatfree
-from cra_evidence.ledger import Ledger
-from cra_evidence.locker import CRAEvidenceLocker
-from cra_evidence.longterm import AlgorithmPolicy, LongTermEvidence, Signer, register_algorithm
-from cra_evidence.sbom import SBOMComponent, SBOMRecord, components_for_osv, pypi_purl
+from omega_cra_evol import ledger as ledger_mod
+from omega_cra_evol.canonical import canonical_bytes, floatfree
+from omega_cra_evol.ledger import Ledger
+from omega_cra_evol.locker import EvidenceLocker
+from omega_cra_evol.longterm import AlgorithmPolicy, LongTermEvidence, Signer, register_algorithm
+from omega_cra_evol.sbom import SBOMComponent, SBOMRecord, components_for_osv, pypi_purl
 import functools
-from cra_evidence.srp_notice import GLOSSARIES, SRPNotice as _SRPNotice
+from omega_cra_evol.srp_notice import GLOSSARIES, SRPNotice as _SRPNotice
 # Pinned to the glossary of 25/09/2026 (snapshot enisa_srp_glossary_20260929, rules srp-notice/1): since 12/11/2026 a notice
 # is built by default under the glossary of 21/10/2026; these tests keep proving the 0.4.0-0.6.0 rules, which a notice
 # recorded then is still checked under (tests/test_srp_glossary_16.py covers the new glossary).
 G0929 = "enisa_srp_glossary_20260929"
 COMMON_FIELDS, VULN_FIELDS, INCIDENT_FIELDS = (t for _, t in GLOSSARIES[G0929]["groups"])
 SRPNotice = functools.partial(_SRPNotice, glossary_version=G0929)
-from cra_evidence.verify_pack import verify_pack
-from cra_evidence.vuln import VulnerabilityRecord, add_months, parse_utc
-from cra_evidence import feeds
+from omega_cra_evol.verify_pack import verify_pack
+from omega_cra_evol.vuln import VulnerabilityRecord, add_months, parse_utc
+from omega_cra_evol import feeds
 
 try:
-    from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path
+    from omega_cra_evol.signing import keygen, load_key, sign_pack, sidecar_path
     import cryptography  # noqa: F401 — signing imports lazily; the module itself must be present
     HAVE_CRYPTO = True
 except Exception:  # noqa: BLE001
@@ -65,7 +65,7 @@ class TestCouncilR2(unittest.TestCase):
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_sidecar_identity_is_signed(self):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); lk.evidence_pack(pack); sign_pack(pack, key, "acme-ci")
         self.assertEqual(verify_pack(pack)["authenticity"], "signed")
@@ -76,7 +76,7 @@ class TestCouncilR2(unittest.TestCase):
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_seal_renewal_chain_with_pinned_key(self):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         first = lk.seal_longterm("ab" * 32, t=1_800_000_000.0, external_digest=True)
         second = lk.seal_longterm("ab" * 32, t=1_900_000_000.0, previous=first, external_digest=True)
@@ -126,24 +126,24 @@ class TestCouncilR2(unittest.TestCase):
 
     # reviewer 4 A1 / reviewer 2 A2 — a pack over a broken chain is refused; and a shipped pack's own snapshot is checked
     def test_pack_refused_on_broken_chain_and_self_snapshot_checked(self):
-        p = os.path.join(self.d, "l.jsonl"); lk = CRAEvidenceLocker(p, "p", "1")
+        p = os.path.join(self.d, "l.jsonl"); lk = EvidenceLocker(p, "p", "1")
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         lines = open(p).read().splitlines(); e = json.loads(lines[0]); e["data"]["kind"] = "cra_vulnX"
         open(p, "w").write(json.dumps(e) + "\n")
         with self.assertRaises(ValueError):
             lk.evidence_pack(os.path.join(self.d, "p.json"))
         # a pack whose own verification snapshot says chain_ok:false must FAIL even without the ledger
-        lk2 = CRAEvidenceLocker(os.path.join(self.d, "l2.jsonl"), "p", "1"); lk2.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
+        lk2 = EvidenceLocker(os.path.join(self.d, "l2.jsonl"), "p", "1"); lk2.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p2.json"); pk = lk2.evidence_pack(pack)
-        pk["verification"]["chain_ok"] = False; pk.pop("pack_sha3"); pk["pack_sha3"] = __import__("cra_evidence.canonical", fromlist=["sha3_hex"]).sha3_hex(pk)
+        pk["verification"]["chain_ok"] = False; pk.pop("pack_sha3"); pk["pack_sha3"] = __import__("omega_cra_evol.canonical", fromlist=["sha3_hex"]).sha3_hex(pk)
         alone = os.path.join(self.d, "alone", "p2.json"); os.makedirs(os.path.dirname(alone)); json.dump(pk, open(alone, "w"))
         r = verify_pack(alone); self.assertFalse(r["ok"]); self.assertIn("pack-self-verification", [l["layer"] for l in r["layers"] if l["status"] == "FAIL"])
 
     # reviewer 4 A7 — declared ledger state is checked against the ledger
     def test_pack_ledger_state_is_checked(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); pk = lk.evidence_pack(pack); self.assertTrue(verify_pack(pack)["ok"])
-        from cra_evidence.canonical import sha3_hex
+        from omega_cra_evol.canonical import sha3_hex
         pk["ledger_entries"] = 999999; pk.pop("pack_sha3"); pk["pack_sha3"] = sha3_hex(pk); json.dump(pk, open(pack, "w"))
         r = verify_pack(pack)     # anchor no longer matches this digest either: FAIL, and the state layer names it
         self.assertFalse(r["ok"])
@@ -152,7 +152,7 @@ class TestCouncilR2(unittest.TestCase):
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_truncated_tail_seen_through_signed_tip(self):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
-        p = os.path.join(self.d, "l.jsonl"); lk = CRAEvidenceLocker(p, "p", "1", tip_key=key)
+        p = os.path.join(self.d, "l.jsonl"); lk = EvidenceLocker(p, "p", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); lk.evidence_pack(pack)
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2", True, AW))     # the inconvenient record after the anchor
@@ -165,7 +165,7 @@ class TestCouncilR2(unittest.TestCase):
 
     # reviewer 4 A9 — a trust store demanded and no signature → FAIL; explicit ledger path honoured
     def test_trust_store_requires_a_signature(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); lk.evidence_pack(pack)
         self.assertTrue(verify_pack(pack)["ok"]); self.assertFalse(verify_pack(pack, trust_store={"x": "00" * 32})["ok"])
         moved = os.path.join(self.d, "elsewhere", "p.json"); os.makedirs(os.path.dirname(moved)); shutil.copy(pack, moved)
@@ -173,7 +173,7 @@ class TestCouncilR2(unittest.TestCase):
 
     # reviewer 2 B2 — the notice cannot carry a different awareness than the vulnerability record it refers to
     def test_notice_awareness_bound_to_vuln_record(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2026-1", True, AW))
         with self.assertRaises(ValueError):
             lk.record_notice(SRPNotice("vulnerability", "early_warning", {**BASE, "awareness_datetime_utc": "2026-09-14T00:00:00Z"}))
@@ -235,14 +235,14 @@ class TestCouncilR2(unittest.TestCase):
 
     # found while testing r2: the record's `kind` field shadowed the ledger kind "cra_vuln" → binding silently skipped
     def test_vuln_record_kind_not_shadowed(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         e = lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW, kind="incident"))
         self.assertEqual(e["data"]["kind"], "cra_vuln"); self.assertEqual(e["data"]["event_kind"], "incident")
         self.assertEqual(lk.verify()["records_checked"], 1)
 
     # reviewer 4 B6 — exit codes: overdue → 1
     def test_cli_vuln_exit_code_on_overdue(self):
-        from cra_evidence.cli import main
+        from omega_cra_evol.cli import main
         led = os.path.join(self.d, "l.jsonl")
         # 0.6.0: awareness after 11/09/2026 (an exploitation known before it is not reported retroactively, guidance §217)
         rc = main(["vuln", "--ledger", led, "--product", "p", "--version", "1", "--id", "CVE-1", "--aware", "2026-09-15T00:00:00Z", "--exploited"])

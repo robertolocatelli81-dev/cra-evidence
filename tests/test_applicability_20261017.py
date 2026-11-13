@@ -1,13 +1,13 @@
 """17/10/2026 (Athena), reviewed 19/10/2026 (Noûs): which CRA obligations are in force for whom, and the horizons counted
-in years (Art. 13(8), 13(9), 13(13), 14(8), 24(3), 69(2)-(3), 71(2); sources in `cra_evidence/applicability.py` and
+in years (Art. 13(8), 13(9), 13(13), 14(8), 24(3), 69(2)-(3), 71(2); sources in `omega_cra_evol/applicability.py` and
 `spec/LEGAL_BASIS.md`). Every boundary is tested on both sides of the instant, under both readings of the day (00:00 UTC
 and 00:00 Europe/Brussels), so a date moved by one second, one hour or one day turns a test red. Review changes: the day
 is no longer read in UTC alone (Roberto's decision of 18/10/2026), and the year horizons follow Reg. 1182/71 Art. 3."""
 import contextlib, io, json, os, subprocess, sys, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from cra_evidence import applicability as A
-from cra_evidence import cli
+from omega_cra_evol import applicability as A
+from omega_cra_evol import cli
 
 
 class Reporting(unittest.TestCase):
@@ -99,7 +99,7 @@ class Horizons(unittest.TestCase):
         self.assertEqual(A.retention_until("2028-01-01T00:00:00Z", "2035-01-01T00:00:00Z")["readings"]["utc"]["governed_by"], "ten_years")
 
     def test_same_ten_years_as_the_pack(self):
-        from cra_evidence.locker import RETENTION_YEARS
+        from omega_cra_evol.locker import RETENTION_YEARS
         self.assertEqual(A.RETENTION_YEARS, RETENTION_YEARS)
 
     def test_update_availability(self):
@@ -156,7 +156,7 @@ class ObligationsCLI(unittest.TestCase):
             self.assertEqual(rc, 2, argv); self.assertEqual(out, "", argv); self.assertIn("usage", err, argv)
 
     def test_a_real_process(self):
-        p = subprocess.run([sys.executable, "-m", "cra_evidence.cli", "obligations", "--role", "open_source_steward",
+        p = subprocess.run([sys.executable, "-m", "omega_cra_evol.cli", "obligations", "--role", "open_source_steward",
                             "--stream", "incident", "--at", "2027-12-11T00:00:00Z"], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         r = json.loads(p.stdout)["reporting"]

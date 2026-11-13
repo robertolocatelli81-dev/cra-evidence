@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "verifiers"))
-VP = importlib.import_module("cra_evidence.verify_pack")
+VP = importlib.import_module("omega_cra_evol.verify_pack")
 try:
     import cryptography  # noqa: F401
     HAVE_CRYPTO = True

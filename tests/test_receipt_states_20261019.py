@@ -15,8 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "verifiers"))
-VP = importlib.import_module("cra_evidence.verify_pack")
-_bind = importlib.import_module("cra_evidence.locker")._bind
+VP = importlib.import_module("omega_cra_evol.verify_pack")
+_bind = importlib.import_module("omega_cra_evol.locker")._bind
 try:
     import cryptography  # noqa: F401
     HAVE_CRYPTO = True
@@ -28,7 +28,7 @@ def cli(args, env_extra=None):
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", VP.FAULT_ENV)}
     env["PYTHONPATH"] = ROOT
     env.update(env_extra or {})
-    return subprocess.run([sys.executable, "-B", "-m", "cra_evidence.cli"] + args, capture_output=True, text=True, env=env)
+    return subprocess.run([sys.executable, "-B", "-m", "omega_cra_evol.cli"] + args, capture_output=True, text=True, env=env)
 
 
 @unittest.skipUnless(HAVE_CRYPTO, "the bases are signed: needs cryptography")
@@ -154,7 +154,7 @@ class TestStates(unittest.TestCase):
         self.assertEqual(r["states"]["producer_signature"], {"state": "contradicted", "reasons": ["sidecar_malformed"]})
 
     def _rechain(self, led, change):
-        from cra_evidence.ledger import entry_hash
+        from omega_cra_evol.ledger import entry_hash
         with open(led, encoding="utf-8") as f:
             es = [json.loads(x) for x in f.read().splitlines() if x.strip()]
         change(es)
@@ -173,7 +173,7 @@ class TestStates(unittest.TestCase):
         with open(led, encoding="utf-8") as f:
             es = [json.loads(x) for x in f.read().splitlines() if x.strip()]
         p["ledger_last_self_hash"] = es[p["ledger_entries"] - 1]["self_hash"]   # the declared state follows the rewritten chain
-        from cra_evidence.canonical import sha3_hex
+        from omega_cra_evol.canonical import sha3_hex
         p["pack_sha3"] = sha3_hex({k: v for k, v in p.items() if k != "pack_sha3"})
         for e in es:
             if e["data"].get("kind") == "cra_pack_anchor":
@@ -191,14 +191,14 @@ class TestStates(unittest.TestCase):
     def test_declared_ledger_state_that_is_not_the_ledgers(self):
         """The pack is anchored and the chain verifies, but the ledger state it declares is not the ledger's."""
         d, pack = self.copy("unsigned")
-        from cra_evidence.canonical import sha3_hex
+        from omega_cra_evol.canonical import sha3_hex
         with open(pack, encoding="utf-8") as f:
             p = json.load(f)
         p["ledger_last_self_hash"] = "ab" * 32
         p["pack_sha3"] = sha3_hex({k: v for k, v in p.items() if k != "pack_sha3"})
         with open(pack, "w", encoding="utf-8") as f:
             json.dump(p, f)
-        from cra_evidence.ledger import Ledger
+        from omega_cra_evol.ledger import Ledger
         Ledger(os.path.join(d, "cra.ledger.jsonl")).append(_bind({"kind": "cra_pack_anchor", "anchored_pack_sha3": p["pack_sha3"], "pack_file": "cra_pack.json"}))
         r = VP.verify_pack(pack)
         self.assertTrue(r["anchored"])

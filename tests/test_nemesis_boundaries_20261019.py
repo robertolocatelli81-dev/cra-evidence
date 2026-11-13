@@ -2,7 +2,7 @@
 """Boundaries that survived a mutant (NEMESIS 19/10/2026): equal instants."""
 import unittest
 
-from cra_evidence.applicability import art14_obligation, update_available_until, user_information
+from omega_cra_evol.applicability import art14_obligation, update_available_until, user_information
 
 
 class EqualInstants(unittest.TestCase):
@@ -26,7 +26,7 @@ class EqualInstants(unittest.TestCase):
     def test_severe_incident_not_marked_exploited_is_reportable(self):
         # Art. 14(3): a severe incident is reported whether or not a vulnerability is actively exploited
         from datetime import datetime, timezone
-        from cra_evidence.vuln import VulnerabilityRecord
+        from omega_cra_evol.vuln import VulnerabilityRecord
         r = VulnerabilityRecord("p", "INC-1", False, "2026-10-01T08:00:00Z", kind="incident")
         o = r.overdue(datetime(2026, 10, 10, tzinfo=timezone.utc))
         self.assertTrue(o["reporting_applicable"]); self.assertTrue(o["any_overdue"])
@@ -34,7 +34,7 @@ class EqualInstants(unittest.TestCase):
         self.assertEqual(o["art14_obligation"]["stream"], "incident")
 
     def test_placed_between_the_two_starts_and_modified_after_names_both_bases(self):
-        from cra_evidence.applicability import legacy_product_scope
+        from omega_cra_evol.applicability import legacy_product_scope
         r = legacy_product_scope("2027-12-10T23:30:00Z", "2027-12-11T00:30:00Z")   # placed: from the date in Brussels only
         self.assertEqual(r["outcome"], "requirements_apply")
         self.assertIn("under the Europe/Brussels reading", r["basis"]); self.assertIn("10 December under the UTC reading", r["basis"])

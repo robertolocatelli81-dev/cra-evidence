@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""`cra seal` checks the SHAPE of the time token it stores (cra_evidence/rfc3161_token.py), never its signature or time.
+"""`cra seal` checks the SHAPE of the time token it stores (omega_cra_evol/rfc3161_token.py), never its signature or time.
 
 The tokens below were made on 13/11/2026 with `openssl ts` (OpenSSL 3.0) by a throw-away TSA whose self-signed
 certificate is not kept: TEST-ONLY, no trust attached. Each test fails on the code of f937be1, which stored any
@@ -8,7 +8,7 @@ import base64, importlib.util, json, os, subprocess, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from cra_evidence.rfc3161_token import TokenRefused, check_token, rfc3161_imprint, OID_SHA3_256, OTS_MAGIC  # noqa: E402
+from omega_cra_evol.rfc3161_token import TokenRefused, check_token, rfc3161_imprint, OID_SHA3_256, OTS_MAGIC  # noqa: E402
 
 PS = "3c5278f66d55d52adcb9727b66ec93d984302e19e812c68f656df493d4b8e988"   # the digest the tokens were requested for
 RESP_SHA3 = ("MIIDsTADAgEAMIIDqAYJKoZIhvcNAQcCoIIDmTCCA5UCAQMxDzANBglghkgBZQMEAgEFADBoBgsqhkiG9w0BCRABBKBZBFcwVQIB"
@@ -108,12 +108,12 @@ class TokenShape(unittest.TestCase):
 @unittest.skipUnless(HAVE_CRYPTO, "a seal is signed: cryptography needed")
 class SealLibrary(unittest.TestCase):
     def test_well_formed_token_is_stored_and_still_assumed(self):
-        from cra_evidence.locker import CRAEvidenceLocker
+        from omega_cra_evol.locker import EvidenceLocker
         d = tempfile.mkdtemp()
-        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
         seal = lk.seal_longterm(PS, ts_source="rfc3161", token_b64=RESP_SHA3, external_digest=True)
         self.assertEqual(seal["records"][-1]["token_b64"], RESP_SHA3)
-        from cra_evidence.longterm import LongTermEvidence
+        from omega_cra_evol.longterm import LongTermEvidence
         self.assertIn("ASSUMED", LongTermEvidence.from_dict(seal).verify(now=0.0)["temporal_trust"])
         with self.assertRaises(TokenRefused):
             lk.seal_longterm(PS, ts_source="rfc3161", token_b64="AAAA", external_digest=True)
@@ -122,7 +122,7 @@ class SealLibrary(unittest.TestCase):
 @unittest.skipUnless(HAVE_CRYPTO, "a seal is signed: cryptography needed")
 class SealCLI(unittest.TestCase):
     def run_cra(self, *args, cwd):
-        return subprocess.run([sys.executable, "-m", "cra_evidence.cli", *args], cwd=cwd, capture_output=True, text=True,
+        return subprocess.run([sys.executable, "-m", "omega_cra_evol.cli", *args], cwd=cwd, capture_output=True, text=True,
                               env=dict(os.environ, PYTHONPATH=ROOT))
 
     def test_seal(self):

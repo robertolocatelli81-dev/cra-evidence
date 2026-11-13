@@ -1,6 +1,6 @@
 import importlib.util, json, os, shutil, subprocess, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence import feeds
+from omega_cra_evol import feeds
 
 
 class TestFeedsOffline(unittest.TestCase):
@@ -26,13 +26,13 @@ class TestInteropCryptovalid(unittest.TestCase):
     """A ledger written here must verify with the cryptovalid reference verifier (same author, separate implementation; pip install the wheel)."""
     def test_cryptovalid_verifies_our_ledger_and_tip(self):
         import verifier
-        from cra_evidence import CRAEvidenceLocker, SBOMComponent, SBOMRecord
+        from omega_cra_evol import EvidenceLocker, SBOMComponent, SBOMRecord
         d = tempfile.mkdtemp(); led = os.path.join(d, "l.jsonl")
         key = None
         if importlib.util.find_spec("cryptography"):
-            from cra_evidence.signing import keygen, load_key
+            from omega_cra_evol.signing import keygen, load_key
             keygen(os.path.join(d, "k")); key = load_key(os.path.join(d, "k"))
-        lk = CRAEvidenceLocker(led, "p", "1", tip_key=key)
+        lk = EvidenceLocker(led, "p", "1", tip_key=key)
         for i in range(5):
             lk.record_sbom(SBOMRecord("p", "1", [SBOMComponent(f"c{i}", "1")]))
         r = verifier.verify_ledger(led); self.assertEqual(r["verdict"], "PASS", r.get("parse_errors"))

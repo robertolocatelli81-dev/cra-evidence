@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXAMPLE = os.path.join(ROOT, "examples", "self_evidence")
 SYFT = os.path.join(ROOT, "tests", "fixtures", "real_tools", "syft-1.52.0_cyclonedx-1.7.json")
-PY = [sys.executable, "-m", "cra_evidence.cli"]
+PY = [sys.executable, "-m", "omega_cra_evol.cli"]
 CAN_RUN = os.name == "posix" and os.path.exists("/dev/full") and shutil.which("bash") is not None
 HAVE_SIGN = True
 try:
@@ -52,7 +52,7 @@ MODES = {
 # feeds without network: only the two fetch functions are replaced (canned answers / an OSError), the rest is the real code
 FEEDS_OFFLINE = r"""
 import sys
-from cra_evidence import feeds
+from omega_cra_evol import feeds
 mode = sys.argv[1]
 def post(url, body, timeout):
     if mode == "down": raise OSError("no network (test)")
@@ -62,13 +62,13 @@ def get(url, timeout):
     if url == feeds.KEV_URL: return {"vulnerabilities": [{"cveID": "CVE-2021-44228"}]}
     return [{"id": "EUVD-test", "aliases": "CVE-2021-44228"}]
 feeds._post_json, feeds._get_json = post, get
-from cra_evidence.cli import main
+from omega_cra_evol.cli import main
 sys.exit(main(["feeds", "CVE-2021-44228"]))
 """
 
 
 NOTICE_OK = {"awareness_datetime_utc": "2026-09-15T08:00:00Z", "manufacturer_name": "example manufacturer",
-             "member_states_available": ["IT"], "notification_type": "Vulnerability", "product_name": "cra-evidence",
+             "member_states_available": ["IT"], "notification_type": "Vulnerability", "product_name": "omega-cra-evol",
              "product_version": "0.4.0", "summary": "illustrative payload; never submitted", "title": "example (not a real report)"}
 
 
@@ -407,7 +407,7 @@ class LedgerNeverHalfWritten(unittest.TestCase):
         self.assertEqual(read(self.ledger), before, "half a record was left in the hash-chained ledger")
         subprocess.run(PY + ["vuln", *self.args, "--id", "CVE-2026-0002", "--aware", self.aware], cwd=ROOT, check=True, capture_output=True)
         sys.path.insert(0, ROOT)
-        from cra_evidence.ledger import Ledger
+        from omega_cra_evol.ledger import Ledger
         self.assertTrue(Ledger(self.ledger).verify()["chain_ok"])
 
     @unittest.skipUnless(HAVE_SIGN, "the tip is signed: needs cryptography")

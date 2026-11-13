@@ -16,9 +16,9 @@ from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from cra_evidence import applicability as A  # noqa: E402
-from cra_evidence import cli  # noqa: E402
-from cra_evidence.vuln import VulnerabilityRecord  # noqa: E402
+from omega_cra_evol import applicability as A  # noqa: E402
+from omega_cra_evol import cli  # noqa: E402
+from omega_cra_evol.vuln import VulnerabilityRecord  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo
@@ -110,7 +110,7 @@ class Record(unittest.TestCase):
     def test_cra_vuln_exit_for_an_exploitation_known_before_the_start(self):
         d = tempfile.mkdtemp(prefix="cra-a14-"); self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}; env["PYTHONPATH"] = ROOT
-        base = [sys.executable, "-B", "-m", "cra_evidence.cli", "vuln", "--ledger", os.path.join(d, "l.jsonl"), "--product", "p",
+        base = [sys.executable, "-B", "-m", "omega_cra_evol.cli", "vuln", "--ledger", os.path.join(d, "l.jsonl"), "--product", "p",
                 "--version", "1", "--exploited"]
         p = subprocess.run(base + ["--id", "CVE-2026-2", "--aware", "2026-09-01T00:00:00Z"], capture_output=True, text=True, env=env)
         self.assertEqual(p.returncode, 0, p.stdout[-400:])   # 0.5.1: exit 1, "overdue" from 2 September

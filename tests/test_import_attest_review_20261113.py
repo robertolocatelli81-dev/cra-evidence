@@ -23,7 +23,7 @@ EW = os.path.join(FIX, "filing_s1AfwOnAgUPN_early_warning_1.json")
 
 
 def cli(*argv):
-    from cra_evidence.cli import main
+    from omega_cra_evol.cli import main
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
@@ -78,7 +78,7 @@ class TestImportReview(unittest.TestCase):
                 self._refused(REP, [self._write("f.json", f)], "no UTC instant between years 1 and 9999")
 
     def test_offset_before_year_1000_normalised_with_four_digits(self):
-        from cra_evidence.sbomify_import import _utc
+        from omega_cra_evol.sbomify_import import _utc
         norms = []
         self.assertEqual(_utc("occurred_at", "0999-06-01T00:30:00+01:00", norms), "0999-05-31T23:30:00Z")
 
@@ -101,8 +101,8 @@ class TestImportReview(unittest.TestCase):
         self._refused(self._write("r.json", r), [EW], "values: not a JSON object")
 
     def test_ledger_failure_midway_names_what_was_recorded(self):
-        from cra_evidence.locker import CRAEvidenceLocker
-        orig = CRAEvidenceLocker.record_notice
+        from omega_cra_evol.locker import EvidenceLocker
+        orig = EvidenceLocker.record_notice
         calls = {"n": 0}
 
         def failing(self_, *a, **k):
@@ -110,7 +110,7 @@ class TestImportReview(unittest.TestCase):
             if calls["n"] == 3:
                 raise OSError(28, "No space left on device")
             return orig(self_, *a, **k)
-        with mock.patch.object(CRAEvidenceLocker, "record_notice", failing):
+        with mock.patch.object(EvidenceLocker, "record_notice", failing):
             rc, out, err = self._import(REP, FILINGS)
         self.assertEqual(rc, 74, (out, err))
         self.assertNotIn("Traceback", err)
@@ -144,11 +144,11 @@ class TestAttestationReview(unittest.TestCase):
         self.d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.d, True)
         with open(os.path.join(V, "trust_store.json"), encoding="utf-8") as f:
-            from cra_evidence.ledger import load_trust_store
+            from omega_cra_evol.ledger import load_trust_store
             self.ts = load_trust_store(f.read())
 
     def _env(self, payload, keyid="test-signer", sk=None):
-        from cra_evidence.art14_attest import PAYLOAD_TYPE, pae
+        from omega_cra_evol.art14_attest import PAYLOAD_TYPE, pae
         s = {"sig": base64.b64encode((sk or self.sk).sign(pae(PAYLOAD_TYPE, payload))).decode()}
         if keyid is not None:
             s["keyid"] = keyid
@@ -158,7 +158,7 @@ class TestAttestationReview(unittest.TestCase):
         return p
 
     def _verify(self, env, drop=True):
-        from cra_evidence.art14_attest import verify_envelope
+        from omega_cra_evol.art14_attest import verify_envelope
         return verify_envelope(env, self.ts, os.path.join(V, "drop_early_warning.json") if drop else None,
                                os.path.join(V, "ledger.jsonl") if drop else None)
 
@@ -201,7 +201,7 @@ class TestAttestationReview(unittest.TestCase):
 
     def test_year_before_1000_formatted_with_four_digits(self):
         from datetime import datetime, timezone
-        from cra_evidence.art14_attest import z
+        from omega_cra_evol.art14_attest import z
         self.assertEqual(z(datetime(999, 1, 2, tzinfo=timezone.utc)), "0999-01-02T00:00:00Z")
 
     def test_lone_surrogate_in_payload_refused(self):
@@ -219,7 +219,7 @@ class TestAttestationReview(unittest.TestCase):
         self.assertIs(r["verified"], False)
 
     def test_signature_entries_malformed_or_badly_encoded(self):
-        from cra_evidence.art14_attest import verify_envelope
+        from omega_cra_evol.art14_attest import verify_envelope
         env = json.load(open(self._env(self.payload), encoding="utf-8"))
         for extra, code, result in (("x", "envelope_malformed", "malformed"), ({"keyid": "test-signer", "sig": 5}, "envelope_malformed", "malformed"),
                                     ({"keyid": "test-signer", "sig": "@@"}, "base64", "bad_encoding")):
@@ -260,14 +260,14 @@ class TestAttestationReview(unittest.TestCase):
         self.assertIn("complete must be null", " ".join(x["detail"] for x in r["reasons"]))
 
     def test_producer_refuses_what_its_verifier_refuses(self):
-        import cra_evidence.art14_attest as A
+        import omega_cra_evol.art14_attest as A
         with mock.patch.object(A, "check_statement", return_value=(None, [{"code": "x", "detail": "y"}], [])):
             with self.assertRaises(A.AttestRefused):
                 A.build_statement(os.path.join(V, "drop_native_early_warning.json"), os.path.join(V, "ledger.jsonl"))
 
     def test_record_written_before_0_8_0_product_not_evaluated(self):
-        from cra_evidence.locker import CRAEvidenceLocker
-        orig = CRAEvidenceLocker._append
+        from omega_cra_evol.locker import EvidenceLocker
+        orig = EvidenceLocker._append
 
         def old_format(self_, entry):
             entry = dict(entry)
@@ -281,7 +281,7 @@ class TestAttestationReview(unittest.TestCase):
             json.dump({"notification_type": "Vulnerability", "title": "t", "summary": "s", "manufacturer_name": "m",
                        "member_states_available": ["IT"], "product_name": "p", "product_version": "1",
                        "awareness_datetime_utc": "2026-11-12T08:00:00Z"}, f)
-        with mock.patch.object(CRAEvidenceLocker, "_append", old_format):
+        with mock.patch.object(EvidenceLocker, "_append", old_format):
             rc, out, err = cli("notice", "--ledger", led, "--product", "p", "--version", "1", "--stage", "early_warning",
                                "--fields", fields, "--drop", drop)
         self.assertEqual(rc, 0, (out, err))
@@ -289,13 +289,13 @@ class TestAttestationReview(unittest.TestCase):
         key = os.path.join(self.d, "k")
         with open(key, "w") as f:
             f.write(hashlib.sha256(json.load(open(os.path.join(V, "manifest.json")))["test_keys"]["test-signer"]["seed_string"].encode()).hexdigest())
-        from cra_evidence.art14_attest import build_statement, sign_envelope
-        from cra_evidence.signing import load_key
+        from omega_cra_evol.art14_attest import build_statement, sign_envelope
+        from omega_cra_evol.signing import load_key
         env = sign_envelope(build_statement(d, led, "p", "1"), load_key(key), "test-signer")
         p = os.path.join(self.d, "e.json")
         with open(p, "w") as f:
             json.dump(env, f)
-        from cra_evidence.art14_attest import verify_envelope
+        from omega_cra_evol.art14_attest import verify_envelope
         r = verify_envelope(p, self.ts, d, led)
         self.assertTrue(r["verified"], r["reasons"])
         self.assertTrue(r["product"].startswith("not_evaluated (the ledger record does not carry the product"), r["product"])

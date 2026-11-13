@@ -8,12 +8,12 @@ import contextlib, copy, io, json, os, re, shutil, sys, tempfile, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-from cra_evidence.cli import main                                                   # noqa: E402
-from cra_evidence.locker import CRAEvidenceLocker                                   # noqa: E402
-from cra_evidence.notice_check import check_notice                                  # noqa: E402
-from cra_evidence.srp_notice import (CURRENT_GLOSSARY, GLOSSARIES, LEGACY_SOURCES, STAGES, SRPNotice,  # noqa: E402
+from omega_cra_evol.cli import main                                                   # noqa: E402
+from omega_cra_evol.locker import EvidenceLocker                                   # noqa: E402
+from omega_cra_evol.notice_check import check_notice                                  # noqa: E402
+from omega_cra_evol.srp_notice import (CURRENT_GLOSSARY, GLOSSARIES, LEGACY_SOURCES, STAGES, SRPNotice,  # noqa: E402
                                      schema, template)
-from cra_evidence.vuln import VulnerabilityRecord                                   # noqa: E402
+from omega_cra_evol.vuln import VulnerabilityRecord                                   # noqa: E402
 import gen_srp_fields                                                               # noqa: E402
 
 SRC = os.path.join(ROOT, "spec", "sources")
@@ -248,7 +248,7 @@ class TestRulesV2(unittest.TestCase):
     def test_record_binds_awareness_through_the_previous_stage(self):
         d = tempfile.mkdtemp()
         try:
-            lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
+            lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
             lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2026-0001", True, AW))
             e = lk.record_notice(self.build("vulnerability", "notification", N72_V))
             self.assertEqual(len(e["data"]["bound_vuln_records"]), 1); self.assertEqual(e["data"]["glossary_version"], G16)
@@ -314,12 +314,12 @@ class TestCheckNotice(unittest.TestCase):
         self.assertTrue(check_notice(ew, led)["verified"])
         rec = [json.loads(x)["data"] for x in open(led, encoding="utf-8") if '"cra_srp_notice"' in x][0]
         led2 = os.path.join(self.d, "l2.jsonl")
-        lk = CRAEvidenceLocker(led2, "p", "1")
+        lk = EvidenceLocker(led2, "p", "1")
         body = {k: v for k, v in rec.items() if k != "record_sha3"}
         lk._append({**body, "glossary_version": G0929})
         r = check_notice(ew, led2)
         self.assertFalse(r["verified"]); self.assertTrue(any("glossary_version" in x for x in r["reasons"]), r)
-        lk2 = CRAEvidenceLocker(os.path.join(self.d, "l3.jsonl"), "p", "1"); lk2._append(dict(body))   # control: same record
+        lk2 = EvidenceLocker(os.path.join(self.d, "l3.jsonl"), "p", "1"); lk2._append(dict(body))   # control: same record
         self.assertTrue(check_notice(ew, os.path.join(self.d, "l3.jsonl"))["verified"])
 
     def test_refusals_write_nothing_and_exit_1(self):

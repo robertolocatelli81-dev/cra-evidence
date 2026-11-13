@@ -18,11 +18,11 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence.canonical import canonical_bytes  # noqa: E402
-from cra_evidence.locker import CRAEvidenceLocker, source_file, sources_dir  # noqa: E402
-from cra_evidence.sbom import (SBOMComponent, SBOMRecord, installed_license, is_spdx_expression,  # noqa: E402
+from omega_cra_evol.canonical import canonical_bytes  # noqa: E402
+from omega_cra_evol.locker import EvidenceLocker, source_file, sources_dir  # noqa: E402
+from omega_cra_evol.sbom import (SBOMComponent, SBOMRecord, installed_license, is_spdx_expression,  # noqa: E402
                                sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx, source_fingerprint)
-from cra_evidence.verify_pack import verify_pack  # noqa: E402
+from omega_cra_evol.verify_pack import verify_pack  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REAL = sorted(glob.glob(os.path.join(HERE, "fixtures", "real_tools", "*.json")))
@@ -215,7 +215,7 @@ class TestSourceStore(unittest.TestCase):
         self.src = os.path.join(self.d, "syft.cdx.json")
         shutil.copy(os.path.join(HERE, "fixtures", "real_tools", "syft-1.52.0_cyclonedx-1.7.json"), self.src)
         self.led = os.path.join(self.d, "l.jsonl")
-        self.lk = CRAEvidenceLocker(self.led, "tiny-cra-sample", "1.0.0")
+        self.lk = EvidenceLocker(self.led, "tiny-cra-sample", "1.0.0")
 
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
@@ -305,11 +305,11 @@ class TestSourceStore(unittest.TestCase):
             self.assertEqual(hashlib.sha256(f.read()).hexdigest(), rec["data"]["source"]["sha256"])
 
     def test_an_oversized_document_is_refused_unread(self):
-        from cra_evidence.sbom import MAX_SOURCE_BYTES
+        from omega_cra_evol.sbom import MAX_SOURCE_BYTES
         big = os.path.join(self.d, "big.json")
         with open(big, "wb") as f:
             f.truncate(MAX_SOURCE_BYTES + 1)                                                  # sparse: nothing is read if the guard holds
-        import cra_evidence.sbom as sm
+        import omega_cra_evol.sbom as sm
         opened = []
         real_open = open
         sm.open = lambda path, *a, **k: (opened.append(str(path)), real_open(path, *a, **k))[1]
@@ -322,7 +322,7 @@ class TestSourceStore(unittest.TestCase):
         self.assertNotIn(big, opened)
         sb = sbom_from_cyclonedx(self.src, "tiny-cra-sample", "1.0.0")
         from dataclasses import replace
-        import cra_evidence.locker as lm
+        import omega_cra_evol.locker as lm
         opened = []
         real_open = open
         lm.open = lambda path, *a, **k: (opened.append(str(path)), real_open(path, *a, **k))[1]
@@ -335,7 +335,7 @@ class TestSourceStore(unittest.TestCase):
         self.assertNotIn(big, opened)
 
     def test_schema_bounds_and_product_type_from_the_document(self):
-        from cra_evidence.sbom import SCHEMA_TEXT_MAX
+        from omega_cra_evol.sbom import SCHEMA_TEXT_MAX
         p = os.path.join(self.d, "long.json")
         with open(p, "w") as f:
             json.dump({"bomFormat": "CycloneDX", "specVersion": "1.7", "metadata": {"component": {"type": "firmware", "name": "fw", "version": "1"}},
@@ -392,7 +392,7 @@ class TestSourceStore(unittest.TestCase):
 
     def test_ingest_reads_the_file_once(self):
         """found by reviewer 2 in round 2: two reads of a file still being written = index of A, hash of B"""
-        import cra_evidence.sbom as m
+        import omega_cra_evol.sbom as m
         opened = []
         real_open = open
         def spy(path, *a, **k):
@@ -473,7 +473,7 @@ class TestSourceStore(unittest.TestCase):
             self.assertEqual(a.read(), b.read())
 
     def test_malformed_hash_in_a_record_is_a_fail_not_a_path(self):
-        from cra_evidence.verify_pack import _source_documents
+        from omega_cra_evol.verify_pack import _source_documents
         entries = [{"data": {"kind": "cra_sbom", "source": {"sha256": "../../etc/passwd"}}}]
         lay = _source_documents(self.led, entries, False)
         self.assertEqual(lay["status"], "FAIL")
@@ -500,8 +500,8 @@ class TestExport(unittest.TestCase):
 
     def test_exports_validate_against_the_official_1_6_and_1_7_schemas(self):
         vs = self._validators()
-        records = [ingest(p) for p in REAL] + [sbom_from_installed("cra-evidence", "0.3.0", ["cryptography"], transitive=True),
-                                                sbom_from_installed("cra-evidence", "0.3.0", ["cryptography", "no-such-dist-xyz"]),   # the `compositions: unknown` shape
+        records = [ingest(p) for p in REAL] + [sbom_from_installed("omega-cra-evol", "0.3.0", ["cryptography"], transitive=True),
+                                                sbom_from_installed("omega-cra-evol", "0.3.0", ["cryptography", "no-such-dist-xyz"]),   # the `compositions: unknown` shape
                                                 SBOMRecord("p", "1", [SBOMComponent("a", "1", license="Apache-2.0 OR BSD-3-Clause"), SBOMComponent("b", "2", license="Proprietary")])]
         for r in records:
             for v, val in vs.items():
@@ -556,7 +556,7 @@ class TestExport(unittest.TestCase):
         self.assertNotIn("dependencies", ing)                                                          # never re-invented for an ingested graph
         self.assertIn({"name": "cra-evidence:source_sha256", "value": rec.source["sha256"]}, ing["metadata"]["properties"])
         self.assertEqual(ing["serialNumber"], "urn:uuid:" + rec.record_id)
-        self.assertEqual(ing["metadata"]["tools"]["components"][0]["name"], "cra-evidence")
+        self.assertEqual(ing["metadata"]["tools"]["components"][0]["name"], "omega-cra-evol")
 
     def test_licence_expression_and_pep639(self):
         self.assertTrue(is_spdx_expression("Apache-2.0 OR BSD-3-Clause"))
@@ -584,7 +584,7 @@ class TestExport(unittest.TestCase):
             self.assertEqual((md.metadata("cryptography").get("License") or "").strip(), "")
 
     def test_pep508_markers_decide_the_edges_of_this_interpreter(self):
-        from cra_evidence.sbom import marker_applies
+        from omega_cra_evol.sbom import marker_applies
         self.assertTrue(marker_applies(""))
         self.assertEqual(marker_applies("python_version < '2.0'"), False)                         # cryptography's typing-extensions marker shape
         self.assertEqual(marker_applies("python_version >= '3.0' and os_name == 'posix'"), os.name == "posix")

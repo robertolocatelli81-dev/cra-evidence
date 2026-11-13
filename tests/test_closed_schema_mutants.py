@@ -63,8 +63,8 @@ class TestClosedSchemaMutants(unittest.TestCase):
     def test_bench_lists_match_the_reference_lists(self):
         import importlib
         sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "verifiers"))
-        V = importlib.import_module("cra_evidence.verify_pack")   # the MODULE (the package exports a function of the same name)
-        S = importlib.import_module("cra_evidence.signing")
+        V = importlib.import_module("omega_cra_evol.verify_pack")   # the MODULE (the package exports a function of the same name)
+        S = importlib.import_module("omega_cra_evol.signing")
         import closed_schema_mutants as B   # noqa: E402
         self.assertEqual(set(B.PACK_KEYS), set(V.PACK_KEYS)); self.assertEqual(set(B.ENTRY_KEYS), set(V.ENTRY_KEYS))
         self.assertEqual(set(B.SIDECAR_KEYS), set(S.SIDECAR_KEYS))

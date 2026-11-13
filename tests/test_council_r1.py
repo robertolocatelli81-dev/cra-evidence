@@ -5,24 +5,24 @@ import json, os, shutil, sys, tempfile, unittest, uuid
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence.canonical import canonical_bytes, floatfree
-from cra_evidence.ledger import Ledger
-from cra_evidence.locker import CRAEvidenceLocker
-from cra_evidence.vuln import VulnerabilityRecord
+from omega_cra_evol.canonical import canonical_bytes, floatfree
+from omega_cra_evol.ledger import Ledger
+from omega_cra_evol.locker import EvidenceLocker
+from omega_cra_evol.vuln import VulnerabilityRecord
 import functools
-from cra_evidence.srp_notice import SRPNotice as _SRPNotice, DryRunDrop
+from omega_cra_evol.srp_notice import SRPNotice as _SRPNotice, DryRunDrop
 # Pinned to the glossary of 25/09/2026 (snapshot enisa_srp_glossary_20260929, rules srp-notice/1): since 12/11/2026 a notice
 # is built by default under the glossary of 21/10/2026; these tests keep proving the 0.4.0-0.6.0 rules, which a notice
 # recorded then is still checked under (tests/test_srp_glossary_16.py covers the new glossary).
 G0929 = "enisa_srp_glossary_20260929"
 SRPNotice = functools.partial(_SRPNotice, glossary_version=G0929)
-from cra_evidence.sbom import SBOMComponent, SBOMRecord
-from cra_evidence.longterm import LongTermEvidence, Signer, register_algorithm, HASHES
-from cra_evidence.verify_pack import verify_pack
-from cra_evidence import feeds
+from omega_cra_evol.sbom import SBOMComponent, SBOMRecord
+from omega_cra_evol.longterm import LongTermEvidence, Signer, register_algorithm, HASHES
+from omega_cra_evol.verify_pack import verify_pack
+from omega_cra_evol import feeds
 
 try:
-    from cra_evidence.signing import keygen
+    from omega_cra_evol.signing import keygen
     import cryptography  # noqa: F401 — signing imports lazily; the module itself must be present
     HAVE_CRYPTO = True
 except Exception:  # noqa: BLE001
@@ -61,13 +61,13 @@ class TestCouncilR1(unittest.TestCase):
 
     # reviewer 3 A.3 — a pack over an empty ledger "proved" nothing but was produced
     def test_pack_refused_on_empty_ledger(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         with self.assertRaises(ValueError):
             lk.evidence_pack(os.path.join(self.d, "p.json"))
 
     # reviewer 5 A.1 — ledger_file "../../x" resolved outside the pack directory; reviewer 3 A.5 — anchoring not reported
     def test_ledger_file_confined_to_pack_dir_and_anchored_flag(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, "2026-09-01T00:00:00Z"))
         pack_path = os.path.join(self.d, "p.json"); lk.evidence_pack(pack_path)
         r = verify_pack(pack_path); self.assertTrue(r["ok"]); self.assertTrue(r["anchored"])
@@ -82,7 +82,7 @@ class TestCouncilR1(unittest.TestCase):
         lte = LongTermEvidence("ab" * 32)
         rec = lte.seal(Signer("test-plain"), t=1.0)
         self.assertEqual(rec["hash"], "sha3-256"); self.assertIn("sha3-256", HASHES)
-        from cra_evidence.longterm import AlgorithmPolicy
+        from omega_cra_evol.longterm import AlgorithmPolicy
         self.assertTrue(lte.verify(now=2.0, policy=AlgorithmPolicy())["ok"])
         self.assertFalse(lte.verify(now=2.0, policy=AlgorithmPolicy({"sha3-256": 1.5}))["ok"])   # hash retired → not ok
         lte.records[0]["hash"] = "sha3-256-unknown"
@@ -146,7 +146,7 @@ class TestCouncilR1(unittest.TestCase):
 
     # reviewer 5 B.5 — "extra==" / "extra  ==" markers slipped into the SBOM as runtime deps
     def test_extra_marker_regex(self):
-        from cra_evidence.sbom import _is_extra_requirement
+        from omega_cra_evol.sbom import _is_extra_requirement
         self.assertTrue(_is_extra_requirement("pytest; extra == 'test'"))
         self.assertTrue(_is_extra_requirement("pytest ; extra=='test'"))
         self.assertFalse(_is_extra_requirement("cryptography>=41"))
@@ -162,7 +162,7 @@ class TestCouncilR1(unittest.TestCase):
 
     # reviewer 5 A.6 — standard VEX/CSAF documents can be embedded (content-bound) in the vulnerability record
     def test_vex_attachment_is_content_bound(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         vex = {"bomFormat": "CycloneDX", "specVersion": "1.6", "vulnerabilities": [{"id": "CVE-1", "analysis": {"state": "not_affected"}}]}
         e = lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, "2026-09-01T00:00:00Z"),
                                     attachments=[{"format": "cyclonedx-vex", "document": vex}])

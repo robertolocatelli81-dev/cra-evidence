@@ -31,8 +31,8 @@ def manifest(d=V2):
 
 
 def run(v, d=V2):
-    from cra_evidence.art14_attest import verify_envelope
-    from cra_evidence.ledger import load_trust_store
+    from omega_cra_evol.art14_attest import verify_envelope
+    from omega_cra_evol.ledger import load_trust_store
     with open(os.path.join(d, v["trust_store"]), encoding="utf-8") as f:
         ts = load_trust_store(f.read())
     return verify_envelope(os.path.join(d, v["envelope"]), ts, v["drop"] and os.path.join(d, v["drop"]),
@@ -40,7 +40,7 @@ def run(v, d=V2):
 
 
 def cli(*argv):
-    from cra_evidence.cli import main
+    from omega_cra_evol.cli import main
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
@@ -60,7 +60,7 @@ def argv_of(v, d):
 
 
 def payload_of(env_path):
-    from cra_evidence.art14_attest import b64decode
+    from omega_cra_evol.art14_attest import b64decode
     with open(env_path, encoding="utf-8") as f:
         return b64decode(json.load(f)["payload"])
 
@@ -69,7 +69,7 @@ def as_vectors_tool_version(payload):
     """`source.toolVersion` of a statement this package writes is the package version (spec v0.1 §4); the vectors were
     written by 0.8.0 (scripts/gen_art14_vectors.py VECTORS_TOOL_VERSION). The payload with that one value replaced,
     the other bytes kept: what the package of the vectors would have written."""
-    from cra_evidence import __version__
+    from omega_cra_evol import __version__
     from gen_art14_vectors import VECTORS_TOOL_VERSION
     old = ('"toolVersion":"%s"' % __version__).encode()
     assert payload.count(old) == 1, payload
@@ -239,7 +239,7 @@ class TestAttestV02(unittest.TestCase):
     def test_producer_gives_the_bytes_of_the_vectors(self):
         """the vectors were built from v0.1 statements by hand; the producer must give the same payload but source.toolVersion"""
         from datetime import datetime, timezone
-        from cra_evidence.art14_attest import build_statement
+        from omega_cra_evol.art14_attest import build_statement
         at = datetime(2026, 11, 13, 7, 5, 0, tzinfo=timezone.utc)
         vs = {v["name"]: v for v in manifest()["vectors"]}
         for name, drop, case in (("valid_cve_euvd_matched", "drop_cve_euvd.json", None),
@@ -254,7 +254,7 @@ class TestAttestV02(unittest.TestCase):
 
     def test_predicate_v01_writes_what_080_wrote(self):
         from datetime import datetime, timezone
-        from cra_evidence.art14_attest import build_statement
+        from omega_cra_evol.art14_attest import build_statement
         at = datetime(2026, 11, 13, 6, 5, 0, tzinfo=timezone.utc)
         vs = {v["name"]: v for v in manifest(V1)["vectors"]}
         for p in (None, "v0.1"):      # the library default stays v0.1 (callers of 0.8.0 unchanged)
@@ -264,7 +264,7 @@ class TestAttestV02(unittest.TestCase):
             # the bytes of 0.8.0 but `source.toolVersion`, which names the version that writes the statement
             want = payload_of(os.path.join(V1, vs["valid_native_early_warning"]["envelope"]))
             self.assertEqual(as_vectors_tool_version(got), want)
-            from cra_evidence import __version__
+            from omega_cra_evol import __version__
             self.assertEqual(json.loads(got)["predicate"]["source"]["toolVersion"], __version__)
         rc, r, out = self.attest("drop_cve_euvd.json", "--predicate", "v0.1")
         self.assertEqual(rc, 0, r)
@@ -301,7 +301,7 @@ class TestNoticeIdentifiers(unittest.TestCase):
     """v0.2 §3: which values of a drop file are the notice's identifiers"""
 
     def test_fields_then_previous_fields(self):
-        from cra_evidence.art14_attest import notice_identifiers
+        from omega_cra_evol.art14_attest import notice_identifiers
         C, E = "CVE-2024-3094", "EUVD-2024-31700"
         for p, want in (({"fields": {"cve_id": C}}, [{"scheme": "cve", "id": C}]),
                         ({"fields": {}, "previous_fields": {"cve_id": C, "euvd_id": E}},
@@ -344,7 +344,7 @@ class TestGenerative(unittest.TestCase):
         cls.base = json.loads(payload_of(os.path.join(V2, vs["valid_identifiers_and_case_reference"]["envelope"])))
 
     def check(self, st):
-        from cra_evidence.art14_attest import check_statement
+        from omega_cra_evol.art14_attest import check_statement
         payload = json.dumps(st, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         ok, reasons, _ = check_statement(payload)
         return ok is not None, [r["code"] for r in reasons]

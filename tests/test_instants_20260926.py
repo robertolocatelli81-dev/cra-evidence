@@ -2,7 +2,7 @@
 2026-02-30, 25:61:61 or month 13 verified PASS in all four verifiers (measured). An instant must exist."""
 import json, os, shutil, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence import signing as S
+from omega_cra_evol import signing as S
 
 try:
     import cryptography  # noqa: F401

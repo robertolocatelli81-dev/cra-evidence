@@ -117,7 +117,7 @@ class TestPins(unittest.TestCase):
     def test_dockerfile_installs_with_hashes_and_without_index_for_the_wheel(self):
         d = read("Dockerfile")
         self.assertIn("--require-hashes --only-binary=:all: -r /tmp/requirements-sign.txt", d)
-        self.assertIn("--no-deps --no-index /tmp/dist/cra_evidence-${CRA_VERSION}-py3-none-any.whl", d)
+        self.assertIn("--no-deps --no-index /tmp/dist/omega_cra_evol-${CRA_VERSION}-py3-none-any.whl", d)
         self.assertRegex(d, r"(?m)^USER 10001$")
 
 
@@ -126,7 +126,7 @@ def dockerignore_rules(text):
 
 
 class TestBuildContext(unittest.TestCase):
-    ALLOWED = ["*", "!dist/cra_evidence-*-py3-none-any.whl", "!container/requirements-sign.txt"]
+    ALLOWED = ["*", "!dist/omega_cra_evol-*-py3-none-any.whl", "!container/requirements-sign.txt"]
 
     def test_dockerignore_admits_only_the_wheel_and_the_requirements(self):
         self.assertEqual(dockerignore_rules(read(".dockerignore")), self.ALLOWED)
@@ -154,7 +154,7 @@ class TestContainerWorkflow(unittest.TestCase):
         job = re.search(r"^    permissions:\n((?:      .*\n)+)", w, re.M).group(1).split()
         self.assertEqual(job, ["contents:", "read", "packages:", "write", "id-token:", "write", "attestations:", "write"])
         for guard in ("(d['ok'], d['authenticity']) == (True, 'trusted-signed')",      # the release's pack verifies
-                      'cmp -s "rel/cra-evidence-$V-cra_pack.json" rel/tampered.json && {',   # the tampered copy differs
+                      'cmp -s "rel/omega-cra-evol-$V-cra_pack.json" rel/tampered.json && {',   # the tampered copy differs
                       'test "$rc" -eq 1 ||',                                             # and is refused with exit 1
                       "subject-digest: ${{ steps.push.outputs.digest }}"):               # attested = pushed digest
             self.assertIn(guard, w)
@@ -189,7 +189,7 @@ exit 0
 @unittest.skipUnless(shutil.which("bash"), "the action's steps are bash")
 class TestActionSteps(unittest.TestCase):
     """the two composite steps of action.yml, run with bash against docker/gh stubs"""
-    IMG = "ghcr.io/robertolocatelli81-dev/cra-evidence"
+    IMG = "ghcr.io/robertolocatelli81-dev/omega-cra-evol"
     DIGEST = "sha256:" + "ab" * 32
 
     def setUp(self):
@@ -214,7 +214,7 @@ class TestActionSteps(unittest.TestCase):
             return r.returncode, f.read(), calls
 
     def verify(self, **env):
-        base = {"V": "0.7.1", "GH_TOKEN": "x", "REPO": "robertolocatelli81-dev/cra-evidence",
+        base = {"V": "0.10.0", "GH_TOKEN": "x", "REPO": "robertolocatelli81-dev/omega-cra-evol",
                 "STUB_REPODIGESTS": f"a.example/mirror@sha256:{'cd' * 32} {self.IMG}@{self.DIGEST}"}
         base.update(env)
         return self.step("verify", base)
@@ -227,8 +227,8 @@ class TestActionSteps(unittest.TestCase):
         self.assertEqual(len(gh), 1)
         argv = gh[0][1:]
         self.assertEqual(argv[:3], ["attestation", "verify", f"oci://{self.IMG}@{self.DIGEST}"])
-        for flag, val in (("--repo", "robertolocatelli81-dev/cra-evidence"), ("--source-ref", "refs/tags/v0.7.1"),
-                          ("--cert-identity", "https://github.com/robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml@refs/tags/v0.7.1")):
+        for flag, val in (("--repo", "robertolocatelli81-dev/omega-cra-evol"), ("--source-ref", "refs/tags/v0.10.0"),
+                          ("--cert-identity", "https://github.com/robertolocatelli81-dev/omega-cra-evol/.github/workflows/container.yml@refs/tags/v0.10.0")):
             self.assertEqual(argv[argv.index(flag) + 1], val)
         self.assertIn("--deny-self-hosted-runners", argv)
 
@@ -279,7 +279,7 @@ class TestActionSteps(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.d, "PWNED")))          # the test sees a shell when there is one
         lax = step_script(a, "verify").replace('--source-ref "refs/tags/v$V" ', "")
         self.assertNotEqual(lax, step_script(a, "verify"))
-        rc, _, calls = self.step("verify", {"V": "0.7.1", "GH_TOKEN": "x", "REPO": "robertolocatelli81-dev/cra-evidence",
+        rc, _, calls = self.step("verify", {"V": "0.10.0", "GH_TOKEN": "x", "REPO": "robertolocatelli81-dev/omega-cra-evol",
                                             "STUB_REPODIGESTS": f"{self.IMG}@{self.DIGEST}"}, lax)
         self.assertNotIn("--source-ref", [c for c in calls if c[0] == "gh"][0])
 

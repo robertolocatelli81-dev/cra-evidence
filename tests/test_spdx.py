@@ -5,8 +5,8 @@ import json, os, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from cra_evidence.sbom import sbom_from_spdx, resolved_components
-from cra_evidence.locker import CRAEvidenceLocker
+from omega_cra_evol.sbom import sbom_from_spdx, resolved_components
+from omega_cra_evol.locker import EvidenceLocker
 
 FX = os.path.join(ROOT, "tests", "fixtures", "spdx")
 
@@ -48,7 +48,7 @@ class TestSPDX(unittest.TestCase):
         p = os.path.join(d, "x.json"); json.dump({"bomFormat": "CycloneDX"}, open(p, "w"))
         with self.assertRaises(ValueError):
             sbom_from_spdx(p, "p", "1")
-        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
         src = os.path.join(FX, "spdx-2.3-dependency.spdx.json")
         e = lk.record_sbom(sbom_from_spdx(src, "p", "1"), source_path=src)
         self.assertTrue(e["data"]["sbom_floor_met"])
@@ -90,7 +90,7 @@ class TestSPDXCouncil(unittest.TestCase):
         self.assertEqual(r.components[0].supplier, "Acme (Bar) Ltd"); self.assertEqual(r.components[0].sha256, "")
 
     def test_floor_not_met_by_noassertion_versions(self):
-        lk = CRAEvidenceLocker(os.path.join(tempfile.mkdtemp(), "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(tempfile.mkdtemp(), "l.jsonl"), "p", "1")
         doc = {"spdxVersion": "SPDX-2.3", "packages": [{"name": "lib", "SPDXID": "SPDXRef-L"}], "documentDescribes": []}
         src = self._w(doc)
         e = lk.record_sbom(sbom_from_spdx(src, "p", "1"), source_path=src)

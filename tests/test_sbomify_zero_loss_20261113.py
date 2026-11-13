@@ -72,7 +72,7 @@ class _Fixtures:
 
 
 def _si():
-    from cra_evidence import sbomify_import
+    from omega_cra_evol import sbomify_import
     return sbomify_import
 
 
@@ -163,7 +163,7 @@ def _forward(conversion, value):
         assert d.tzinfo is not None
         return d.astimezone(timezone.utc)
     if conversion == "pec_option":
-        from cra_evidence.srp_notice import PEC_OPTIONS
+        from omega_cra_evol.srp_notice import PEC_OPTIONS
         return [k for k, t in PEC_OPTIONS.items() if t == value]
     raise AssertionError(f"conversion {conversion!r} not in the spec")
 
@@ -176,7 +176,7 @@ class TestReverseFromDropFiles(_Fixtures, unittest.TestCase):
         shutil.rmtree(self.d, ignore_errors=True)
 
     def cli(self, *argv):
-        from cra_evidence.cli import main
+        from omega_cra_evol.cli import main
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:

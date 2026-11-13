@@ -2,24 +2,24 @@
 import json, os, shutil, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence.canonical import canonical_bytes
-from cra_evidence.ledger import Ledger
-from cra_evidence.locker import CRAEvidenceLocker
-from cra_evidence.longterm import AlgorithmPolicy, LongTermEvidence, Signer, register_algorithm
-from cra_evidence.sbom import SBOMComponent, SBOMRecord, is_spdx_id, sbom_from_installed
+from omega_cra_evol.canonical import canonical_bytes
+from omega_cra_evol.ledger import Ledger
+from omega_cra_evol.locker import EvidenceLocker
+from omega_cra_evol.longterm import AlgorithmPolicy, LongTermEvidence, Signer, register_algorithm
+from omega_cra_evol.sbom import SBOMComponent, SBOMRecord, is_spdx_id, sbom_from_installed
 import functools
-from cra_evidence.srp_notice import SRPNotice as _SRPNotice
+from omega_cra_evol.srp_notice import SRPNotice as _SRPNotice
 # Pinned to the glossary of 25/09/2026 (snapshot enisa_srp_glossary_20260929, rules srp-notice/1): since 12/11/2026 a notice
 # is built by default under the glossary of 21/10/2026; these tests keep proving the 0.4.0-0.6.0 rules, which a notice
 # recorded then is still checked under (tests/test_srp_glossary_16.py covers the new glossary).
 G0929 = "enisa_srp_glossary_20260929"
 SRPNotice = functools.partial(_SRPNotice, glossary_version=G0929)
-from cra_evidence.verify_pack import verify_pack
-from cra_evidence.vuln import VulnerabilityRecord
-from cra_evidence import feeds
+from omega_cra_evol.verify_pack import verify_pack
+from omega_cra_evol.vuln import VulnerabilityRecord
+from omega_cra_evol import feeds
 
 try:
-    from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path
+    from omega_cra_evol.signing import keygen, load_key, sign_pack, sidecar_path
     import cryptography  # noqa: F401 — signing imports lazily; the module itself must be present
     HAVE_CRYPTO = True
 except Exception:  # noqa: BLE001
@@ -71,14 +71,14 @@ class TestCouncilR3(unittest.TestCase):
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_fingerprint_is_recomputed(self):
         k = os.path.join(self.d, "k.key"); keygen(k); key = load_key(k)
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); lk.evidence_pack(pack); sign_pack(pack, key, "acme")
         side = json.load(open(sidecar_path(pack))); side["fingerprint"] = "0123456789abcdef"; json.dump(side, open(sidecar_path(pack), "w"))
         self.assertEqual(verify_pack(pack)["authenticity"], "FAIL")
 
     # B1 — a required ledger that is missing is a FAIL, not a skip
     def test_required_ledger_missing_is_fail(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         pack = os.path.join(self.d, "p.json"); lk.evidence_pack(pack)
         os.remove(os.path.join(self.d, "l.jsonl"))
         self.assertFalse(verify_pack(pack, log_pubkey_hex="00" * 32)["ok"])
@@ -87,7 +87,7 @@ class TestCouncilR3(unittest.TestCase):
 
     # B3/B4 — binding: latest record wins, ids stripped, product must match, absent awareness refused when bound
     def test_binding_latest_record_strip_and_product(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         lk.record_vulnerability(VulnerabilityRecord("p", " CVE-2026-1 ", True, "2026-08-01T00:00:00Z"))   # superseded
         lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2026-1", True, AW))                       # current
         e = lk.record_notice(SRPNotice("vulnerability", "early_warning", dict(BASE))); self.assertEqual(len(e["data"]["bound_vuln_records"]), 1)
@@ -99,7 +99,7 @@ class TestCouncilR3(unittest.TestCase):
     # B5/B6 — seal only anchored digests by default; pack appears only once anchored
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_seal_requires_anchor_and_pack_is_atomic(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1"); lk.record_vulnerability(VulnerabilityRecord("p", "CVE-1", False, AW))
         with self.assertRaises(ValueError):
             lk.seal_longterm("ab" * 32)
         pack = os.path.join(self.d, "p.json"); pk = lk.evidence_pack(pack)
@@ -156,7 +156,7 @@ class TestCouncilR3(unittest.TestCase):
 
     # C5 — the floor is not met by NOT-INSTALLED phantoms
     def test_floor_ignores_phantom_components(self):
-        lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         e = lk.record_sbom(sbom_from_installed("p", "1", ["package-that-does-not-exist-xyz"]))
         self.assertFalse(e["data"]["sbom_floor_met"]); self.assertEqual(e["data"]["resolved_components"], 0)
 
@@ -172,7 +172,7 @@ class TestCouncilR3(unittest.TestCase):
 
     # reviewers 1 and 2, C — a feed-confirmed exploitation sets the clock; C8 — schema template feeds `cra notice`
     def test_cli_feed_confirmation_sets_exploited_and_template(self):
-        from cra_evidence.cli import main
+        from omega_cra_evol.cli import main
         oldk = feeds.cisa_kev_ids
         feeds.cisa_kev_ids = lambda timeout=60: {"ids": {"CVE-2021-44228"}, "count": 1, "error": None}
         led = os.path.join(self.d, "l.jsonl")

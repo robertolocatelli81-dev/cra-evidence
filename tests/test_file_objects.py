@@ -15,12 +15,12 @@ except ImportError:   # non-POSIX
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from cra_evidence.locker import CRAEvidenceLocker
-from cra_evidence.verify_pack import verify_pack
-from cra_evidence.vuln import VulnerabilityRecord
+from omega_cra_evol.locker import EvidenceLocker
+from omega_cra_evol.verify_pack import verify_pack
+from omega_cra_evol.vuln import VulnerabilityRecord
 
 try:
-    from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path
+    from omega_cra_evol.signing import keygen, load_key, sign_pack, sidecar_path
     import cryptography  # noqa: F401
     HAVE_CRYPTO = True
 except Exception:  # noqa: BLE001
@@ -39,7 +39,7 @@ def _limit():
 def cli(*args, env=None):
     """(exit, parsed JSON or None, stderr) of `cra verify`, in a child with a timeout and a memory bound."""
     try:
-        r = subprocess.run([sys.executable, "-m", "cra_evidence.cli", "verify", *args], capture_output=True, text=True, timeout=TIMEOUT,
+        r = subprocess.run([sys.executable, "-m", "omega_cra_evol.cli", "verify", *args], capture_output=True, text=True, timeout=TIMEOUT,
                            cwd=ROOT, env={**os.environ, "PYTHONPATH": ROOT, **(env or {})}, preexec_fn=_limit if resource else None)
     except subprocess.TimeoutExpired:
         return "BLOCKED", None, ""
@@ -67,7 +67,7 @@ def fail_detail(j, layer):
 class TestFileObjects(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
-        self.lk = CRAEvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
+        self.lk = EvidenceLocker(os.path.join(self.d, "l.jsonl"), "p", "1")
         self.lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2026-1", True, "2026-09-01T00:00:00Z"))
         self.pack = os.path.join(self.d, "p.json")
         self.lk.evidence_pack(self.pack)
@@ -190,11 +190,11 @@ class WeakEd25519Keys20260925(unittest.TestCase):
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography needed to sign the forged sidecar")
     def test_forged_sidecar_with_pinned_small_order_key_is_refused(self):
         import json as _json, tempfile as _tf
-        from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path, weak_ed25519_key
-        from cra_evidence.ledger import load_trust_store
+        from omega_cra_evol.signing import keygen, load_key, sign_pack, sidecar_path, weak_ed25519_key
+        from omega_cra_evol.ledger import load_trust_store
         with _tf.TemporaryDirectory() as d:
             keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
-            lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1", tip_key=key)
+            lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1", tip_key=key)
             lk.record_vulnerability(VulnerabilityRecord("p", "CVE-2026-1", True, "2026-09-01T00:00:00Z"))
             pack = os.path.join(d, "p.json"); lk.evidence_pack(pack); sign_pack(pack, key, "acme-ci")
             sp = sidecar_path(pack); sd = _json.load(open(sp))
@@ -205,7 +205,7 @@ class WeakEd25519Keys20260925(unittest.TestCase):
             self.assertTrue(weak_ed25519_key(ident)); self.assertTrue(weak_ed25519_key("ed" + "ff" * 30 + "7f"))
 
     def test_longterm_primitive_refuses_weak_key(self):
-        from cra_evidence.longterm import _ed_verify
+        from omega_cra_evol.longterm import _ed_verify
         self.assertFalse(_ed_verify("01" + "00" * 31, "01" + "00" * 63, b"any message"))
 
 

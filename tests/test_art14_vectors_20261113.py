@@ -36,8 +36,8 @@ def manifest():
 
 
 def run(v):
-    from cra_evidence.art14_attest import verify_envelope
-    from cra_evidence.ledger import load_trust_store
+    from omega_cra_evol.art14_attest import verify_envelope
+    from omega_cra_evol.ledger import load_trust_store
     with open(os.path.join(V, v["trust_store"]), encoding="utf-8") as f:
         ts = load_trust_store(f.read())
     return verify_envelope(os.path.join(V, v["envelope"]), ts, v["drop"] and os.path.join(V, v["drop"]),
@@ -45,7 +45,7 @@ def run(v):
 
 
 def cli(*argv):
-    from cra_evidence.cli import main
+    from omega_cra_evol.cli import main
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:

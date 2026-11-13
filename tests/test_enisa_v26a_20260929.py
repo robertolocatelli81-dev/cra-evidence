@@ -5,7 +5,7 @@ import contextlib, io, json, os, re, shutil, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import functools
-from cra_evidence.srp_notice import GLOSSARIES, SRPNotice as _SRPNotice, schema as _schema
+from omega_cra_evol.srp_notice import GLOSSARIES, SRPNotice as _SRPNotice, schema as _schema
 # Pinned to the glossary of 25/09/2026 (snapshot enisa_srp_glossary_20260929, rules srp-notice/1): since 12/11/2026 a notice
 # is built by default under the glossary of 21/10/2026; these tests keep proving the 0.4.0-0.6.0 rules, which a notice
 # recorded then is still checked under (tests/test_srp_glossary_16.py covers the new glossary).
@@ -106,7 +106,7 @@ class TestV26aInNotices(unittest.TestCase):
             SRPNotice("incident", "notification", {**N72, "notification_type": "Incident", "vulnerability_occurred_datetime_utc": "2026-08-24T09:15:00Z"})
 
     def test_cli_notice_exit_code_and_template(self):
-        from cra_evidence.cli import main
+        from omega_cra_evol.cli import main
         d = tempfile.mkdtemp()
         try:
             led = os.path.join(d, "l.jsonl"); drop = os.path.join(d, "drop")

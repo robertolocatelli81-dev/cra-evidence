@@ -2,7 +2,7 @@
 """Measure (13/11/2026): where does the canonical profile of this package (`canonical_bytes`: sorted keys, separators
 (",", ":"), ASCII-escaped, no floats, integers within ±(2^53−1)) give the same bytes as RFC 8785 (JCS), and where not?
 
-Why: the profile is cryptovalid's acceptance profile (cra_evidence/canonical.py), and RFC 8785 is the canonical form
+Why: the profile is cryptovalid's acceptance profile (omega_cra_evol/canonical.py), and RFC 8785 is the canonical form
 other formats sign. If a ledger line is ever handed to a JCS verifier, the answer decides whether the hash matches. Answer, measured below: the same bytes if and only if every
 character of every key and string is in U+0000..U+007E; U+007F and every non-ASCII character are escaped by the profile
 and raw UTF-8 in JCS, and beyond the BMP the member order differs too (code points against UTF-16 code units).
@@ -26,7 +26,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence.canonical import MAX_SAFE_INT, canonical_bytes
+from omega_cra_evol.canonical import MAX_SAFE_INT, canonical_bytes
 
 
 def jcs(obj) -> bytes:

@@ -15,9 +15,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-VP = importlib.import_module("cra_evidence.verify_pack")
-C = importlib.import_module("cra_evidence.canonical")
-L = importlib.import_module("cra_evidence.ledger")
+VP = importlib.import_module("omega_cra_evol.verify_pack")
+C = importlib.import_module("omega_cra_evol.canonical")
+L = importlib.import_module("omega_cra_evol.ledger")
 EX = os.path.join(ROOT, "examples", "self_evidence")
 
 

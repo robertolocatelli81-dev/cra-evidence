@@ -8,10 +8,10 @@ import contextlib, copy, http.server, io, json, os, shutil, subprocess, sys, tem
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-from cra_evidence.canonical import sha3_hex                                          # noqa: E402
-from cra_evidence.cli import main                                                    # noqa: E402
-from cra_evidence.notice_check import check_notice                                   # noqa: E402
-from cra_evidence.srp_notice import CURRENT_GLOSSARY, SRPNotice, template            # noqa: E402
+from omega_cra_evol.canonical import sha3_hex                                          # noqa: E402
+from omega_cra_evol.cli import main                                                    # noqa: E402
+from omega_cra_evol.notice_check import check_notice                                   # noqa: E402
+from omega_cra_evol.srp_notice import CURRENT_GLOSSARY, SRPNotice, template            # noqa: E402
 import srp_glossary                                                                  # noqa: E402
 
 FIX = os.path.join(ROOT, "tests", "fixtures", "srp_legacy_nemesis")
@@ -162,15 +162,15 @@ class TestLedgerNegatives(_Tmp, unittest.TestCase):
         self.assertEqual(rc, 0, out)
         with open(self.f, encoding="utf-8") as f:
             p = json.load(f)
-        from cra_evidence.locker import CRAEvidenceLocker
+        from omega_cra_evol.locker import EvidenceLocker
         n = SRPNotice(p["stream"], p["stage"], p["fields"], generated_utc=p["generated_utc"], notice_id=p["notice_id"])
-        CRAEvidenceLocker(self.led, "p", "1").record_notice(n, {"status": "not_written"})
+        EvidenceLocker(self.led, "p", "1").record_notice(n, {"status": "not_written"})
         self.assertFalse(check_notice(self.f, self.led)["verified"])
 
 
     def _forged_ledger(self, change, rehash=True):
         """A second, chain-valid ledger holding the same notice record with one change."""
-        from cra_evidence.ledger import Ledger
+        from omega_cra_evol.ledger import Ledger
         with open(self.led, encoding="utf-8") as f:
             rec = [json.loads(x)["data"] for x in f if '"cra_srp_notice"' in x][0]
         rec = dict(rec); change(rec)

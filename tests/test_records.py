@@ -1,10 +1,10 @@
 import json, os, shutil, sys, tempfile, unittest
 from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence.sbom import SBOMComponent, SBOMRecord, sbom_from_cyclonedx, sbom_from_installed
-from cra_evidence.vuln import VulnerabilityRecord
+from omega_cra_evol.sbom import SBOMComponent, SBOMRecord, sbom_from_cyclonedx, sbom_from_installed
+from omega_cra_evol.vuln import VulnerabilityRecord
 import functools
-from cra_evidence.srp_notice import SRPNotice as _SRPNotice, DryRunDrop, schema as _schema
+from omega_cra_evol.srp_notice import SRPNotice as _SRPNotice, DryRunDrop, schema as _schema
 # Pinned to the glossary of 25/09/2026 (snapshot enisa_srp_glossary_20260929, rules srp-notice/1): since 12/11/2026 a notice
 # is built by default under the glossary of 21/10/2026; these tests keep proving the 0.4.0-0.6.0 rules, which a notice
 # recorded then is still checked under (tests/test_srp_glossary_16.py covers the new glossary).

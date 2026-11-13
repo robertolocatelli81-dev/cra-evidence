@@ -4,7 +4,7 @@ KMS round-trip itself needs a real account (skipped here; exercised on the autho
 import os, sys, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence.kms import derive_signing_key, sigv4_headers, KMSSigner
+from omega_cra_evol.kms import derive_signing_key, sigv4_headers, KMSSigner
 
 
 class TestSigV4(unittest.TestCase):

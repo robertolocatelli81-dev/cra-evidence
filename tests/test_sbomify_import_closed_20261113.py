@@ -90,7 +90,7 @@ class _Tmp:
         return p
 
     def cli(self, *argv):
-        from cra_evidence.cli import main
+        from omega_cra_evol.cli import main
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
@@ -226,7 +226,7 @@ class TestRefusals(_Tmp, unittest.TestCase):
         self.assertIn("never guessed", self.refused(rp, [fp]))
         rp, fp = self.mutate_filing(("snapshot", "srp_fields", "pec"), "none")   # not exactly one of the readings
         self.refused(rp, [fp])
-        from cra_evidence.srp_notice import PEC_OPTIONS
+        from omega_cra_evol.srp_notice import PEC_OPTIONS
         rp, fp = self.mutate_filing(("snapshot", "srp_fields", "pec"), PEC_OPTIONS["imminent_high_risk"])
         rc, out, err, led, drop = self.imp(rp, [fp], tag="pec")
         self.assertEqual(rc, 0, out + err)
@@ -304,15 +304,15 @@ class TestRefusals(_Tmp, unittest.TestCase):
         rc, out, err, *_ = self.imp(REP_V, V_FILINGS[2:], tag="once")
         self.assertEqual(rc, 0, out + err)
         self.assertIn("already_recorded", json.loads(out)["event"])
-        from cra_evidence.ledger import Ledger
+        from omega_cra_evol.ledger import Ledger
         kinds = [e["data"]["kind"] for e in Ledger(led).entries()]
         self.assertEqual(kinds.count("cra_vuln"), 1); self.assertEqual(kinds.count("cra_srp_notice"), 6)
 
 
 class TestWriteFailureLeavesNothing(_Tmp, unittest.TestCase):
     def test_a_drop_file_that_cannot_be_written_undoes_the_import(self):
-        from cra_evidence.outputs import OutputNotWritten
-        from cra_evidence.srp_notice import DryRunDrop
+        from omega_cra_evol.outputs import OutputNotWritten
+        from omega_cra_evol.srp_notice import DryRunDrop
         real, calls = DryRunDrop.prepare, []
 
         def flaky(self_, notice):
@@ -335,7 +335,7 @@ class TestCheckNoticeV3(_Tmp, unittest.TestCase):
         return led, [os.path.join(drop, n["drop_file"]) for n in json.loads(out)["notices"]]
 
     def check(self, drop, led=None):
-        from cra_evidence.notice_check import check_notice
+        from omega_cra_evol.notice_check import check_notice
         return check_notice(drop, led)
 
     def test_every_imported_drop_verifies(self):
@@ -353,7 +353,7 @@ class TestCheckNoticeV3(_Tmp, unittest.TestCase):
                 self.assertEqual(rc, 0)
 
     def rewrite(self, path, fn, rehash=True):
-        from cra_evidence.srp_notice import SourcedSRPNotice
+        from omega_cra_evol.srp_notice import SourcedSRPNotice
         p = load(path)
         fn(p)
         if rehash:
@@ -408,14 +408,14 @@ class TestCheckNoticeV3(_Tmp, unittest.TestCase):
         with open(kept, "wb") as f:
             f.write(raw)
         self.assertTrue(self.check(d, led)["verified"])
-        from cra_evidence import sbomify_import as si
+        from omega_cra_evol import sbomify_import as si
         table = dict(si.MAPPING); table[("both", "attack_vector")] = "component_name"   # a mapping that places it elsewhere
         with mock.patch.object(si, "MAPPING", table):
             r = self.check(d, led)
         self.assertFalse(r["verified"]); self.assertIn("re-derived", " ".join(r["reasons"]))
 
     def test_rule9(self):
-        from cra_evidence.srp_notice import SRPNotice
+        from omega_cra_evol.srp_notice import SRPNotice
         n = SRPNotice("vulnerability", "intermediate", {"attack_vector": "x", "cve_id": "CVE-2099-0001"})
         self.assertIsNone(n.complete()); self.assertEqual(n.missing(), []); self.assertIsNone(n.deadline_utc())
         self.assertEqual(n.payload()["schema"], "cra-srp/2")
@@ -440,7 +440,7 @@ class TestCheckNoticeV3(_Tmp, unittest.TestCase):
 
 class TestAttestRefusals(_Tmp, unittest.TestCase):
     def test_attest_refuses_a_cra_srp_2_drop_and_an_unbound_drop(self):
-        from cra_evidence.art14_attest import AttestRefused, build_statement
+        from omega_cra_evol.art14_attest import AttestRefused, build_statement
         legacy = os.path.join(ROOT, "tests", "fixtures", "srp_legacy_nemesis", "vulnerability_early_warning_8d0a9c38-4596-4396-993e-3629d585eb50.json")
         with self.assertRaises(AttestRefused) as cm:
             build_statement(legacy, os.path.join(self.d, "none.jsonl"), "p", "1")
@@ -456,7 +456,7 @@ class TestAttestRefusals(_Tmp, unittest.TestCase):
         self.assertIsNotNone(st["predicate"]["deadlineAt"])
 
     def test_rule9_keeps_the_future_awareness_refusal(self):
-        from cra_evidence.srp_notice import SRPNotice
+        from omega_cra_evol.srp_notice import SRPNotice
         for stage in ("intermediate", "users_informed"):
             with self.assertRaises(ValueError) as cm:
                 SRPNotice("vulnerability", stage, {"awareness_datetime_utc": "2099-01-01T00:00:00Z"})
@@ -472,8 +472,8 @@ class TestAttestRefusals(_Tmp, unittest.TestCase):
         return led, os.path.join(self.d, "nd", json.loads(out)["drop_file"])
 
     def test_native_statement(self):
-        from cra_evidence import __version__
-        from cra_evidence.art14_attest import AttestRefused, build_statement
+        from omega_cra_evol import __version__
+        from omega_cra_evol.art14_attest import AttestRefused, build_statement
         led, d = self.native()
         with open(d, "rb") as f:
             sha = hashlib.sha256(f.read()).hexdigest()
@@ -501,9 +501,9 @@ class TestAttestRefusals(_Tmp, unittest.TestCase):
         self.assertEqual(rc, 2)
 
     def test_product_not_evaluated_only_when_the_record_lacks_it(self):
-        from cra_evidence.art14_attest import AttestRefused, build_statement, check_statement
-        from cra_evidence.canonical import sha3_hex
-        from cra_evidence.ledger import Ledger
+        from omega_cra_evol.art14_attest import AttestRefused, build_statement, check_statement
+        from omega_cra_evol.canonical import sha3_hex
+        from omega_cra_evol.ledger import Ledger
         led, d = self.native()
         old = os.path.join(self.d, "old.jsonl")              # the same records as cra-evidence 0.7.1 wrote them: no product
         for e in Ledger(led).entries():

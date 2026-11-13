@@ -34,7 +34,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXAMPLE = os.path.join(ROOT, "examples", "self_evidence")
 SYFT = os.path.join(ROOT, "tests", "fixtures", "real_tools", "syft-1.52.0_cyclonedx-1.7.json")
-PY = [sys.executable, "-B", "-m", "cra_evidence.cli"]
+PY = [sys.executable, "-B", "-m", "omega_cra_evol.cli"]
 EX_IOERR = 74
 CAN_RUN = os.name == "posix" and os.path.exists("/dev/full") and shutil.which("bash") is not None and os.path.exists("/proc/self/stat")
 HAVE_SIGN = True
@@ -350,7 +350,7 @@ class UsageAndRefusalsWithStderrLost(unittest.TestCase):
         for flag in ("--version", "--help"):
             rc, out, err = run(PY + [flag], "file")
             self.assertEqual(rc, 0, err)
-            self.assertTrue(out.startswith(b"cra-evidence " if flag == "--version" else b"usage: cra "), out[:40])
+            self.assertTrue(out.startswith(b"omega-cra-evol " if flag == "--version" else b"usage: cra "), out[:40])
             for mode in ("devfull", "pipe_closed", "closed"):
                 rc, _, err = run(PY + [flag], mode)
                 self.assertEqual(rc, EX_IOERR, f"{flag} {mode}: {err!r}")
@@ -366,7 +366,7 @@ class InProcess(unittest.TestCase):
 
     def _main(self, stream, argv):
         sys.path.insert(0, ROOT)
-        from cra_evidence.cli import main
+        from omega_cra_evol.cli import main
         saved = sys.stdout
         sys.stdout = stream
         try:
@@ -564,14 +564,14 @@ class PromisedFilesAndLedger(unittest.TestCase):
         self.assertEqual(p.returncode, EX_IOERR)
         self.assertEqual(self.vuln("CVE-2026-0002").returncode, 0)
         sys.path.insert(0, ROOT)
-        from cra_evidence.ledger import Ledger
+        from omega_cra_evol.ledger import Ledger
         v = Ledger(self.ledger).verify()
         self.assertTrue(v["chain_ok"])
         self.assertEqual(v["entries"], 2)
 
 
 class WriteTmp(unittest.TestCase):
-    """cra_evidence.outputs.write_tmp itself: every byte or OutputNotWritten with no temporary left, and never through a
+    """omega_cra_evol.outputs.write_tmp itself: every byte or OutputNotWritten with no temporary left, and never through a
     name that already exists (O_EXCL), even when it is the very name the call drew"""
 
     def setUp(self):
@@ -580,7 +580,7 @@ class WriteTmp(unittest.TestCase):
 
     @unittest.skipUnless(CAN_RUN, "needs POSIX resource limits")
     def test_short_write_under_a_file_size_limit(self):
-        code = ("import resource, sys; sys.path.insert(0, sys.argv[1]); from cra_evidence import outputs\n"
+        code = ("import resource, sys; sys.path.insert(0, sys.argv[1]); from omega_cra_evol import outputs\n"
                 "resource.setrlimit(resource.RLIMIT_FSIZE, (100, 100))\n"
                 "try:\n    outputs.write_tmp(sys.argv[2], 'x' * 1000)\nexcept outputs.OutputNotWritten as e:\n    print('refused', e)\n"
                 "else:\n    print('written')\n")
@@ -591,7 +591,7 @@ class WriteTmp(unittest.TestCase):
 
     def test_existing_name_is_never_opened(self):
         sys.path.insert(0, ROOT)
-        from cra_evidence import outputs
+        from omega_cra_evol import outputs
         victim = os.path.join(self.W, "victim")
         with open(victim, "w") as f:
             f.write("untouched")
@@ -611,7 +611,7 @@ class WriteTmp(unittest.TestCase):
     def test_existing_regular_file_or_fifo_at_the_drawn_name(self):
         """O_EXCL itself, not only O_NOFOLLOW: a regular file at the very name the call drew is refused, not truncated,
         and a FIFO there is refused at once, never waited on (child process: a regression would hang, not pass)"""
-        code = ("import os, sys; sys.path.insert(0, sys.argv[1]); from cra_evidence import outputs\n"
+        code = ("import os, sys; sys.path.insert(0, sys.argv[1]); from omega_cra_evol import outputs\n"
                 "outputs.secrets.token_hex = lambda n: '0' * (2 * n)\n"
                 "try:\n    outputs.write_tmp(sys.argv[2], 'pack')\nexcept outputs.OutputNotWritten as e:\n    print('refused')\n"
                 "else:\n    print('written')\n")
@@ -637,7 +637,7 @@ class WriteTmp(unittest.TestCase):
         and the temporary is removed"""
         import errno
         sys.path.insert(0, ROOT)
-        from cra_evidence import outputs
+        from omega_cra_evol import outputs
 
         class FailingClose:
             def __getattr__(self, name):
@@ -659,14 +659,14 @@ class WriteTmp(unittest.TestCase):
 
 FEED_REFUSAL = r"""
 import sys
-from cra_evidence import feeds
+from omega_cra_evol import feeds
 mode, ledger = sys.argv[1], sys.argv[2]
 def get(url, timeout):
     if mode == "down":
         raise OSError("no network (test)")
     return {"vulnerabilities": [{"cveID": "CVE-2021-44228"}]}
 feeds._get_json = get
-from cra_evidence.cli import main
+from omega_cra_evol.cli import main
 sys.exit(main(["vuln", "--ledger", ledger, "--product", "p", "--version", "1", "--id", "CVE-2026-0001",
                "--aware", "2026-10-12T00:00:00Z", "--source", "cisa_kev"]))
 """

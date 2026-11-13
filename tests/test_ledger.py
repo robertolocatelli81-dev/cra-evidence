@@ -1,8 +1,8 @@
 import json, os, shutil, sys, tempfile, unittest
 from multiprocessing import Process
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence.ledger import Ledger, GENESIS
-from cra_evidence.canonical import sha256_hex
+from omega_cra_evol.ledger import Ledger, GENESIS
+from omega_cra_evol.canonical import sha256_hex
 
 
 def _worker(path, n, tag):
@@ -65,16 +65,16 @@ class TestLedger(unittest.TestCase):
 
 class TestDepthBound(unittest.TestCase):
     def test_reference_parses_512_and_refuses_513(self):
-        from cra_evidence.ledger import parse_line
+        from omega_cra_evol.ledger import parse_line
         parse_line('{"a":' + "[" * 511 + "]" * 511 + "}")            # depth 512: inside the profile, must PARSE (round 5: it stopped at 332)
         with self.assertRaises(ValueError):
             parse_line('{"a":' + "[" * 512 + "]" * 512 + "}")        # depth 513: refused by a linear pre-scan, never RecursionError
 
     def test_producer_writes_only_what_every_reader_reads(self):
         import tempfile
-        from cra_evidence.locker import CRAEvidenceLocker
-        from cra_evidence.vuln import VulnerabilityRecord
-        d = tempfile.mkdtemp(); lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
+        from omega_cra_evol.locker import EvidenceLocker
+        from omega_cra_evol.vuln import VulnerabilityRecord
+        d = tempfile.mkdtemp(); lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "p", "1")
         def nest(n):
             v = {"x": 1}
             for _ in range(n):
@@ -90,7 +90,7 @@ class TestDepthBound(unittest.TestCase):
 
 class TestLineCap(unittest.TestCase):
     def test_a_record_above_64_mib_is_refused_before_writing(self):
-        from cra_evidence.ledger import MAX_LINE_BYTES
+        from omega_cra_evol.ledger import MAX_LINE_BYTES
         import tempfile
         d = tempfile.mkdtemp(); p = os.path.join(d, "l.jsonl")
         led = Ledger(p)
