@@ -186,16 +186,23 @@ class CRAEvidenceLocker:
                              "attachments": att})
 
     def record_notice(self, notice: SRPNotice, drop_result: Optional[Dict[str, Any]] = None,
-                      divergence_reason: Optional[str] = None) -> Dict[str, Any]:
+                      divergence_reason: Optional[str] = None, imported: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """imported: for a notice of cra-srp/3 taken from another tool, what identifies its source in the record
+        (`cra import sbomify`: the tool, the sha256 of the filing and report documents kept in <ledger>.sources/, the
+        source's own ids). Absent for a notice built here: the record keeps the keys it always had."""
         bound_to = self.bind_notice(notice, divergence_reason)
-        return self._append({"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
-                             "glossary_version": notice.glossary_version,
-                             "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
-                             "complete": notice.complete(), "missing_required": notice.missing(),
-                             "deadline_utc": notice.deadline_utc(), "drop": drop_result or {"status": "not_written"},
-                             "bound_vuln_records": bound_to, "awareness_divergence_reason": divergence_reason})
+        rec = {"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
+               "glossary_version": notice.glossary_version,
+               "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
+               "complete": notice.complete(), "missing_required": notice.missing(),
+               "deadline_utc": notice.deadline_utc(), "drop": drop_result or {"status": "not_written"},
+               "bound_vuln_records": bound_to, "awareness_divergence_reason": divergence_reason}
+        if imported is not None:
+            rec["imported"] = imported
+        return self._append(rec)
 
-    def bind_notice(self, notice: SRPNotice, divergence_reason: Optional[str] = None) -> List[Any]:
+    def bind_notice(self, notice: SRPNotice, divergence_reason: Optional[str] = None,
+                    pending: Tuple[Dict[str, Any], ...] = ()) -> List[Any]:
         """The vulnerability records the notice is bound to (called by `cra notice` BEFORE the drop file is written, so a
         refused binding leaves no file behind). The notice's awareness instant is bound to the vulnerability record already in the chain for the same id
         (cve_id / euvd_id ↔ vuln_id): a different value is refused unless `divergence_reason` declares why — the legal
@@ -206,7 +213,9 @@ class CRAEvidenceLocker:
         ids = {str(notice.case_value(k)).strip().upper() for k in ("cve_id", "euvd_id") if notice.case_value(k)}
         latest: Dict[str, Dict[str, Any]] = {}     # the LAST record per vuln_id is the current legal state
         if ids:
-            for e in self.ledger.entries():
+            # pending: cra_vuln records about to be appended after the ledger's (an import checks every binding before
+            # it writes anything)
+            for e in list(self.ledger.entries()) + [{"data": p} for p in pending]:
                 d = e.get("data") if isinstance(e, dict) else None
                 if isinstance(d, dict) and d.get("kind") == "cra_vuln" and d.get("product_id") == self.product_id:
                     vid = str(d.get("vuln_id", "")).strip().upper()

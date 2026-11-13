@@ -29,8 +29,15 @@ from .canonical import sha3_hex
 from .outputs import OutputNotWritten, write_file
 from .vuln import parse_utc, EARLY_WARNING_HOURS, NOTIFICATION_HOURS, FINAL_REPORT_DAYS_AFTER_FIX, CLOCK_SKEW
 
-STAGES = ("early_warning", "notification", "final_report")
+STAGES = ("early_warning", "notification", "final_report")   # the glossary's three columns
+# Art. 14(6) (intermediate report on the coordinating CSIRT's request) and 14(8) (impacted users informed): no glossary
+# column. Rule 9 of srp-notice/2 (spec/SRP_FIELDS.md, amendment of 13/11/2026): judged by rules 1, 4 and 5 only,
+# complete null, missing_required [], deadline null; srp-notice/2 glossaries only.
+RULE9_STAGES = ("intermediate", "users_informed")
+ALL_STAGES = STAGES + RULE9_STAGES
 STREAMS = ("vulnerability", "incident")
+SOURCE_TOOLS = ("cra-evidence", "sbomify")
+CONVERSIONS = ("product_type", "member_states", "utc_offset", "pec_option")   # the closed conversions of the sbomify import
 
 # ── glossary 20260929 (page "Version 1.3. Last update: 25 September 2026"): the tables of cra-evidence 0.4.0 – 0.6.0,
 # kept verbatim. field -> {stage: "R" required | "O" optional | "A" required-if-available | "C" carried | "-" not at this stage}
@@ -233,12 +240,21 @@ class SRPNotice:
     notice_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     previous_fields: Optional[Dict[str, Any]] = None   # the previous stage's payload: "C" fields are carried from it
     glossary_version: str = CURRENT_GLOSSARY
+    # cra-srp/3 (rule 10) adds `source` and `filing`: they live in the subclass SourcedSRPNotice, so a notice of
+    # cra-srp/2 keeps exactly its fields and its hash.
+    source = None
+    filing = None
 
     def __post_init__(self):
-        if self.stream not in STREAMS or self.stage not in STAGES:
+        if self.stream not in STREAMS or self.stage not in ALL_STAGES:
             raise ValueError("unknown stream/stage")
         g = glossary(self.glossary_version)
         v2 = g["rules"] == "srp-notice/2"
+        r9 = self.stage in RULE9_STAGES
+        if r9 and not v2:
+            raise ValueError(f"stage {self.stage} exists under srp-notice/2 only (rule 9), not under {self.glossary_version}")
+        if self.source is None and self.filing is not None:
+            raise ValueError("filing without source: a cra-srp/3 notice carries both keys")
         if not isinstance(self.fields, dict):
             raise ValueError("fields must be a JSON object")
         if self.previous_fields is not None and not isinstance(self.previous_fields, dict):
@@ -252,7 +268,9 @@ class SRPNotice:
         for k in self.fields:
             if k not in sch:
                 raise ValueError(f"field not in the SRP schema for stream {self.stream} under {self.glossary_version}: {k}")
-        if self.previous_fields:
+        if self.source is not None:
+            check_source_filing(self.source, self.filing, self.stream, self.glossary_version)
+        if self.previous_fields and not r9:
             # "By default copied from previous step[, or updated]": copy what this payload does not carry. N/A is never copied.
             for k, spec in sch.items():
                 if spec["stages"][self.stage] == "C" and not _present(self.fields.get(k)) and _present(self.previous_fields.get(k)):
@@ -268,11 +286,13 @@ class SRPNotice:
                     raise ValueError(f"{k}: JSON type {type(v).__name__} not allowed for format {spec['format']}")
                 if not _present(v):
                     continue
+                if spec.get("entered_by") == "CSIRT":
+                    raise ValueError(f"{k} (row {spec['glossary_row']}): entered by the designated CSIRT, not by the manufacturer's representative")
+                if r9:                     # rule 9: no column, so no "not at this stage" and no condition
+                    continue
                 if spec["stages"][self.stage] == "-":
                     raise ValueError(f"{k} (row {spec['glossary_row']}): not a field of stage {self.stage} under {self.glossary_version} "
                                      f"(glossary: N/A); a value entered at an earlier stage goes in previous_fields")
-                if spec.get("entered_by") == "CSIRT":
-                    raise ValueError(f"{k} (row {spec['glossary_row']}): entered by the designated CSIRT, not by the manufacturer's representative")
                 need = spec.get("when", {}).get(self.stage)
                 if need:
                     have = _present(self.fields.get(need)) or (need == "user_measures" and _present((self.previous_fields or {}).get(need)))
@@ -280,7 +300,7 @@ class SRPNotice:
                         raise ValueError(f"{k} (row {spec['glossary_row']}): optional at stage {self.stage} only when {need} "
                                          f"(row {sch[need]['glossary_row']}) is present")
         aw_spec = sch["awareness_datetime_utc"]
-        if aw_spec["stages"][self.stage] == "R" and not _present(self.fields.get("awareness_datetime_utc")):
+        if not r9 and aw_spec["stages"][self.stage] == "R" and not _present(self.fields.get("awareness_datetime_utc")):
             raise ValueError(f"awareness_datetime_utc is required at stage {self.stage}")
         aw = self.case_value("awareness_datetime_utc")
         if _present(aw) and parse_utc(str(aw)) > datetime.now(timezone.utc) + CLOCK_SKEW:
@@ -314,13 +334,18 @@ class SRPNotice:
         from the previous step is missing here unless this payload carries it (pass previous_fields), and only if it
         was required at an earlier stage. Required-if-available ("A") is never counted as missing: the manufacturer
         decides; the payload records the choice."""
+        if self.stage in RULE9_STAGES:
+            return []                  # rule 9: none is required
         earlier = STAGES[:STAGES.index(self.stage)]
         def needed(spec):
             code = spec["stages"].get(self.stage)
             return code == "R" or (code == "C" and any(spec["stages"].get(s0) == "R" for s0 in earlier))
         return [k for k, spec in schema(self.stream, self.glossary_version).items() if needed(spec) and not _present(self.fields.get(k))]
 
-    def complete(self) -> bool:
+    def complete(self) -> Optional[bool]:
+        """None at the stages without a glossary column (rule 9): not evaluated, never true."""
+        if self.stage in RULE9_STAGES:
+            return None
         return not self.missing()
 
     def deadline_utc(self) -> Optional[str]:
@@ -328,6 +353,8 @@ class SRPNotice:
         SUBMISSION of the incident notification (Art. 14(4)(c)) — that instant lives in the vulnerability record
         (`notification_sent_utc`), not in this payload. At 72 h the awareness instant comes from previous_fields when
         this payload does not carry it (glossary 20261112: it is an early-warning field only)."""
+        if self.stage in RULE9_STAGES:
+            return None                # rule 9
         aw0 = self.case_value("awareness_datetime_utc")
         if not _present(aw0):
             return None
@@ -347,9 +374,17 @@ class SRPNotice:
         body = asdict(self)
         if getattr(self, "_unversioned", False):   # a drop file of cra-srp/1: its hash was computed before this field existed
             body.pop("glossary_version")
-        return sha3_hex(body)
+        return sha3_hex(body)                      # SourcedSRPNotice: covers source and filing too (rule 10)
 
     def payload(self) -> Dict[str, Any]:
+        p = self._payload()
+        if self.source is not None:            # rule 10: cra-srp/3 = the keys of cra-srp/2 plus source and filing
+            p["schema"] = "cra-srp/3"
+            p["source"] = json.loads(json.dumps(self.source))
+            p["filing"] = dict(self.filing) if self.filing is not None else None
+        return p
+
+    def _payload(self) -> Dict[str, Any]:
         return {"schema": "cra-srp/2", "glossary_version": self.glossary_version, "glossary_source": glossary(self.glossary_version)["source"],
                 "stream": self.stream, "stage": self.stage,
                 "notice_id": self.notice_id, "generated_utc": self.generated_utc, "deadline_utc": self.deadline_utc(),
@@ -358,6 +393,100 @@ class SRPNotice:
                 "notice_sha3": self.canonical_hash(),
                 "submission": "NOT submitted by this tool: the SRP is a human web portal (EU Login + MFA, Assigned "
                               "Representative); this payload is the evidence of what existed and when"}
+
+
+@dataclass(frozen=True)
+class SourcedSRPNotice(SRPNotice):
+    """A notice of cra-srp/3 (rule 10): `source` = the tool that recorded it, its version, the sha256 of the exact source
+    document, the glossary rows the source does not carry, and where the pairs that are not this stage's fields went
+    (later_stage, readings) with the normalisations applied; `filing` = null or what that tool recorded about the
+    filing (a declaration, not a proof of submission). notice_sha3 covers both."""
+    source: Dict[str, Any] = field(default_factory=dict)
+    filing: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        if not isinstance(self.source, dict) or not self.source:
+            raise ValueError("a cra-srp/3 notice needs its source block")
+        super().__post_init__()
+
+
+_SOURCE_KEYS = frozenset({"tool", "tool_version", "document_sha256", "absent_at_source", "later_stage", "readings", "normalisations"})
+_FILING_KEYS = frozenset({"declared_by", "srp_reference", "filed_at", "filed_by"})
+_LATER_KEYS = frozenset({"sbomify_id", "field", "row", "value", "stage"})
+_READING_KEYS = frozenset({"sbomify_id", "field", "row", "value", "reading"})
+_NORM_KEYS = frozenset({"sbomify_id", "from", "to", "conversion"})
+
+
+def _closed(obj: Any, keys: frozenset, where: str) -> None:
+    if not isinstance(obj, dict):
+        raise ValueError(f"{where}: not a JSON object")
+    unknown, absent = sorted(set(obj) - keys), sorted(keys - set(obj))
+    if unknown:
+        raise ValueError(f"{where}: unknown keys {unknown}")
+    if absent:
+        raise ValueError(f"{where}: missing keys {absent}")
+
+
+def _str(v: Any, where: str, nonempty: bool = False) -> None:
+    if type(v) is not str or (nonempty and not v):
+        raise ValueError(f"{where}: must be a {'non-empty ' if nonempty else ''}string")
+
+
+def check_source_filing(source: Any, filing: Any, stream: str, glossary_version: str) -> None:
+    """The `source` and `filing` blocks of a cra-srp/3 notice (rule 10), closed at every level; ValueError with the reason."""
+    import re as _re
+    sch = schema(stream, glossary_version)
+    rows = {spec["glossary_row"]: k for k, spec in sch.items()}
+    _closed(source, _SOURCE_KEYS, "source")
+    if source["tool"] not in SOURCE_TOOLS:
+        raise ValueError(f"source.tool {source['tool']!r}: one of {list(SOURCE_TOOLS)}")
+    _str(source["tool_version"], "source.tool_version", nonempty=True)
+    if type(source["document_sha256"]) is not str or not _re.fullmatch(r"[0-9a-f]{64}", source["document_sha256"]):
+        raise ValueError("source.document_sha256: 64 lower-case hex characters")
+    for name in ("absent_at_source", "later_stage", "readings", "normalisations"):
+        if type(source[name]) is not list:
+            raise ValueError(f"source.{name}: must be a list")
+    seen = set()
+    for r in source["absent_at_source"]:
+        if type(r) is not str or r not in rows or r in seen:
+            raise ValueError(f"source.absent_at_source: {r!r} is not a (single) glossary row of stream {stream} under {glossary_version}")
+        seen.add(r)
+    for i, e in enumerate(source["later_stage"]):
+        w = f"source.later_stage[{i}]"
+        _closed(e, _LATER_KEYS, w)
+        _str(e["sbomify_id"], w + ".sbomify_id", True)
+        if type(e["field"]) is not str or e["field"] not in sch or sch[e["field"]]["glossary_row"] != e["row"]:
+            raise ValueError(f"{w}: field/row not a field of stream {stream} under {glossary_version}")
+        if e["stage"] not in STAGES or sch[e["field"]]["stages"][e["stage"]] == "-":
+            raise ValueError(f"{w}: stage {e['stage']!r} does not admit {e['field']}")
+        if not _type_ok(sch[e["field"]], e["value"]) or not _present(e["value"]):
+            raise ValueError(f"{w}: value of the wrong JSON type or empty")
+    for i, e in enumerate(source["readings"]):
+        w = f"source.readings[{i}]"
+        _closed(e, _READING_KEYS, w)
+        _str(e["sbomify_id"], w + ".sbomify_id", True)
+        if type(e["field"]) is not str or e["field"] not in sch or sch[e["field"]]["glossary_row"] != e["row"]:
+            raise ValueError(f"{w}: field/row not a field of stream {stream} under {glossary_version}")
+        _str(e["value"], w + ".value")
+        _str(e["reading"], w + ".reading", True)
+    for i, e in enumerate(source["normalisations"]):
+        w = f"source.normalisations[{i}]"
+        _closed(e, _NORM_KEYS, w)
+        _str(e["sbomify_id"], w + ".sbomify_id", True)
+        _str(e["from"], w + ".from")
+        if e["conversion"] not in CONVERSIONS:
+            raise ValueError(f"{w}: conversion {e['conversion']!r} not one of {list(CONVERSIONS)}")
+        to = e["to"]
+        if not (type(to) is str or (type(to) is list and all(type(x) is str for x in to))):
+            raise ValueError(f"{w}.to: a string or a list of strings")
+    if filing is None:
+        return
+    _closed(filing, _FILING_KEYS, "filing")
+    if filing["declared_by"] != source["tool"]:
+        raise ValueError("filing.declared_by must equal source.tool")
+    for k in ("srp_reference", "filed_at", "filed_by"):
+        _str(filing[k], "filing." + k)
+    parse_utc(filing["filed_at"])
 
 
 def template(stream: str, stage: str, glossary_version: str = CURRENT_GLOSSARY) -> Dict[str, Any]:

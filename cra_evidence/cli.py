@@ -275,6 +275,23 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--divergence-reason", help="why this notice's awareness differs from the recorded vulnerability event")
     s = sub.add_parser("check-notice", help="re-check a notice drop file under the glossary it records (and, with --ledger, against its ledger record)")
     s.add_argument("drop", help="the drop file written by `cra notice`"); s.add_argument("--ledger", help="the ledger the notice was recorded in")
+    s = sub.add_parser("import", help="import Art. 14 notices recorded by another tool (sbomify) as cra-srp/3 notices")
+    isub = s.add_subparsers(dest="source_tool", required=True)
+    s = isub.add_parser("sbomify", allow_abbrev=False, help="import a report of sbomify's CRA reporting API and its filings",
+                        description="Records the vulnerability or incident event once per report, then one notice per filing in "
+                        "filed_at order, each written as a cra-srp/3 drop file; keeps the report and filing documents byte for "
+                        "byte in <ledger>.sources/<sha256>.json and in the drop folder (sbomify_<sha256>.json), their sha256 "
+                        "recorded. Refused with exit 1, nothing written, on: a key or JSON type outside the documents' closed "
+                        "shape, a duplicate key, a pair of a snapshot that the mapping does not place, a value that does not "
+                        "convert (product type, Member State code, PEC text, a date without offset), a filing recorded before "
+                        "2026-10-21T00:00:00Z, a filing its report does not list (or lists differently), a filing already imported. "
+                        "Exit 0 once imported (an incomplete notice is recorded as incomplete, see `complete`); spec/SRP_FIELDS.md, "
+                        "\"Importing from sbomify\". The filing data are sbomify's declaration, not a proof of submission.")
+    common(s)
+    s.add_argument("--report", required=True, help="the JSON of GET /api/v1/compliance/cra-reports/{id}, as received")
+    s.add_argument("--filing", required=True, action="append", help="the JSON of GET .../cra-reports/{id}/filings/{filing_id}, as received (repeat for each filing)")
+    s.add_argument("--drop-dir", required=True, help="drop folder for the cra-srp/3 files")
+    s.add_argument("--source-version", required=True, help="the sbomify version or commit the documents come from (recorded as declared)")
     s = sub.add_parser("schema", help="print the SRP field schema for a stream, or a fillable template for a stage"); s.add_argument("--stream", default="vulnerability", choices=["vulnerability", "incident"])
     s.add_argument("--template", choices=["early_warning", "notification", "final_report"], help="print {field: \"\"} for the fields of this stage (R/C/O/A), ready for `cra notice --fields`")
     s.add_argument("--glossary", default=CURRENT_GLOSSARY, choices=sorted(GLOSSARIES), help="ENISA glossary snapshot (default: the newest)")
@@ -367,6 +384,14 @@ def _main(argv: List[str] = None) -> int:
     if a.cmd == "check-notice":
         r = check_notice(a.drop, a.ledger); _p(r)
         return 0 if r["verified"] else 1
+    if a.cmd == "import":
+        from .sbomify_import import ImportRefused, run_import
+        lk = _locker(a)
+        try:
+            r = run_import(a.report, a.filing, lk, a.drop_dir, a.source_version)
+        except ImportRefused as e:
+            _p({"imported": False, "tool": a.source_tool, "reasons": [str(e)], "written": "nothing"}); return 1
+        _p(r); return 0
     if a.cmd == "pack":
         lk = _locker(a); pk = lk.evidence_pack(a.out); _p({"pack": a.out, "pack_sha3": pk["pack_sha3"], "verification": pk["verification"]})
         return 0 if pk["verification"]["chain_ok"] else 1
