@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """13/11/2026, 0.10.0: the project is omega-cra-evol. The distribution, the package, the two commands and the version
 string carry the new name everywhere they are compared (pyproject, Dockerfile, container workflow, action); the
-earlier import name `cra_evidence`, `python -m cra_evidence.cli` and the class name `CRAEvidenceLocker` keep working
+earlier import name `cra_evidence` and `python -m cra_evidence.cli` keep working
 with a DeprecationWarning until a release on or after 2027-03-31, and every name reached through them is the SAME
 object as under the new name (one implementation). Real processes, so that this run's import state hides nothing.
 Positive control: with warnings as errors the earlier names fail and the new ones do not."""
@@ -77,13 +77,13 @@ import {OLD}, {NEW}
 subs = {SUBMODULES!r}
 for s in subs:
     assert importlib.import_module("{OLD}." + s) is importlib.import_module("{NEW}." + s), s
-from {OLD} import CRAEvidenceLocker, EvidenceLocker, SBOMRecord, SRPNotice, VulnerabilityRecord, verify_pack, __version__
-from {OLD}.locker import CRAEvidenceLocker as viaLocker, PACK_KIND
+from {OLD} import EvidenceLocker, SBOMRecord, SRPNotice, VulnerabilityRecord, verify_pack, __version__
+from {OLD}.locker import EvidenceLocker as viaLocker, PACK_KIND
 from {OLD}.ledger import Ledger
 from {OLD}.cli import main
 import {OLD}.cli as c, {OLD}.signing as sg
-assert CRAEvidenceLocker is viaLocker is EvidenceLocker is {NEW}.EvidenceLocker
-assert CRAEvidenceLocker.__name__ == "EvidenceLocker"
+assert viaLocker is EvidenceLocker is {NEW}.EvidenceLocker
+assert EvidenceLocker.__name__ == "EvidenceLocker"
 assert (SBOMRecord, SRPNotice, VulnerabilityRecord) == ({NEW}.SBOMRecord, {NEW}.SRPNotice, {NEW}.VulnerabilityRecord)
 assert callable(verify_pack) and verify_pack is {NEW}.verify_pack and {OLD}.verify_pack is {NEW}.verify_pack
 assert __version__ == {NEW}.__version__ and Ledger is {NEW}.ledger.Ledger and main is {NEW}.cli.main
@@ -108,19 +108,19 @@ print(len(subs), "ok")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn("DeprecationWarning", r.stderr, imp)
 
-    def test_the_earlier_class_name_warns_from_each_place(self):
-        for imp in (f"from {NEW} import CRAEvidenceLocker", f"from {NEW}.locker import CRAEvidenceLocker",
-                    f"import warnings; warnings.simplefilter('ignore'); import {OLD}; warnings.resetwarnings(); "
-                    f"warnings.simplefilter('default'); from {OLD} import CRAEvidenceLocker"):
-            r = py("-c", imp + f"; from {NEW} import EvidenceLocker; assert CRAEvidenceLocker is EvidenceLocker")
-            self.assertEqual(r.returncode, 0, (imp, r.stderr))
-            self.assertIn("DeprecationWarning: CRAEvidenceLocker is deprecated: use EvidenceLocker", r.stderr, imp)
+    def test_the_earlier_class_name_is_not_kept(self):
+        earlier = "CRA" + "EvidenceLocker"         # assembled: the name is written nowhere in the tree
+        for imp in (f"from {NEW} import {earlier}", f"from {NEW}.locker import {earlier}",
+                    f"import warnings; warnings.simplefilter('ignore'); from {OLD} import {earlier}"):
+            r = py("-c", imp)
+            self.assertEqual(r.returncode, 1, imp)
+            self.assertIn("ImportError", r.stderr, imp)
         r = py("-c", f"import {NEW}; {NEW}.NoSuchName")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("AttributeError", r.stderr)
 
     def test_positive_control_warnings_as_errors(self):
-        for imp in (f"import {OLD}", f"from {NEW} import CRAEvidenceLocker"):
+        for imp in (f"import {OLD}", f"from {OLD}.ledger import Ledger"):
             r = py("-W", "error::DeprecationWarning", "-c", imp)
             self.assertEqual(r.returncode, 1, imp)
             self.assertIn("DeprecationWarning", r.stderr)
@@ -133,6 +133,67 @@ print(len(subs), "ok")
             self.assertIsNone(re.search(r"^\s*(import|from)\s+%s\b" % OLD, read(NEW, m + ".py"), re.M), m)
         r = py("-c", f"import sys, {NEW}, {NEW}.cli; print(sorted(m for m in sys.modules if m.startswith('{OLD}')))")
         self.assertEqual((r.returncode, r.stdout), (0, "[]\n"), r.stderr)
+
+
+def _bin():
+    """The folder that holds both commands: next to this interpreter (an unactivated venv too), else on PATH."""
+    for d in (os.path.dirname(sys.executable), os.path.dirname(shutil.which(DIST) or "")):
+        if d and all(os.access(os.path.join(d, c), os.X_OK) for c in (DIST, "cra")):
+            return d
+    return None
+
+
+BIN = _bin()
+
+
+class UnknownNames(unittest.TestCase):
+    """The aliases forward the names that exist and nothing else: an unknown name is an AttributeError / ImportError
+    under the earlier names exactly as under the new ones (a forwarder that answered None would let a typo pass)."""
+    def test_unknown_names_are_refused_under_every_name(self):
+        code = f"""
+import warnings; warnings.simplefilter("ignore")
+import {OLD}, {NEW}, {NEW}.locker
+for mod in ({OLD}, {NEW}, {NEW}.locker):
+    try:
+        getattr(mod, "NoSuchName")
+    except AttributeError:
+        pass
+    else:
+        raise SystemExit(mod.__name__ + ": NoSuchName answered")
+    assert not hasattr(mod, "EvidenceLockr"), mod.__name__
+for stmt in ("from {OLD} import NoSuchName", "from {NEW}.locker import NoSuchName", "from {OLD}.locker import NoSuchName"):
+    try:
+        exec(stmt)
+    except ImportError:
+        pass
+    else:
+        raise SystemExit(stmt + ": no ImportError")
+assert {{"EvidenceLocker", "SBOMRecord", "verify_pack", "__version__"}} <= set(dir({OLD})), "dir() of the alias"
+print("refused")
+"""
+        r = py("-c", code)
+        self.assertEqual((r.returncode, r.stdout), (0, "refused\n"), r.stderr)
+
+    def test_star_import_of_the_earlier_name_gives_the_public_names(self):
+        code = f"""
+import warnings; warnings.simplefilter("ignore")
+from {OLD} import *
+import {NEW}
+_names = dir()
+missing = [n for n in ("EvidenceLocker", "SBOMRecord", "SBOMComponent", "SRPNotice",
+                       "VulnerabilityRecord", "verify_pack", "sbom_from_cyclonedx", "ledger", "locker") if n not in _names]
+assert not missing, missing
+assert EvidenceLocker is {NEW}.EvidenceLocker and ledger is {NEW}.ledger
+print("star ok")
+"""
+        r = py("-c", code)
+        self.assertEqual((r.returncode, r.stdout), (0, "star ok\n"), r.stderr)
+
+    def test_names_written_by_the_tool(self):
+        import logging
+        from omega_cra_evol import ledger
+        self.assertIs(ledger._log, logging.getLogger("omega_cra_evol.ledger"))
+        self.assertIn('"User-Agent": "omega-cra-evol/" + __version__', read(NEW, "feeds.py"))
 
 
 class CommandLine(unittest.TestCase):
@@ -159,12 +220,10 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(codes[2], 1)                     # a finding against the pack
         self.assertEqual(codes[3:], [2, 2], codes)        # usage errors
 
-    @unittest.skipUnless(shutil.which(DIST) and shutil.which("cra") and
-                         os.path.dirname(shutil.which(DIST)) == os.path.dirname(shutil.which("cra")),
-                         "the two commands are not installed side by side in this environment")
+    @unittest.skipUnless(BIN, "the two commands are not installed side by side in this environment")
     def test_the_installed_commands_are_the_same_entry_point(self):
         for cmd in (DIST, "cra"):
-            r = subprocess.run([cmd, "--version"], capture_output=True, text=True)
+            r = subprocess.run([os.path.join(BIN, cmd), "--version"], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertTrue(r.stdout.startswith(DIST + " "), r.stdout)
 

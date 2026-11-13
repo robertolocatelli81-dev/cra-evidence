@@ -336,12 +336,3 @@ class EvidenceLocker:
                       "signer_pub": signer.pub})
         return d
 
-
-def __getattr__(name: str) -> Any:
-    """`CRAEvidenceLocker`, the class name until 0.9.0: the same class, with a DeprecationWarning (removed in a release
-    on or after 2027-03-31, see the changelog)"""
-    if name == "CRAEvidenceLocker":
-        import warnings
-        warnings.warn("CRAEvidenceLocker is deprecated: use EvidenceLocker (the same class)", DeprecationWarning, stacklevel=2)
-        return EvidenceLocker
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

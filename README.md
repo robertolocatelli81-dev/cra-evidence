@@ -15,7 +15,7 @@ Single Reporting Platform (SRP):
 
 The technical documentation stays at the disposal of market surveillance authorities for **at least 10 years** after
 the product is placed on the market, or for the support period if longer (Art. 13(13)). Sources and re-reading dates:
-[`spec/LEGAL_BASIS.md`](spec/LEGAL_BASIS.md).
+[`spec/LEGAL_BASIS.md`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/spec/LEGAL_BASIS.md).
 
 The SRP is a web portal. What was notified, under which ENISA field glossary, how complete, when the clock started and
 when it was filed lives in the firm's own tools — and may have to be shown, years later, to someone who does not run them.
@@ -98,19 +98,19 @@ which says nothing about identifiers.
 
 ## Proofs
 
-- **Specification before code:** the attestation format is [`spec/art14-filing/v0.1/`](spec/art14-filing/v0.1/README.md)
+- **Specification before code:** the attestation format is [`spec/art14-filing/v0.1/`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/spec/art14-filing/v0.1/README.md)
   (in-toto Statement v1 in a DSSE envelope, Ed25519, closed predicate) and its delta
-  [`v0.2`](spec/art14-filing/v0.2/README.md) (vulnerability identifiers, case reference); the notice rules and the sbomify mapping are in
-  [`spec/SRP_FIELDS.md`](spec/SRP_FIELDS.md); the receipt of `cra verify` in [`spec/RECEIPT.md`](spec/RECEIPT.md).
-- **Attestation vectors:** [`spec/art14-filing/v0.1/vectors/`](spec/art14-filing/v0.1/vectors/) — 52 envelopes —
-  and [`v0.2/vectors/`](spec/art14-filing/v0.2/vectors/) — 53, with real CVE / EUVD identifiers in synthetic notices;
+  [`v0.2`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/spec/art14-filing/v0.2/README.md) (vulnerability identifiers, case reference); the notice rules and the sbomify mapping are in
+  [`spec/SRP_FIELDS.md`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/spec/SRP_FIELDS.md); the receipt of `cra verify` in [`spec/RECEIPT.md`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/spec/RECEIPT.md).
+- **Attestation vectors:** [`spec/art14-filing/v0.1/vectors/`](https://github.com/robertolocatelli81-dev/omega-cra-evol/tree/v0.10.0/spec/art14-filing/v0.1/vectors/) — 52 envelopes —
+  and [`v0.2/vectors/`](https://github.com/robertolocatelli81-dev/omega-cra-evol/tree/v0.10.0/spec/art14-filing/v0.2/vectors/) — 53, with real CVE / EUVD identifiers in synthetic notices;
   each `manifest.json` gives every envelope's expected exit code and exact set of reason codes, for any other
   implementation to run.
-- **Verifiers in other languages, by the same author:** [`verifiers/`](verifiers/README.md) re-implements `cra verify`
+- **Verifiers in other languages, by the same author:** [`verifiers/`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/verifiers/README.md) re-implements `cra verify`
   in JavaScript (Node, no dependencies), Go (standard library) and Rust; `verifiers/differential.py` builds intact and
   tampered packs and requires the same verdict and the same failing layers from all of them. The ledger also follows
   the profile of cryptovalid's verifiers (same author).
-- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): the suites on Python 3.9, 3.11 and 3.12, with
+- **CI** ([`.github/workflows/ci.yml`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/.github/workflows/ci.yml)): the suites on Python 3.9, 3.11 and 3.12, with
   cryptography only and with no optional dependency; the differential oracle across Python, JS, Go and Rust; the
   official CycloneDX CLI and SPDX tools on the SBOM fixtures; gitleaks on the whole history. A weekly workflow
   re-reads ENISA's SRP glossary page and fails on any difference from the vendored snapshot.
@@ -126,7 +126,7 @@ which says nothing about identifiers.
 Re-run on 13/11/2026 on this release's code (omega-cra-evol 0.10.0; `git archive` of the commit, fresh
 virtual environments):
 
-- The test suite: 464 tests, OK on Python 3.9.25, 3.11.2, 3.12.15 and 3.13.15 with `[sign]`, jsonschema, referencing and the
+- The test suite: 466 tests, OK on Python 3.9.25, 3.11.2, 3.12.15 and 3.13.15 with `[sign]`, jsonschema, referencing and the
   cryptovalid wheel; 1 skipped (the live feeds check, which needs the network).
 - The attestation vectors: v0.1, 52 (10 valid, 42 each breaking one rule), and v0.2, 53 (10 valid, 43 refused): each
   gives the exit code and exactly the set of reason codes its `manifest.json` expects.
@@ -184,7 +184,7 @@ network by default):
 
 Every subcommand has `--help`. `cra verify` gives one authenticity verdict (`trusted-signed` > `signed` > `anchored` >
 `FAIL`) and exits 0 verified, 1 a finding against the pack, 77 not assessed, 2 unusable input, 74 receipt not written
-([`spec/RECEIPT.md`](spec/RECEIPT.md)).
+([`spec/RECEIPT.md`](https://github.com/robertolocatelli81-dev/omega-cra-evol/blob/v0.10.0/spec/RECEIPT.md)).
 
 ## Guarantees and assumptions
 

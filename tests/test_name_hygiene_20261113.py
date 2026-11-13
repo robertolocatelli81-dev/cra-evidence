@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """13/11/2026, the rename to omega-cra-evol. Rules on the whole tree (every file, history and data included), checked
 on every run:
-  1. no file names another party's product: the words "CRA" and "Evidence" joined by a space, a hyphen or an
-     underscore with those capitals, the two words separated by white space in any case, or joined in any case
-     (a package or domain name) — except this project's earlier class name;
-  2. that class name appears only where it is the subject: the deprecated aliases, the changelog and their tests;
+  1. the earlier name is written only in its own forms: never the two words with capitals joined by a space, a
+     hyphen or an underscore, never the two words separated by white space in any case, never the two words joined
+     in any case (the earlier class name included: it is not kept);
+  2. (no exception: the locker class is EvidenceLocker);
   3. the earlier project name in lower case (`cra-evidence`, `cra_evidence`) is this project's own earlier name and is
      allowed (history, frozen identifiers, the alias); README carries it in the one rename line only.
 The forbidden strings are assembled from pieces, so that this file carries none of them. Positive controls: the same
@@ -17,11 +17,8 @@ CLASS = A + B + "Locker"
 FORBIDDEN = [
     re.compile(A + r"[ \u00a0_-]" + B),                         # the two words with those capitals, joined or spaced
     re.compile(r"(?i)\b" + A.lower() + r"[\s\u00a0]+" + B.lower()),   # the two words in any case, separated by white space
-    re.compile(r"(?i)" + A.lower() + B.lower() + r"(?!Locker)"),       # joined, any case (a package or domain name)
-    re.compile(r"(?i:" + A.lower() + B.lower() + r"locker)(?<!" + CLASS + r")"),   # the class name in another case
+    re.compile(r"(?i)" + A.lower() + B.lower()),                       # the two words joined, any case
 ]
-CLASS_ALLOWED_IN = ("CHANGELOG.md", "cra_evidence/", "omega_cra_evol/__init__.py", "omega_cra_evol/locker.py",
-                    "tests/test_rename_20261113.py")
 SKIP_DIRS = {".git", "__pycache__", "target", "build", "dist", "node_modules", ".eggs"}
 
 
@@ -44,8 +41,8 @@ def files():
                 continue
 
 
-class NoOtherPartyIsNamed(unittest.TestCase):
-    def test_no_file_names_another_product(self):
+class TheEarlierNameInItsOwnForms(unittest.TestCase):
+    def test_no_other_form_of_the_earlier_name(self):
         found, n = {}, 0
         for rel, text in files():
             n += 1
@@ -57,19 +54,12 @@ class NoOtherPartyIsNamed(unittest.TestCase):
 
     def test_positive_control(self):
         for bad in (A + " " + B, "the " + A + "-" + B + " platform", A + "_" + B, A.lower() + " " + B.lower() + " pack",
-                    A + chr(0xA0) + B.lower(), "pip install " + A.lower() + B.lower(), A + B + " Ltd",
-                    "https://" + A.lower() + B.lower() + ".example", A.upper() + B.upper(), A.lower() + B + "Locker"):
+                    A + chr(0xA0) + B.lower(), "pip install " + A.lower() + B.lower(), A + B + " pack",
+                    "x/" + A.lower() + B.lower() + "/y", A.upper() + B.upper(), A.lower() + B + "Locker", CLASS):
             self.assertTrue(others_in(bad), bad)
-        for ok in ("cra-evidence", "cra_evidence_pack/1", "omega-cra-evol", "the cra command; evidence pack", CLASS,
+        for ok in ("cra-evidence", "cra_evidence_pack/1", "omega-cra-evol", "the cra command; evidence pack", "EvidenceLocker",
                    "CRA Art. 14 evidence"):
             self.assertEqual(others_in(ok), [], ok)
-
-
-class TheEarlierClassName(unittest.TestCase):
-    def test_only_where_it_is_the_subject(self):
-        found = sorted(rel for rel, text in files() if CLASS in text)
-        self.assertEqual([r for r in found if not r.startswith(CLASS_ALLOWED_IN)], [])
-        self.assertIn("omega_cra_evol/locker.py", found)        # the walk saw the alias
 
 
 class TheEarlierProjectName(unittest.TestCase):

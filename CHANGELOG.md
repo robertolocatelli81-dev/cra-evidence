@@ -7,11 +7,13 @@ exit codes and verification are unchanged; packs, ledgers and attestations made 
 
 - **Distribution** `omega-cra-evol`, **package** `omega_cra_evol`, **commands** `cra` (as before) and `omega-cra-evol`
   (the same entry point; the name `pipx run` and `uvx` look for). `cra --version` prints `omega-cra-evol 0.10.0`.
-- **Class** `CRAEvidenceLocker` is now `EvidenceLocker`.
+- **Class**: the locker class is `EvidenceLocker`; its earlier name is not kept (an import of it is an ImportError:
+  import `EvidenceLocker`, the same class with the same methods).
 - **Deprecated aliases, removed in a release on or after 2027-03-31:** the import name `cra_evidence` (every submodule,
   `from cra_evidence.ledger import Ledger` and the like, gives the same module object as under `omega_cra_evol`),
-  `python -m cra_evidence.cli` (runs the same command), and the class name `CRAEvidenceLocker` (the same class, from
-  `omega_cra_evol`, `omega_cra_evol.locker` or `cra_evidence`). Each emits a `DeprecationWarning`.
+  and `python -m cra_evidence.cli` (runs the same command). Each emits a `DeprecationWarning`. `from cra_evidence
+  import *` gives the public names of the package, the locker class as `EvidenceLocker`. An unknown name is refused
+  under the earlier name exactly as under the new one.
 - **Container image** `ghcr.io/robertolocatelli81-dev/omega-cra-evol`, labels `org.opencontainers.image.source` and
   `.title` with the new name; the image build checks both commands. **GitHub Action**
   `robertolocatelli81-dev/omega-cra-evol@v0.10.0`; it verifies the provenance against
@@ -38,10 +40,12 @@ What breaks, and what to change:
 - `docker pull ghcr.io/robertolocatelli81-dev/cra-evidence:<tag>` holds up to 0.9.0; newer versions are only in
   `ghcr.io/robertolocatelli81-dev/omega-cra-evol`, and the action's `version` input takes 0.10.0 or later.
 - `import cra_evidence` works with a `DeprecationWarning` until a release on or after 2027-03-31.
+- Code that imports the locker class by its earlier name: import `EvidenceLocker`.
 - Anything that compares the output of `cra --version`, or the tool name in `metadata.tools` of an SBOM export, sees the
   new name.
 - The Go verifier's module path changed.
-- Nothing changes in the files: packs, ledgers, sidecars, seals, notices, attestations and exit codes.
+- Nothing changes in the formats of packs, ledgers, sidecars, seals, notices and attestations, nor in the exit codes
+  (messages that suggest an install now name `omega-cra-evol[sign]`).
 
 ## 0.9.0 — 2026-11-13 — art14-filing v0.2: the CVE / EUVD identifiers of the notice and a declared case reference
 
