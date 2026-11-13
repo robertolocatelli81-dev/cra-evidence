@@ -13,6 +13,23 @@ HAVE_CRYPTO = importlib.util.find_spec("cryptography") is not None
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 
+
+def check_published_vectors(test, root, subdir):
+    """every published vector file of `subdir` keeps the sha256 it was published with
+    (tests/fixtures/art14_vectors_published_sha256.txt): a release must not change them"""
+    import hashlib
+    pins = {}
+    with open(os.path.join(root, "tests", "fixtures", "art14_vectors_published_sha256.txt"), encoding="utf-8") as f:
+        for line in f:
+            h, p = line.rstrip("\n").split("  ", 1)
+            if p.startswith(subdir + "/"):
+                pins[p] = h
+    test.assertTrue(pins, subdir)
+    for p, h in sorted(pins.items()):
+        with open(os.path.join(root, p), "rb") as f:
+            test.assertEqual(hashlib.sha256(f.read()).hexdigest(), h, p)
+
+
 def manifest():
     with open(os.path.join(V, "manifest.json"), encoding="utf-8") as f:
         return json.load(f)
@@ -85,7 +102,9 @@ class TestVectors(unittest.TestCase):
         d = tempfile.mkdtemp()
         try:
             out = os.path.join(d, "vectors")
-            gen_art14_vectors.generate(out)
+            m = gen_art14_vectors.generate(out)
+            self.assertEqual(len(m["vectors"]), len(manifest()["vectors"]))   # the script prints it
+            check_published_vectors(self, ROOT, "spec/art14-filing/v0.1/vectors")
             mine, theirs = sorted(os.listdir(out)), sorted(os.listdir(V))
             self.assertEqual(mine, theirs)
             for n in mine:

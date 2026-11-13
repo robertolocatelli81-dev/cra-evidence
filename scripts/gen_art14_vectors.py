@@ -89,7 +89,7 @@ def build_notices(work):
 def generate(out):
     import cra_evidence
     with mock.patch.object(cra_evidence, "__version__", VECTORS_TOOL_VERSION):
-        _generate(out)
+        return _generate(out)
 
 
 def _generate(out):

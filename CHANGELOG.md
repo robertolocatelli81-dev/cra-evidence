@@ -25,8 +25,9 @@ Specification written before the code: `spec/art14-filing/v0.2/README.md` (a del
 - **`cra attest`** writes v0.2 by default, with the identifiers read from the notice (an identifier out of its form is
   refused, nothing written; there is no option to type others: rule 5 would refuse them as soon as the notice is
   given), `--case-reference ISSUER ID` (given twice: usage error, exit 2), and `--predicate v0.1` for the statement
-  of 0.8.0 (the same bytes but `source.toolVersion`, the version that writes it, spec v0.1 §4; for a verifier of
-  0.8.0, or to say nothing about identifiers, e.g. under embargo). A
+  of 0.8.0 (the same bytes; for a notice built by cra-evidence, cra-srp/2, `source.toolVersion` is the version that
+  writes the statement, spec v0.1 §4, so 0.9.0 there; for an imported notice, cra-srp/3, it is the source's and the
+  bytes are those of 0.8.0; for a verifier of 0.8.0, or to say nothing about identifiers, e.g. under embargo). A
   notice whose `cve_id` / `euvd_id` is not in its form (e.g. lower case, which `cra notice` records) was attested by
   0.8.0 and is now refused by default; `--predicate v0.1` attests it as before. The library default of
   `build_statement` stays v0.1.
@@ -39,7 +40,9 @@ Specification written before the code: `spec/art14-filing/v0.2/README.md` (a del
   ASSUMED.
 - **Vectors** `spec/art14-filing/v0.2/vectors/`: 53 (10 valid, 43 refused), built by
   `scripts/gen_art14_v02_vectors.py` from v0.1 statements without the v0.2 producer; the producer gives the same
-  payload bytes (test). Synthetic notices carrying real identifiers (CVE-2024-3094 / EUVD-2024-31700, CVE-2021-44228 /
+  payload bytes but `source.toolVersion` (test). The vector generators write `source.toolVersion` 0.8.0 whatever the
+  package version (`VECTORS_TOOL_VERSION`), so a release does not change the published vectors; the tests compare
+  every published vector file with its sha256 (`tests/fixtures/art14_vectors_published_sha256.txt`). Synthetic notices carrying real identifiers (CVE-2024-3094 / EUVD-2024-31700, CVE-2021-44228 /
   EUVD-2021-34768, CVE-2024-21762 / EUVD-2024-19376, read on ENISA's EUVD API on 13/11/2026, digests in the spec).
 - **Canonical profile and RFC 8785.** `canonical.py` now says what was measured: the profile gives the bytes of JCS
   only when every character is in U+0000..U+007E (U+007F and non-ASCII are escaped here, raw UTF-8 in JCS; beyond the

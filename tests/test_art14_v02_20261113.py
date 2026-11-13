@@ -2,12 +2,13 @@
 """13/11/2026 — art14-filing v0.2 (spec/art14-filing/v0.2/README.md), written before the code that implements it.
 
 - every vector of spec/art14-filing/v0.2/vectors gives its expected verdict, exact set of reason codes and receipt
-  values, through the library and through `cra verify-attestation`; the vectors are what the generator writes;
+  values, through the library and through `cra verify-attestation`; the vectors are what the generator writes, and
+  every published vector file keeps its sha256;
 - two statements of the same product and stage, without the notice, are told apart by their receipts (spec §1);
 - a v0.1 statement keeps the receipt of cra-evidence 0.8.0 byte for byte (receipts of 0.8.0 on the v0.1 vectors,
   vendored in tests/fixtures/art14_v01_receipts_080/);
-- `cra attest` writes v0.2 by default, with the identifiers of the notice, and the same bytes as the vectors (built
-  without the v0.2 producer); `--predicate v0.1` writes what 0.8.0 wrote but `source.toolVersion` (the version that
+- `cra attest` writes v0.2 by default, with the identifiers of the notice, and the bytes of the vectors (built
+  without the v0.2 producer) but `source.toolVersion`; `--predicate v0.1` writes what 0.8.0 wrote but `source.toolVersion` (the version that
   writes it); `--case-reference` is checked;
 - generative: an unknown key in every new object, every wrong JSON type on every new leaf, and random identifier and
   reference strings against an oracle written without regular expressions."""
@@ -124,7 +125,10 @@ class TestV02Vectors(unittest.TestCase):
         d = tempfile.mkdtemp()
         try:
             out = os.path.join(d, "vectors")
-            gen_art14_v02_vectors.generate(out)
+            m = gen_art14_v02_vectors.generate(out)
+            self.assertEqual(len(m["vectors"]), len(manifest()["vectors"]))   # the script prints it
+            from test_art14_vectors_20261113 import check_published_vectors
+            check_published_vectors(self, ROOT, "spec/art14-filing/v0.2/vectors")
             self.assertEqual(sorted(os.listdir(out)), sorted(os.listdir(V2)))
             for n in os.listdir(out):
                 with open(os.path.join(out, n), "rb") as a, open(os.path.join(V2, n), "rb") as b:
@@ -233,7 +237,7 @@ class TestAttestV02(unittest.TestCase):
                 self.assertEqual(json.loads(o)["vulnerability_ids"]["result"], "matched")
 
     def test_producer_gives_the_bytes_of_the_vectors(self):
-        """the vectors were built from v0.1 statements by hand; the producer must give the same payload"""
+        """the vectors were built from v0.1 statements by hand; the producer must give the same payload but source.toolVersion"""
         from datetime import datetime, timezone
         from cra_evidence.art14_attest import build_statement
         at = datetime(2026, 11, 13, 7, 5, 0, tzinfo=timezone.utc)

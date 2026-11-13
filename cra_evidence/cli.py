@@ -323,7 +323,7 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--filed-by", help="cra-srp/2 only, with --filed-at: who filed it, declared")
     s.add_argument("--predicate", choices=("v0.2", "v0.1"), default="v0.2",
                    help="v0.2 (default): with the notice's CVE / EUVD identifiers (vulnerabilityIds) and --case-reference; v0.1: "
-                        "the statement of cra-evidence 0.8.0, no identifiers (for a verifier of 0.8.0, or to say nothing about them)")
+                        "the v0.1 format of cra-evidence 0.8.0, no identifiers (for a verifier of 0.8.0, or to say nothing about them)")
     s.add_argument("--case-reference", nargs=2, metavar=("ISSUER", "ID"), action="append",
                    help="v0.2: the reference ISSUER (a CSIRT, a CNA, the manufacturer…) gave to the case; declared, never checkable")
     s.add_argument("--key", help="Ed25519 seed file"); s.add_argument("--signer-id", required=True)

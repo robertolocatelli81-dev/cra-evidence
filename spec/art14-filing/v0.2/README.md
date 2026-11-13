@@ -174,7 +174,8 @@ v0.1 vectors, CHANGELOG 0.9.0).
   named; a notice with no identifiers gives a statement without the key.
 - `caseReference` from `--case-reference ISSUER ID`, checked by §2.2 before anything is written.
 - `--predicate v0.1` writes a v0.1 statement as cra-evidence 0.8.0 did (same bytes for the same inputs and instant,
-  but `source.toolVersion`, which names the version that writes it: v0.1 §4); `--case-reference` is refused with it.
+  but `source.toolVersion` of a notice built by cra-evidence, which names the version that writes the statement:
+  v0.1 §4; for an imported notice it is the source's); `--case-reference` is refused with it.
 
 The statement payload is the JSON text of the statement with keys sorted, separators `,` `:`, strings in UTF-8 (not
 ASCII-escaped). Every member name of a statement that `cra attest` writes is ASCII, so this text is the RFC 8785 (JCS)

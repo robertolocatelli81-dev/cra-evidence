@@ -2,7 +2,7 @@
 """Generate spec/art14-filing/v0.2/vectors/ (spec v0.2 §8): valid v0.2 statements and, for each rule of v0.2 §2-§3,
 statements that break it, each with its expected verdict, reason codes and receipt values in manifest.json.
 
-The v0.2 statements are built here WITHOUT the v0.2 producer: a v0.1 statement of `build_statement` (0.8.0 code) is
+The v0.2 statements are built here WITHOUT the v0.2 producer: a v0.1 statement of `build_statement` (toolVersion VECTORS_TOOL_VERSION) is
 re-typed to the v0.2 TypeURI and given the new fields by hand, so the vectors check `cra attest` from a second path
 (same author, not the v0.2 producer)
 (tests/test_art14_v02_20261113.py compares the producer's payload with them).
@@ -94,7 +94,7 @@ def to_v02(payload, ids=None, case=None, type_uri=TYPE_V02):
 def generate(out):
     import cra_evidence
     with mock.patch.object(cra_evidence, "__version__", VECTORS_TOOL_VERSION):   # the version of the v0.1 vectors
-        _generate(out)
+        return _generate(out)
 
 
 def _generate(out):

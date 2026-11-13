@@ -90,8 +90,8 @@ typed) and, if given, the reference a coordinator gave to the case. A coordinato
 the notice file — the statement names the notice by its digests, not its text: the same command without `--drop` still
 verifies the signature and the ledger entry, and reports the identifiers as `"declared, not checked (no drop file
 given)"`. With the notice file they must be exactly the notice's: one more, one fewer, or none while the notice has
-some, and the statement is refused (`vulnerability_ids`). `--predicate v0.1` writes the statement of 0.8.0, which says
-nothing about identifiers.
+some, and the statement is refused (`vulnerability_ids`). `--predicate v0.1` writes a v0.1 statement (the format of 0.8.0),
+which says nothing about identifiers.
 `cra schema --stream vulnerability --template early_warning` prints a fillable template of a stage.
 
 ## Proofs
