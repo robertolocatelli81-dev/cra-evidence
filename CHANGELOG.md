@@ -22,23 +22,30 @@ Specifications written before the code: `spec/art14-filing/v0.1/README.md` and, 
   sbomify recorded: a declaration, not a proof of submission.
 - **`cra check-notice`** reads `cra-srp/3` (closed `source` and `filing` blocks; with `--ledger`, the kept source
   document must hash to `document_sha256` and re-derive the same notice). `cra-srp/1` and `cra-srp/2` files are read as
-  before: on the 5 drop files of the repository, and on an early warning and a 72 h notification written by 0.7.1's and
-  by this `cra notice`, the receipts of 0.7.1's checker and of this one are identical (measured 13/11/2026).
-- **`cra attest DROP --ledger L --product P --version V (--key K | --aws-kms-key-id …) --signer-id ID --out X`** and
+  before (receipts compared below); an early warning and a 72 h notification written by 0.7.1's `cra notice` and by
+  this one verify with both checkers, ledger included (measured 13/11/2026).
+- **`cra attest DROP --ledger L (--key K | --aws-kms-key-id …) --signer-id ID --out X`** and
   **`cra verify-attestation X --trust-store T [--drop D] [--ledger L]`**: predicate type `art14-filing` v0.1, in-toto
-  Statement v1 in a DSSE envelope, Ed25519. Exit 0 trusted and every check run passed, 1 refused or not verified
-  (reason codes in the receipt), 2 usage. Without `--ledger` the receipt says `ledger: not_evaluated`.
-- **Vectors** `spec/art14-filing/v0.1/vectors/`: 45 (8 valid, 37 each breaking one rule of §2-§5), from
+  Statement v1 in a DSSE envelope, Ed25519, about a `cra-srp/2` notice (built by `cra notice`: source `cra-evidence`,
+  filing null unless declared with `--filed-at` [`--srp-reference`] [`--filed-by`]) or a `cra-srp/3` one (imported).
+  The `cra_srp_notice` ledger record now carries `product_id` and `product_version`: `cra attest` takes the product
+  from it (`--product`/`--version` only for records written before) and the verifier compares the statement's
+  `product` with it (`product: PASS` / `FAIL`; `not_evaluated` without a ledger or for an older record). Exit 0 trusted
+  and every check run passed, 1 refused or not verified (reason codes in the receipt), 2 usage. Without `--ledger` the
+  receipt says `ledger: not_evaluated`.
+- **Vectors** `spec/art14-filing/v0.1/vectors/`: 52 (10 valid, 42 each breaking one rule of §2-§5), from
   `scripts/gen_art14_vectors.py` with two test-only keys derived from fixed public strings; `manifest.json` gives each
   expected verdict, exit code and reason code.
-- **Tests:** 376 (41 new: the zero-loss test, committed before the importer and failing then, with a positive control
+- **Tests:** 379 (44 new: the zero-loss test, committed before the importer and failing then, with a positive control
   that removes one mapping entry; the vectors; generative refusals — an unknown key in every object, a wrong type on
   every leaf, a duplicate key in every object of the real documents). Measured 13/11/2026: OK on Python 3.9.25, 3.11.2
   and 3.12.15 with `[sign]`, jsonschema and referencing (2 skipped: live feeds, cryptovalid wheel absent), and on 3.12.15
-  with no optional dependency (53 skipped). 16 hand mutants of the new code, each failing at least one test.
-- **Limits.** `cra-srp/3` drop files carry no `product_id` / `product_version`, so the verifier cannot compare the
-  predicate's `product` with the drop file (§4.2 rule 1): the receipt says `product: not_evaluated`. `cra notice` still
-  writes `cra-srp/2`, so only imported notices can be attested in this release. An event with no CVE or EUVD id
+  with no optional dependency (53 skipped). 23 hand mutants of the new code, each failing at least one test. The
+  checker of 0.7.1 and this one give byte-identical receipts on the 5 `cra-srp/1` / `cra-srp/2` drop files of the
+  repository (2 of them also against their ledger).
+- **sbomify `member_states`:** a code given twice ("AT, AT") is refused, never de-duplicated.
+- **Limits.** Drop files carry no product: a notice recorded by 0.7.1 or earlier can be attested only with a declared
+  `--product`/`--version`, which no record confirms (`product: not_evaluated`). An event with no CVE or EUVD id
   (sbomify incidents, a report whose `cve_id` was cleared) is recorded under `sbomify-report:<id>`, and rule 8 binds no
   notice to it.
 
