@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.9.0 — unreleased — art14-filing v0.2: the CVE / EUVD identifiers of the notice and a declared case reference
+
+Specification written before the code: `spec/art14-filing/v0.2/README.md` (a delta over v0.1).
+
+- **Predicate type `art14-filing` v0.2** (new TypeURI `…/spec/art14-filing/v0.2`), two optional fields:
+  `vulnerabilityIds`, a closed list of `{scheme, id}` with `scheme` `cve` or `euvd`, at most one per scheme, `cve`
+  first, no empty list (the key is omitted); the CVE form is the `cveId` pattern of the CVE JSON record format
+  (`^CVE-[0-9]{4}-[0-9]{4,19}$`, read 13/11/2026 at cve-schema `ce5f5c8`), the EUVD form is our reading written in the
+  spec (`EUVD-`, four-digit year, 1 to 19 digits: ENISA publishes no grammar), both full matches on ASCII digits, no
+  normalisation; `caseReference`, a closed `{issuer, id}` (1 to 255 characters, no control character, no leading or
+  trailing space), always "declared by the signer, not checkable".
+- **Rule 5.** With `--drop`, the identifiers of a v0.2 statement must equal the notice's (`cve_id` / `euvd_id`, from
+  `fields`, else `previous_fields`): one more, one fewer, a different one, or none in the statement while the notice
+  has some — refused (`vulnerability_ids`, the reason lists what is only in the statement and only in the notice).
+  Without `--drop` the receipt lists them as `declared, not checked (no drop file given)`.
+- **`cra verify-attestation`** accepts v0.1 and v0.2. The receipt of a v0.2 statement has `vulnerability_ids`
+  (`declared`, `notice`, `result`) and `case_reference`; a v0.1 statement keeps the receipt of 0.8.0 byte for byte:
+  measured on the 52 v0.1 vectors of 0.8.0, 51 identical receipts; the 52nd, `predicate_type_wrong`, used the v0.2
+  TypeURI as its wrong value and is now refused by rule 5 instead (its drop file carries a `cve_id`). That vector
+  now uses `…/v0.3`. The receipts of 0.8.0 are vendored in `tests/fixtures/art14_v01_receipts_080/` and compared by a
+  test.
+- **`cra attest`** writes v0.2 by default, with the identifiers read from the notice (an identifier out of its form is
+  refused, nothing written; there is no option to type others: rule 5 would refuse them as soon as the notice is
+  given), `--case-reference ISSUER ID`, and `--predicate v0.1` for the statement of 0.8.0 (the same bytes; for a
+  verifier of 0.8.0, or to say nothing about identifiers, e.g. under embargo). The library default of
+  `build_statement` stays v0.1.
+- **Vectors** `spec/art14-filing/v0.2/vectors/`: 53 (10 valid, 43 refused), built by
+  `scripts/gen_art14_v02_vectors.py` from v0.1 statements without the v0.2 producer; the producer gives the same
+  payload bytes (test). Synthetic notices carrying real identifiers (CVE-2024-3094 / EUVD-2024-31700, CVE-2021-44228 /
+  EUVD-2021-34768, CVE-2024-21762 / EUVD-2024-19376, read on ENISA's EUVD API on 13/11/2026, digests in the spec).
+- **Canonical profile and RFC 8785.** `canonical.py` now says what was measured: the profile gives the bytes of JCS
+  only when every character is in U+0000..U+007E (U+007F and non-ASCII are escaped here, raw UTF-8 in JCS; beyond the
+  BMP the member order differs). Test `tests/test_canonical_vs_jcs_20261113.py` (two JCS encoders, the test data of
+  RFC 8785 §3.2.3 re-read). No profile change, no digest change. The JS, Go and Rust verifiers canonicalise like the
+  Python reference on these characters (a ledger with U+007F, C1 controls, U+2028, keys U+E000 and U+10000: same
+  verdict in the four; each of them mutated to write U+007F raw, and the JS one to sort by UTF-16, fails). The art14
+  statement payload is JCS (all member names ASCII): measured on 101 of the 105 v0.1 and v0.2 vectors, the 4 others
+  being refused vectors whose payload has a duplicate key, a float or no base64.
+- **Docstrings:** `canonical.py` "independent cryptovalid checkers" → "by the same author"; `longterm.seal` no longer
+  reads as if the stored RFC 3161 / OTS token were verified (a caller-injected `timestamp_trust_fn` is the only
+  check; cra-evidence ships none).
+- **Tests:** test files committed before the code (red: 10186 failures and 5 errors on the 0.8.0 code), generative
+  refusals (an unknown key in every new object, every wrong JSON type on every new leaf, 6000 random identifiers and
+  4000 random references against oracles written without regular expressions); 30 hand mutants of the new rules, each
+  failing at least one test.
+
 ## 0.8.0 — 2026-11-13 — notices recorded in sbomify imported as cra-srp/3; in-toto attestations of an Art. 14 notice (art14-filing v0.1)
 
 Specifications written before the code: `spec/art14-filing/v0.1/README.md` and, in `spec/SRP_FIELDS.md`, the amendment of

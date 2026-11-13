@@ -65,24 +65,44 @@ The same attestation for a notice built here, without sbomify:
 cat > ew.json <<'EOF'
 {"notification_type": "Vulnerability", "title": "Auth bypass in Acme D1", "summary": "Exploitation observed.",
  "manufacturer_name": "Acme", "member_states_available": ["IT"], "product_name": "Acme D1",
- "product_version": "1.0.7", "awareness_datetime_utc": "2026-11-12T08:00:00Z"}
+ "product_version": "1.0.7", "awareness_datetime_utc": "2026-11-12T08:00:00Z",
+ "cve_id": "CVE-2024-3094", "euvd_id": "EUVD-2024-31700"}
 EOF
 cra notice --ledger cra.ledger.jsonl --product acme-d1 --version 1.0.7 --stage early_warning --fields ew.json --drop native_drop
-cra attest native_drop/vulnerability_early_warning_*.json --ledger cra.ledger.jsonl --key psirt.key --signer-id acme-psirt --out native.intoto.json
+cra attest native_drop/vulnerability_early_warning_*.json --ledger cra.ledger.jsonl --key psirt.key --signer-id acme-psirt \
+    --case-reference example-csirt 2026-000123 --out native.intoto.json
 cra verify-attestation native.intoto.json --trust-store trust.json --drop native_drop/vulnerability_early_warning_*.json --ledger cra.ledger.jsonl
 ```
 
 Same folder, same key → `"complete": true`,
-`"deadline_utc": "2026-11-13T08:00:00+00:00"`, `"status": "prepared_not_sent"`; then `"verified": true`, exit 0.
+`"deadline_utc": "2026-11-13T08:00:00+00:00"`, `"status": "prepared_not_sent"`; then `"verified": true`, exit 0, and:
+
+```
+"vulnerability_ids": {"declared": [{"id": "CVE-2024-3094", "scheme": "cve"}, {"id": "EUVD-2024-31700", "scheme": "euvd"}],
+                      "notice":   [{"id": "CVE-2024-3094", "scheme": "cve"}, {"id": "EUVD-2024-31700", "scheme": "euvd"}],
+                      "result": "matched"},
+"case_reference":    {"declared": {"id": "2026-000123", "issuer": "example-csirt"}, "result": "declared by the signer, not checkable"}
+```
+
+The statement is `art14-filing` v0.2: it carries the notice's CVE and EUVD identifiers (read from the notice, never
+typed) and, if given, the reference a coordinator gave to the case. A coordinator can receive the statement **without**
+the notice file — the statement names the notice by its digests, not its text: the same command without `--drop` still
+verifies the signature and the ledger entry, and reports the identifiers as `"declared, not checked (no drop file
+given)"`. With the notice file they must be exactly the notice's: one more, one fewer, or none while the notice has
+some, and the statement is refused (`vulnerability_ids`). `--predicate v0.1` writes the statement of 0.8.0, which says
+nothing about identifiers.
 `cra schema --stream vulnerability --template early_warning` prints a fillable template of a stage.
 
 ## Proofs
 
 - **Specification before code:** the attestation format is [`spec/art14-filing/v0.1/`](spec/art14-filing/v0.1/README.md)
-  (in-toto Statement v1 in a DSSE envelope, Ed25519, closed predicate); the notice rules and the sbomify mapping are in
+  (in-toto Statement v1 in a DSSE envelope, Ed25519, closed predicate) and its delta
+  [`v0.2`](spec/art14-filing/v0.2/README.md) (vulnerability identifiers, case reference); the notice rules and the sbomify mapping are in
   [`spec/SRP_FIELDS.md`](spec/SRP_FIELDS.md); the receipt of `cra verify` in [`spec/RECEIPT.md`](spec/RECEIPT.md).
-- **Attestation vectors:** [`spec/art14-filing/v0.1/vectors/`](spec/art14-filing/v0.1/vectors/) — 52 envelopes,
-  `manifest.json` gives each one's expected exit code and exact set of reason codes, for any other implementation to run.
+- **Attestation vectors:** [`spec/art14-filing/v0.1/vectors/`](spec/art14-filing/v0.1/vectors/) — 52 envelopes —
+  and [`v0.2/vectors/`](spec/art14-filing/v0.2/vectors/) — 53, with real CVE / EUVD identifiers in synthetic notices;
+  each `manifest.json` gives every envelope's expected exit code and exact set of reason codes, for any other
+  implementation to run.
 - **Verifiers in other languages, by the same author:** [`verifiers/`](verifiers/README.md) re-implements `cra verify`
   in JavaScript (Node, no dependencies), Go (standard library) and Rust; `verifiers/differential.py` builds intact and
   tampered packs and requires the same verdict and the same failing layers from all of them. The ledger also follows
@@ -149,7 +169,7 @@ network by default):
 | `cra notice --stage STAGE --fields F --drop D` | builds the notice payload, lists missing required fields, records it; never submits it |
 | `cra import sbomify --report R --filing F …` | imports the notices recorded in sbomify, documents kept byte for byte |
 | `cra check-notice DROP [--ledger L]` | re-checks a notice under the glossary it records |
-| `cra attest DROP` / `cra verify-attestation ENV` | signs / verifies the `art14-filing` v0.1 attestation of a notice |
+| `cra attest DROP` / `cra verify-attestation ENV` | signs / verifies the `art14-filing` attestation of a notice: v0.2 (default: with its CVE / EUVD identifiers and an optional case reference) or v0.1 |
 | `cra pack`, `cra sign`, `cra seal`, `cra verify` | evidence pack anchored in the ledger, Ed25519 signature (seed file or AWS KMS), renewable seal, offline verification |
 | `cra feeds ID` | read-only network checks: OSV positive control, CISA KEV / ENISA EUVD exploitation signal |
 | `cra obligations` | which obligations are in force for a role at an instant, and the horizons counted in years (Art. 13, 14, 24(3), 69, 71); both readings of a start date, 00:00 UTC and 00:00 Brussels; never reads the clock |
@@ -170,6 +190,8 @@ Every subcommand has `--help`. `cra verify` gives one authenticity verdict (`tru
   determination; KEV and EUVD are surfaced as signals.
 - **An imported filing record is the source tool's declaration, not proof of submission.** The same holds for a
   filing declared with `cra attest --filed-at`.
+- **Identifiers and case reference (v0.2):** the CVE / EUVD identifiers are compared with the notice only when the
+  notice file is given; a case reference is the signer's declaration, which no file can check.
 - **Time:** the ledger orders records; it is an objective time anchor only with an attached RFC 3161 / OpenTimestamps
   token, which this tool stores and does not verify.
 - **Verifiers:** the JavaScript, Go and Rust verifiers and cryptovalid's are by the same author as this tool; they are
