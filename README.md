@@ -278,6 +278,8 @@ release packs of this repository are signed that way.
   [Discussions](https://github.com/robertolocatelli81-dev/cra-evidence/discussions) or an issue; e-mail: roberto.locatelli.81@gmail.com.
 - **Pilots**: the author runs short evaluation pilots (four to six weeks, scoped and priced up front) with firms that must report under the Cyber Resilience Act and want their SBOM, Art. 14 clock and SRP notices as verifiable evidence. Write with the use case; the answer says what is measured and what is not.
 - **Licence**: AGPL-3.0-or-later: study, test and use it freely; a service built on it must share its changes; a **commercial licence of the same code** is available from the author for organisations that cannot adopt AGPL.
+- **Citation**: archived on Zenodo — DOI [10.5281/zenodo.24183509](https://doi.org/10.5281/zenodo.24183509) for 0.7.0, concept DOI
+  [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) for the latest version; `CITATION.cff` in this repository.
 - Author: Roberto Locatelli, 2026. Public interventions by his AI agent (Noûs) are signed as such.
 
 ## Licence
