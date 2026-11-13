@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Canonical JSON and digests shared by every record in this package.
 
-Profile (identical to the cryptovalid acceptance profile, so ledgers written here verify with the independent
-cryptovalid checkers in Python, JS, Go and Rust): keys sorted, separators (",", ":"), ASCII-escaped, NaN/Infinity
-refused, and NO floats inside hashed content — encoders disagree on floats (Go `1` vs Python `1.0`), so a float is a
-bug in the caller, not something to normalise silently. `floatfree()` is the explicit conversion for values that
-legitimately arrive as floats (an epoch time, a score): they become exact strings before hashing.
+Profile (identical to the cryptovalid acceptance profile, so ledgers written here verify with the cryptovalid
+checkers in Python, JS, Go and Rust, by the same author): keys sorted, separators (",", ":"), ASCII-escaped,
+NaN/Infinity refused, and NO floats inside hashed content — encoders disagree on floats (Go `1` vs Python `1.0`), so a
+float is a bug in the caller, not something to normalise silently. `floatfree()` is the explicit conversion for values
+that legitimately arrive as floats (an epoch time, a score): they become exact strings before hashing.
+
+Not RFC 8785 (JCS), nor a subset of it: the bytes are the same as JCS only when every character of every key and
+string is in U+0000..U+007E. U+007F and every non-ASCII character are written here as `\\uXXXX` and in JCS as raw UTF-8,
+and beyond the BMP the member order differs too (code points here, UTF-16 code units in JCS). Measured in
+tests/test_canonical_vs_jcs_20261113.py. The profile is not changed: it would change every recorded digest.
 """
 from __future__ import annotations
 
