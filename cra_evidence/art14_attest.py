@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Predicate type `art14-filing` v0.1 (spec/art14-filing/v0.1/README.md): an in-toto Statement v1 in a DSSE envelope,
-signed with Ed25519, about one Art. 14 notice drop file (cra-srp/2 or cra-srp/3) — its stage and glossary, what the tool recorded
-about its filing (a declaration), its source, and its place in the ledger.
+"""Predicate type `art14-filing` v0.1 and v0.2 (spec/art14-filing/v0.1/README.md, v0.2/README.md): an in-toto Statement v1
+in a DSSE envelope, signed with Ed25519, about one Art. 14 notice drop file (cra-srp/2 or cra-srp/3) — its stage and glossary,
+what the tool recorded about its filing (a declaration), its source, and its place in the ledger; v0.2 adds the CVE / EUVD
+identifiers of the notice (`vulnerabilityIds`, equal to the notice's when the drop file is given: rule 5) and a declared
+`caseReference` (never checkable).
 
 `build_statement` + `sign_envelope` (`cra attest`) and `verify_envelope` (`cra verify-attestation`). The verifier checks
 the envelope first (DSSE: decode, payload type, signatures over PAE with the trust store key a keyid names, or every
@@ -26,6 +28,9 @@ from .srp_notice import ALL_STAGES, GLOSSARIES, RULE9_STAGES, SOURCE_TOOLS, STRE
 from .vuln import EARLY_WARNING_HOURS, NOTIFICATION_HOURS, parse_utc
 
 TYPE_URI = "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.1"
+TYPE_URI_V02 = "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.2"
+VERSIONS = {TYPE_URI: "v0.1", TYPE_URI_V02: "v0.2"}
+TYPE_OF = {v: k for k, v in VERSIONS.items()}
 PAYLOAD_TYPE = "application/vnd.in-toto+json"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
 REGULATION = "EU 2024/2847 Art. 14"
@@ -38,6 +43,15 @@ _PRODUCT_KEYS = frozenset({"id", "version"})
 _FILING_KEYS = frozenset({"declaredBy", "srpReference", "filedAt", "filedBy"})
 _SOURCE_KEYS = frozenset({"tool", "toolVersion", "documentSha256", "absentAtSource"})
 _LEDGER_KEYS = frozenset({"entryIndex", "entryHash"})
+_V02_OPTIONAL = frozenset({"vulnerabilityIds", "caseReference"})
+_ID_KEYS = frozenset({"scheme", "id"})
+_CASE_KEYS = frozenset({"issuer", "id"})
+# v0.2 §2.1: full match, [0-9] = ASCII digits only (no `$`, which accepts a final newline; no `\d`, which accepts any
+# Unicode digit). CVE: the cveId pattern of the CVE JSON record format; EUVD: our reading (ENISA publishes no grammar).
+ID_FORMS = {"cve": re.compile(r"CVE-[0-9]{4}-[0-9]{4,19}"), "euvd": re.compile(r"EUVD-[0-9]{4}-[0-9]{1,19}")}
+ID_FIELDS = (("cve", "cve_id"), ("euvd", "euvd_id"))   # scheme order of §2.1 = the order of the notice fields
+NOT_CHECKED = "declared, not checked (no drop file given)"
+NOT_CHECKABLE = "declared by the signer, not checkable"
 _TS = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _B64_STD = re.compile(r"[A-Za-z0-9+/]*={0,2}")
@@ -104,6 +118,33 @@ def b64decode(s: Any) -> bytes:
         raise ValueError(f"not base64: {e}") from None
 
 
+def reference_ok(s: Any) -> bool:
+    """v0.2 §2.2: 1 to 255 code points, no control character (Cc: U+0000..U+001F, U+007F..U+009F), no leading or
+    trailing U+0020. Surrogates too are refused (only an argument can carry one: a parsed payload never does)."""
+    return (type(s) is str and 1 <= len(s) <= 255 and s[0] != " " and s[-1] != " "
+            and not any(ord(c) <= 0x1F or 0x7F <= ord(c) <= 0x9F or 0xD800 <= ord(c) <= 0xDFFF for c in s))
+
+
+def _present_value(v: Any) -> bool:
+    """v0.2 §3: missing, null, an empty list, or a string that is empty or only whitespace = no value"""
+    return not (v is None or v == [] or (type(v) is str and v.strip() == ""))
+
+
+def notice_identifiers(p: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """v0.2 §3: the CVE / EUVD identifiers of a drop file, from `fields`, else from `previous_fields`, in scheme order;
+    a value is listed as it is (a value out of form is still an identifier of the notice)"""
+    fields = p.get("fields") if isinstance(p.get("fields"), dict) else {}
+    prev = p.get("previous_fields") if isinstance(p.get("previous_fields"), dict) else {}
+    out = []
+    for scheme, k in ID_FIELDS:
+        v = fields.get(k)
+        if not _present_value(v):
+            v = prev.get(k)
+        if _present_value(v):
+            out.append({"scheme": scheme, "id": v})
+    return out
+
+
 # ── producing ─────────────────────────────────────────────────────────────────
 def _case_value(p: Dict[str, Any], k: str) -> Any:
     v = p["fields"].get(k)
@@ -113,19 +154,32 @@ def _case_value(p: Dict[str, Any], k: str) -> Any:
 
 
 def build_statement(drop_path: str, ledger_path: str, product_id: Optional[str] = None, product_version: Optional[str] = None,
-                    attested_at: Optional[datetime] = None, filing: Optional[Dict[str, str]] = None) -> bytes:
+                    attested_at: Optional[datetime] = None, filing: Optional[Dict[str, str]] = None,
+                    predicate: str = "v0.1", case_reference: Optional[Dict[str, str]] = None) -> bytes:
     """The Statement's exact bytes (canonical JSON, keys sorted). Refused unless the drop file is a cra-srp/2 notice
     (written by `cra notice`) or a cra-srp/3 notice that `cra check-notice` verifies against this ledger.
     product: from the ledger record when it carries it (0.8.0 on; a different --product/--version is refused), else
     from the arguments (required then). filing (cra-srp/2 only): {"srp_reference", "filed_at", "filed_by"} declared
-    by the operator of cra-evidence; for cra-srp/3 the filing is the one of the drop file."""
+    by the operator of cra-evidence; for cra-srp/3 the filing is the one of the drop file.
+    predicate: "v0.1" (the library default, the bytes of 0.8.0) or "v0.2" (`cra attest`'s default): v0.2 carries the
+    notice's CVE / EUVD identifiers (read from the drop file, v0.2 §6; one out of form is refused) and, if given,
+    case_reference {"issuer", "id"} (v0.2 §2.2)."""
     from . import __version__
     from .notice_check import check_notice, load_json_object
+    if predicate not in TYPE_OF:
+        raise AttestRefused(f"predicate {predicate!r}: v0.1 or v0.2")
+    if case_reference is not None:
+        if predicate != "v0.2":
+            raise AttestRefused("--case-reference: a field of art14-filing v0.2 (not of v0.1)")
+        if (not isinstance(case_reference, dict) or set(case_reference) != _CASE_KEYS
+                or not all(reference_ok(case_reference[k]) for k in ("issuer", "id"))):
+            raise AttestRefused("--case-reference ISSUER ID: each 1 to 255 characters, no control character, no leading "
+                                "or trailing space (art14-filing v0.2 §2.2)")
     raw = read_regular(drop_path)
     p = load_json_object(drop_path)
     sch = p.get("schema")
     if sch not in ("cra-srp/2", "cra-srp/3"):
-        raise AttestRefused(f"schema {sch!r}: the subject of art14-filing v0.1 is a cra-srp/2 or cra-srp/3 drop file")
+        raise AttestRefused(f"schema {sch!r}: the subject of art14-filing {predicate} is a cra-srp/2 or cra-srp/3 drop file")
     if filing is not None and sch != "cra-srp/2":
         raise AttestRefused("--srp-reference/--filed-at/--filed-by: a cra-srp/3 notice carries the filing its source recorded")
     r = check_notice(drop_path, ledger_path)
@@ -190,7 +244,17 @@ def build_statement(drop_path: str, ledger_path: str, product_id: Optional[str] 
             "awareAt": z(aware), "deadlineAt": deadline, "filing": filing_p, "source": source,
             "ledger": {"entryIndex": hits[0]["idx"], "entryHash": hits[0]["self_hash"]},
             "attestedAt": z(now.replace(microsecond=0))}
-    st = {"_type": STATEMENT_TYPE, "predicateType": TYPE_URI, "predicate": pred,
+    if predicate == "v0.2":
+        ids = notice_identifiers(p)
+        for e in ids:
+            if type(e["id"]) is not str or not ID_FORMS[e["scheme"]].fullmatch(e["id"]):
+                raise AttestRefused(f"the notice's {e['scheme']}_id {str(e['id'])[:80]!r} is not in the {e['scheme'].upper()} "
+                                    f"form (art14-filing v0.2 §2.1): fix the notice, or attest with --predicate v0.1")
+        if ids:
+            pred["vulnerabilityIds"] = ids
+        if case_reference is not None:
+            pred["caseReference"] = {"issuer": case_reference["issuer"], "id": case_reference["id"]}
+    st = {"_type": STATEMENT_TYPE, "predicateType": TYPE_OF[predicate], "predicate": pred,
           "subject": [{"name": f"srp-notice:{p['stream']}:{stage}", "digest": {"sha256": sha256, "sha3_256": sha3}}]}
     payload = json.dumps(st, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     errs = check_statement(payload)[1]      # the producer's statement must pass the verifier's own closed reading
@@ -238,8 +302,8 @@ def check_statement(payload: bytes) -> Tuple[Optional[Dict[str, Any]], List[Dict
         return None, reasons, unrec
     if st["_type"] != STATEMENT_TYPE:
         _r(reasons, "statement_type", f"_type {str(st['_type'])[:80]!r} is not {STATEMENT_TYPE}")
-    if st["predicateType"] != TYPE_URI:
-        _r(reasons, "predicate_type", f"predicateType {str(st['predicateType'])[:120]!r} is not {TYPE_URI}")
+    if type(st["predicateType"]) is not str or st["predicateType"] not in VERSIONS:
+        _r(reasons, "predicate_type", f"predicateType {str(st['predicateType'])[:120]!r} is not one of {list(VERSIONS)}")
     sub = st["subject"]
     if type(sub) is not list or len(sub) != 1 or not isinstance(sub[0], dict):
         _r(reasons, "subject", "subject must be a list of exactly one object")
@@ -262,7 +326,7 @@ def check_statement(payload: bytes) -> Tuple[Optional[Dict[str, Any]], List[Dict
     if not isinstance(pr, dict):
         _r(reasons, "predicate_type_error", "predicate must be an object")
         return None, reasons, unrec
-    _check_predicate(pr, reasons)
+    _check_predicate(pr, reasons, VERSIONS[st["predicateType"]])
     if not reasons and sub[0]["name"] != f"srp-notice:{pr['stream']}:{pr['stage']}":
         _r(reasons, "subject", f"subject[0].name {sub[0]['name'][:80]!r} is not srp-notice:{pr['stream']}:{pr['stage']}")
     if not reasons and pr["source"]["tool"] == "cra-evidence":
@@ -273,8 +337,9 @@ def check_statement(payload: bytes) -> Tuple[Optional[Dict[str, Any]], List[Dict
     return (None if reasons else st), reasons, unrec
 
 
-def _closed(obj: Dict[str, Any], keys: frozenset, where: str, reasons: List[Dict[str, str]]) -> bool:
-    unknown, absent = sorted(set(obj) - keys), sorted(keys - set(obj))
+def _closed(obj: Dict[str, Any], keys: frozenset, where: str, reasons: List[Dict[str, str]],
+            optional: frozenset = frozenset()) -> bool:
+    unknown, absent = sorted(set(obj) - keys - optional), sorted(keys - set(obj))
     if unknown:
         _r(reasons, "predicate_unknown_key", f"{where}: unknown keys {unknown}")
     if absent:
@@ -282,9 +347,9 @@ def _closed(obj: Dict[str, Any], keys: frozenset, where: str, reasons: List[Dict
     return not unknown and not absent
 
 
-def _check_predicate(pr: Dict[str, Any], reasons: List[Dict[str, str]]) -> None:
+def _check_predicate(pr: Dict[str, Any], reasons: List[Dict[str, str]], version: str = "v0.1") -> None:
     n0 = len(reasons)
-    if not _closed(pr, _PRED_KEYS, "predicate", reasons):
+    if not _closed(pr, _PRED_KEYS, "predicate", reasons, _V02_OPTIONAL if version == "v0.2" else frozenset()):
         return
     def typ(ok: bool, where: str, want: str):
         if not ok:
@@ -332,6 +397,16 @@ def _check_predicate(pr: Dict[str, Any], reasons: List[Dict[str, str]]) -> None:
         typ(type(i) is int and 0 <= i <= 2 ** 53 - 1, "ledger.entryIndex", "a non-negative integer")
         if typ(type(led["entryHash"]) is str, "ledger.entryHash", "a string") and not _HEX64.fullmatch(led["entryHash"]):
             _r(reasons, "predicate_type_error", "ledger.entryHash: 64 lower-case hex expected")
+    if "vulnerabilityIds" in pr:
+        _check_ids(pr["vulnerabilityIds"], reasons)
+    if "caseReference" in pr:
+        cr = pr["caseReference"]
+        if typ(isinstance(cr, dict), "caseReference", "an object (omit the key when there is no reference)") and \
+                _closed(cr, _CASE_KEYS, "caseReference", reasons):
+            for k in ("issuer", "id"):
+                if typ(type(cr[k]) is str, f"caseReference.{k}", "a string") and not reference_ok(cr[k]):
+                    _r(reasons, "predicate_identifier", f"caseReference.{k} {cr[k][:80]!r}: 1 to 255 characters, no control "
+                                                        "character, no leading or trailing space (v0.2 §2.2)")
     if len(reasons) > n0:
         return
     # §4.1 and the predicate's own consistency
@@ -364,6 +439,40 @@ def _check_predicate(pr: Dict[str, Any], reasons: List[Dict[str, str]]) -> None:
         _r(reasons, "deadline", f"deadlineAt {pr['deadlineAt']!r}: computed from awareAt it is {want!r} at stage {pr['stage']}")
     if fil is not None and parse_utc(pr["attestedAt"]) < parse_utc(fil["filedAt"]):
         _r(reasons, "rule4", "attestedAt is earlier than filing.filedAt (§4.2 rule 4)")
+
+
+def _check_ids(ids: Any, reasons: List[Dict[str, str]]) -> None:
+    """v0.2 §2.1"""
+    if type(ids) is not list:
+        _r(reasons, "predicate_type_error", "vulnerabilityIds: a list expected (omit the key when there are none)")
+        return
+    if not ids:
+        _r(reasons, "predicate_rule", "vulnerabilityIds is empty: omit the key when there are no identifiers (v0.2 §2.1)")
+        return
+    schemes, n0 = [], len(reasons)
+    for i, e in enumerate(ids):
+        where = f"vulnerabilityIds[{i}]"
+        if not isinstance(e, dict):
+            _r(reasons, "predicate_type_error", f"{where}: an object expected")
+            continue
+        if not _closed(e, _ID_KEYS, where, reasons):
+            continue
+        sc, v = e["scheme"], e["id"]
+        if type(sc) is not str:
+            _r(reasons, "predicate_type_error", f"{where}.scheme: a string expected")
+        elif sc not in ID_FORMS:
+            _r(reasons, "predicate_enum", f"{where}.scheme: {sc[:40]!r} is not one of {list(ID_FORMS)}")
+        if type(v) is not str:
+            _r(reasons, "predicate_type_error", f"{where}.id: a string expected")
+        elif type(sc) is str and sc in ID_FORMS and not ID_FORMS[sc].fullmatch(v):
+            _r(reasons, "predicate_identifier", f"{where}.id {v[:80]!r} is not in the {sc.upper()} form (v0.2 §2.1)")
+        schemes.append(sc)
+    if len(reasons) > n0:
+        return
+    # one rule: the schemes, in order, are the distinct schemes in the order of §2.1 (no duplicate, cve before euvd)
+    if schemes != [s for s, _ in ID_FIELDS if s in schemes]:
+        _r(reasons, "predicate_rule", f"vulnerabilityIds: at most one identifier per scheme, cve before euvd (v0.2 §2.1), "
+                                      f"got {schemes}")
 
 
 def _same(a: Any, b: Any) -> bool:
@@ -486,6 +595,9 @@ def verify_envelope(env_path: str, trust_store: Dict[str, str], drop_path: Optio
         return out
     # §3: the exact verified bytes, never the envelope re-parsed
     st, errs, unrec = check_statement(payload)
+    t = _type_read(payload)
+    if t is not None:      # v0.2 §5: the TypeURI of the statement once read; v0.1's otherwise (v0.1 receipts unchanged)
+        out["predicate_type"] = t
     out["statement_unrecognized"] = unrec
     if errs:
         reasons.extend(errs)
@@ -494,12 +606,47 @@ def verify_envelope(env_path: str, trust_store: Dict[str, str], drop_path: Optio
     out["statement"] = "accepted"
     pr = st["predicate"]
     dg = st["subject"][0]["digest"]
+    if st["predicateType"] == TYPE_URI_V02:    # v0.2 §5; a v0.1 receipt gets neither key
+        cr = pr.get("caseReference")
+        out["vulnerability_ids"] = {"declared": list(pr.get("vulnerabilityIds", [])), "notice": None,
+                                    "result": "not_evaluated (the drop file did not pass its digest, schema or rule 2 "
+                                              "checks)" if drop_path else NOT_CHECKED}
+        out["case_reference"] = {"declared": cr, "result": NOT_CHECKABLE if cr is not None else "none declared"}
     if drop_path:
         _check_drop(drop_path, pr, dg, out, reasons)
     if ledger_path:
         _check_ledger(ledger_path, pr, dg, out, reasons)
     out["verified"] = not reasons
     return out
+
+
+def _type_read(payload: bytes) -> Optional[str]:
+    """the predicateType of a payload, when it parses and is one of the defined TypeURIs"""
+    try:
+        st = _strict_json(payload, "payload")
+    except ValueError:
+        return None
+    t = st.get("predicateType") if isinstance(st, dict) else None
+    return t if type(t) is str and t in VERSIONS else None
+
+
+def _check_rule5(p: Dict[str, Any], pr: Dict[str, Any], out: Dict[str, Any], reasons: List[Dict[str, str]]) -> None:
+    """v0.2 §3 rule 5: the statement's identifiers equal the notice's (an absent key = none)"""
+    notice = notice_identifiers(p)
+    declared = pr.get("vulnerabilityIds", [])
+    out["vulnerability_ids"]["notice"] = notice
+    have = {e["scheme"]: e["id"] for e in declared}
+    want = {e["scheme"]: e["id"] for e in notice}
+    if have == want:
+        out["vulnerability_ids"]["result"] = "matched"
+        return
+    only_st = [f"{s}:{have[s]}" for s, _ in ID_FIELDS if s in have and (s not in want or want[s] != have[s])]
+    only_no = [f"{s}:{str(want[s])[:80]}" for s, _ in ID_FIELDS if s in want and (s not in have or want[s] != have[s])]
+    bad_form = [f"{s}_id {str(v)[:80]!r}" for s, v in want.items() if type(v) is not str or not ID_FORMS[s].fullmatch(v)]
+    out["vulnerability_ids"]["result"] = "FAIL"
+    _r(reasons, "vulnerability_ids", f"identifiers only in the statement: {only_st}; only in the notice: {only_no} "
+                                     "(v0.2 §3 rule 5: the two sets must be equal)"
+                                     + (f"; not in its scheme's form in the notice: {bad_form}" if bad_form else ""))
 
 
 def _check_drop(drop_path: str, pr: Dict[str, Any], dg: Dict[str, str], out: Dict[str, Any], reasons: List[Dict[str, str]]) -> None:
@@ -540,6 +687,8 @@ def _check_drop(drop_path: str, pr: Dict[str, Any], dg: Dict[str, str], out: Dic
         aw = _case_value(p, "awareness_datetime_utc")
         if not isinstance(aw, str) or parse_utc(aw) != parse_utc(pr["awareAt"]):
             _r(reasons, "drop_mismatch", f"awareAt differs from the notice's awareness instant {aw!r}")
+        if "vulnerability_ids" in out:          # a v0.2 statement
+            _check_rule5(p, pr, out, reasons)
         if sch == "cra-srp/2":   # a notice built here: the filing, if any, is declared in the statement only
             if pr["source"]["tool"] != "cra-evidence":
                 _r(reasons, "drop_mismatch", f"a cra-srp/2 drop file is a notice of cra-evidence, not of {pr['source']['tool']!r}")

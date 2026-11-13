@@ -257,6 +257,7 @@ class TestAttestV02(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertFalse(r["attested"])
         self.assertIn("cve-2024-3094", r["reasons"][0])
+        self.assertIn("--predicate v0.1", r["reasons"][0])     # the producer says what to do, not only what failed
         self.assertFalse(os.path.exists(out))
         rc, r, out = self.attest("drop_lower_case.json", "--predicate", "v0.1")      # v0.1 does not read identifiers
         self.assertEqual(rc, 0, r)
@@ -274,6 +275,26 @@ class TestAttestV02(unittest.TestCase):
         rc, r, out = self.attest("drop_no_ids.json", "--predicate", "v0.1", "--case-reference", "a", "b")
         self.assertNotEqual(rc, 0)
         self.assertFalse(os.path.exists(out))
+
+
+class TestNoticeIdentifiers(unittest.TestCase):
+    """v0.2 §3: which values of a drop file are the notice's identifiers"""
+
+    def test_fields_then_previous_fields(self):
+        from cra_evidence.art14_attest import notice_identifiers
+        C, E = "CVE-2024-3094", "EUVD-2024-31700"
+        for p, want in (({"fields": {"cve_id": C}}, [{"scheme": "cve", "id": C}]),
+                        ({"fields": {}, "previous_fields": {"cve_id": C, "euvd_id": E}},
+                         [{"scheme": "cve", "id": C}, {"scheme": "euvd", "id": E}]),
+                        ({"fields": {"cve_id": "  \t"}, "previous_fields": {"cve_id": C}}, [{"scheme": "cve", "id": C}]),
+                        ({"fields": {"cve_id": ""}, "previous_fields": None}, []),
+                        ({"fields": {"cve_id": " \u3000 "}}, []),           # whitespace only (str.isspace): no value
+                        ({"fields": {"cve_id": None, "euvd_id": []}}, []),
+                        ({"fields": {"cve_id": "cve-2024-3094"}}, [{"scheme": "cve", "id": "cve-2024-3094"}]),   # listed as it is
+                        ({"fields": {"euvd_id": E, "cve_id": C}}, [{"scheme": "cve", "id": C}, {"scheme": "euvd", "id": E}]),
+                        ({"fields": "not an object", "previous_fields": ["x"]}, [])):
+            with self.subTest(p=p):
+                self.assertEqual(notice_identifiers(p), want)
 
 
 def _is_cve(s):

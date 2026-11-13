@@ -305,10 +305,11 @@ def _main(argv: List[str] = None) -> int:
     s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp); --tip-key = the sealing identity"); common(s)
     s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted"); s.add_argument("--token-b64", help="RFC 3161 / OTS token (required when --ts-source is not 'asserted')")
     s.add_argument("--renew", help="JSON file with the previous seal (lte dict) to extend the chain")
-    s = sub.add_parser("attest", help="sign an in-toto statement (predicate art14-filing v0.1, DSSE, Ed25519) about a notice drop file and its ledger entry",
+    s = sub.add_parser("attest", help="sign an in-toto statement (predicate art14-filing v0.2 or v0.1, DSSE, Ed25519) about a notice drop file and its ledger entry",
                        description="Writes a DSSE envelope (payloadType application/vnd.in-toto+json) whose Statement names the drop file's "
                        "bytes (sha256 and sha3_256) and states its stage, glossary, completeness, awareness instant, filing as declared, "
-                       "source and ledger entry (spec/art14-filing/v0.1/README.md). Refused (exit 1, nothing written) unless the drop file "
+                       "source and ledger entry (spec/art14-filing/v0.1/README.md); v0.2, the default, adds the notice's CVE / EUVD "
+                       "identifiers, read from the drop file, and a declared case reference (spec/art14-filing/v0.2/README.md). Refused (exit 1, nothing written) unless the drop file "
                        "is cra-srp/2 (written by `cra notice`) or cra-srp/3 (imported) and `cra check-notice DROP --ledger L` verifies it. "
                        "For cra-srp/2 the source is cra-evidence and the filing is null unless declared with --filed-at [--srp-reference] "
                        "[--filed-by]; for cra-srp/3 it is the filing its source recorded. The keyid is --signer-id: the name of the key in "
@@ -320,17 +321,23 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--srp-reference", help="cra-srp/2 only, with --filed-at: the SRP reference of the filing, declared")
     s.add_argument("--filed-at", help="cra-srp/2 only: the instant the notice was filed on the SRP, declared (RFC 3339 with zone)")
     s.add_argument("--filed-by", help="cra-srp/2 only, with --filed-at: who filed it, declared")
+    s.add_argument("--predicate", choices=("v0.2", "v0.1"), default="v0.2",
+                   help="v0.2 (default): with the notice's CVE / EUVD identifiers (vulnerabilityIds) and --case-reference; v0.1: "
+                        "the statement of cra-evidence 0.8.0, no identifiers (for a verifier of 0.8.0, or to say nothing about them)")
+    s.add_argument("--case-reference", nargs=2, metavar=("ISSUER", "ID"),
+                   help="v0.2: the reference ISSUER (a CSIRT, a CNA, the manufacturer…) gave to the case; declared, never checkable")
     s.add_argument("--key", help="Ed25519 seed file"); s.add_argument("--signer-id", required=True)
     s.add_argument("--aws-kms-key-id", help="KMS key id/ARN (key spec ECC_NIST_EDWARDS25519)")
     s.add_argument("--aws-region"); s.add_argument("--aws-creds-file", help="KEY=VALUE file with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY [/ AWS_SESSION_TOKEN]")
     s.add_argument("--out", required=True, help="the envelope file to write (e.g. notice.intoto.json)")
-    s = sub.add_parser("verify-attestation", help="verify an art14-filing v0.1 DSSE envelope against a trust store (and, if given, the drop file and the ledger)",
+    s = sub.add_parser("verify-attestation", help="verify an art14-filing v0.1 or v0.2 DSSE envelope against a trust store (and, if given, the drop file and the ledger)",
                        description="Exit 0: a signature verifies with a trusted key, the statement and its closed predicate are accepted, and "
                        "every check that could be run passed; 1: refused or not verified (reasons in the receipt); 2: usage (e.g. an "
                        "unreadable trust store). Without --drop the subject's bytes are not compared (drop: not_evaluated); without "
                        "--ledger the receipt says ledger: not_evaluated. Unrecognized Statement fields are listed "
                        "(statement_unrecognized), never refused; signatures that do not verify and unknown keyids are listed; a signature "
-                       "without keyid is tried with every key of the trust store.")
+                       "without keyid is tried with every key of the trust store. For v0.2, with --drop, the statement's CVE / EUVD identifiers must "
+                       "equal the notice's (rule 5); without it they are listed as declared, not checked.")
     s.add_argument("envelope"); s.add_argument("--trust-store", required=True, help="JSON {signer_id: public_key_hex}")
     s.add_argument("--drop", help="the drop file the statement names"); s.add_argument("--ledger", help="the ledger the notice was recorded in")
     s = sub.add_parser("verify", help="verify a pack offline (exit 0 only if authenticity is not FAIL)"); s.add_argument("pack")
@@ -449,7 +456,9 @@ def _main(argv: List[str] = None) -> int:
         else:
             p.error("attest: give --key or --aws-kms-key-id")
         try:
-            payload = build_statement(a.drop, a.ledger, a.product, a.version, filing=fil)
+            cref = None if a.case_reference is None else {"issuer": a.case_reference[0], "id": a.case_reference[1]}
+            payload = build_statement(a.drop, a.ledger, a.product, a.version, filing=fil, predicate=a.predicate,
+                                      case_reference=cref)
         except (AttestRefused, ValueError, OSError) as e:
             _p({"attested": False, "reasons": [str(e)[:400]]}); return 1
         env = sign_envelope(payload, key, a.signer_id)
