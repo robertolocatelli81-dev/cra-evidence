@@ -1,4 +1,4 @@
-# Verifiers in other languages (by the same author as cra-evidence)
+# Verifiers in other languages (by the same author as omega-cra-evol)
 
 Three re-implementations of `cra verify`, written from the profile (not from each other), so that an auditor can
 check a pack without running the producer's code:

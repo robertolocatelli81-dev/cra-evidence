@@ -1,4 +1,4 @@
-name: "cra-evidence"
+name: "omega-cra-evol"
 description: "Run the cra command (EU Cyber Resilience Act evidence: SBOM record, Art. 14 clock, SRP notices, offline verification) from the provenance-verified container image"
 author: "Roberto Locatelli"
 branding:
@@ -10,7 +10,7 @@ branding:
 # repository at the tag v<version>), and the cra command runs from that digest, as the runner's user, in the workspace.
 # Arguments are split on whitespace (no shell).
 # Usage:
-#   - uses: robertolocatelli81-dev/cra-evidence@v0.9.0
+#   - uses: robertolocatelli81-dev/omega-cra-evol@v0.10.0
 #     with:
 #       args: verify dist/pack.json --ledger evidence/cra.ledger.jsonl --trust-store evidence/trust.json
 
@@ -19,9 +19,9 @@ inputs:
     description: "Arguments of the cra command, e.g. `verify pack.json --ledger cra.ledger.jsonl`; split on whitespace"
     required: true
   version:
-    description: "cra-evidence version of the image (default: the version of this action's release)"
+    description: "omega-cra-evol version of the image (default: the version of this action's release); images of 0.9.0 and earlier are not published under this name"
     required: false
-    default: "0.9.0"
+    default: "0.10.0"
   network:
     description: "Network of the container: `none` (default) or `bridge`, needed only by `cra feeds` and `cra sign --aws-kms-key-id` (the action passes no AWS_* variable to the container)"
     required: false
@@ -46,7 +46,7 @@ runs:
       env:
         V: ${{ inputs.version }}
         GH_TOKEN: ${{ inputs.token }}
-        REPO: robertolocatelli81-dev/cra-evidence
+        REPO: robertolocatelli81-dev/omega-cra-evol
       run: |
         set -euo pipefail
         case "$V" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::version '$V' is not X.Y.Z"; exit 1;; esac

@@ -24,7 +24,7 @@ from typing import Any, Dict, List
 
 from . import __version__
 from .applicability import ROLES, STREAMS
-from .locker import CRAEvidenceLocker
+from .locker import EvidenceLocker
 from .sbom import resolved_components, sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx
 from .signing import keygen, load_key, sign_pack
 from .notice_check import check_notice, load_json_object   # a duplicate key in --fields/--previous is refused, never last-wins
@@ -222,9 +222,9 @@ def _load_json(path: str) -> Any:
         return json.load(f)
 
 
-def _locker(a) -> CRAEvidenceLocker:
+def _locker(a) -> EvidenceLocker:
     key = load_key(a.tip_key) if getattr(a, "tip_key", None) else None
-    return CRAEvidenceLocker(a.ledger, a.product, a.version, tip_key=key, support_period_end=getattr(a, "support_period_end", None))
+    return EvidenceLocker(a.ledger, a.product, a.version, tip_key=key, support_period_end=getattr(a, "support_period_end", None))
 
 
 def main(argv: List[str] = None) -> int:
@@ -241,9 +241,9 @@ def main(argv: List[str] = None) -> int:
 
 
 def _main(argv: List[str] = None) -> int:
-    p = _Parser(prog="cra", description="CRA evidence locker (SBOM, Art. 14 clock, SRP notices, 10-year seal) — offline-verifiable",
+    p = _Parser(prog="cra", description="omega-cra-evol: evidence locker for the EU Cyber Resilience Act (SBOM, Art. 14 clock, SRP notices, 10-year seal) — offline-verifiable",
                                 allow_abbrev=False)   # `--require-source` is not `--require-sources`: the three independent verifiers refuse it, so does the reference
-    p.add_argument("--version", action=_Version, version=f"cra-evidence {__version__}")
+    p.add_argument("--version", action=_Version, version=f"omega-cra-evol {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(s):
@@ -311,7 +311,7 @@ def _main(argv: List[str] = None) -> int:
                        "source and ledger entry (spec/art14-filing/v0.1/README.md); v0.2, the default, adds the notice's CVE / EUVD "
                        "identifiers, read from the drop file, and a declared case reference (spec/art14-filing/v0.2/README.md). Refused (exit 1, nothing written) unless the drop file "
                        "is cra-srp/2 (written by `cra notice`) or cra-srp/3 (imported) and `cra check-notice DROP --ledger L` verifies it. "
-                       "For cra-srp/2 the source is cra-evidence and the filing is null unless declared with --filed-at [--srp-reference] "
+                       "For cra-srp/2 the source.tool is cra-evidence (the value of a notice built here) and the filing is null unless declared with --filed-at [--srp-reference] "
                        "[--filed-by]; for cra-srp/3 it is the filing its source recorded. The keyid is --signer-id: the name of the key in "
                        "the verifier's trust store. Not a proof of submission to ENISA's platform.")
     s.add_argument("drop", help="the cra-srp/2 or cra-srp/3 drop file"); s.add_argument("--ledger", required=True)

@@ -16,11 +16,11 @@ from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from cra_evidence import art14_attest as A                     # noqa: E402
-from cra_evidence import ledger as L                            # noqa: E402
-from cra_evidence.locker import CRAEvidenceLocker               # noqa: E402
-from cra_evidence.sbomify_import import run_import              # noqa: E402
-from cra_evidence.srp_notice import DryRunDrop, SRPNotice        # noqa: E402
+from omega_cra_evol import art14_attest as A                     # noqa: E402
+from omega_cra_evol import ledger as L                            # noqa: E402
+from omega_cra_evol.locker import EvidenceLocker               # noqa: E402
+from omega_cra_evol.sbomify_import import run_import              # noqa: E402
+from omega_cra_evol.srp_notice import DryRunDrop, SRPNotice        # noqa: E402
 
 NATIVE_EW = {"notification_type": "Vulnerability", "title": "Second exploited flaw in Acme T100 (synthetic)",
              "summary": "Synthetic early warning built with cra notice.", "manufacturer_name": "Example Widgets GmbH (synthetic)",
@@ -35,7 +35,7 @@ FIX = os.path.join(ROOT, "tests", "fixtures", "sbomify_4ef6128")
 NOW = datetime(2026, 11, 13, 6, 0, 0, tzinfo=timezone.utc)
 ATTESTED = datetime(2026, 11, 13, 6, 5, 0, tzinfo=timezone.utc)
 SMALL_ORDER_KEY = "0100000000000000000000000000000000000000000000000000000000000000"   # the identity point (order 1)
-# The cra-evidence version written in `source.toolVersion` of the statements built here (spec v0.1 §4: the version that
+# The version of this tool written in `source.toolVersion` of the statements built here (spec v0.1 §4: the version that
 # writes the statement). The vectors were written by 0.8.0; the version is fixed here so that a release does not
 # change them (13/11/2026, release of 0.9.0: with the package version the vectors would have changed at every release).
 VECTORS_TOOL_VERSION = "0.8.0"
@@ -70,7 +70,7 @@ def build_notices(work):
         return str(uuid.uuid5(uuid.NAMESPACE_URL, f"cra-evidence/art14-filing/v0.1/vectors/{n[0]}"))
     led, drop = os.path.join(work, "ledger.jsonl"), os.path.join(work, "drop")
     with mock.patch.object(L, "_now_ts", lambda: "2026-11-13T06:00:00Z"):
-        lk = CRAEvidenceLocker(led, "acme-thermostat-t100", "4.2.4")
+        lk = EvidenceLocker(led, "acme-thermostat-t100", "4.2.4")
         r = run_import(os.path.join(FIX, "report_s1AfwOnAgUPN.json"),
                        [os.path.join(FIX, "filing_s1AfwOnAgUPN_early_warning_1.json"),
                         os.path.join(FIX, "filing_s1AfwOnAgUPN_intermediate_1.json")],
@@ -87,8 +87,8 @@ def build_notices(work):
 
 
 def generate(out):
-    import cra_evidence
-    with mock.patch.object(cra_evidence, "__version__", VECTORS_TOOL_VERSION):
+    import omega_cra_evol
+    with mock.patch.object(omega_cra_evol, "__version__", VECTORS_TOOL_VERSION):
         return _generate(out)
 
 

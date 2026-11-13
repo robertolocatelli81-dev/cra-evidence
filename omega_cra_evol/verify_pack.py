@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Offline verifier of a CRA evidence pack. Layers, each PASS/FAIL/SKIP, then ONE authenticity verdict:
+"""Offline verifier of an evidence pack (`cra_evidence_pack/1`). Layers, each PASS/FAIL/SKIP, then ONE authenticity verdict:
   trusted-signed > signed > anchored (integrity, not identity) > FAIL.
 A pack alone proves internal consistency; the ledger next to it proves the pack is anchored into a valid chain; a
 signature proves which key produced it; a trust store proves that key is one you chose to trust."""
@@ -33,7 +33,7 @@ FAULT_ENV = "CRA_VERIFY_INJECT_FAULT"   # test hook: "1" raises inside the guard
 
 # 0.6.0 — spec/RECEIPT.md: admission, refusal_class, states (vocabulary below, immutable), policy. Computed BESIDE the
 # 0.5.1 fields, never from them: `ok` keeps its 0.5.1 computation and its equation with the states is proved on a bench.
-STATES_VOCABULARY = "cra-evidence/states-1"
+STATES_VOCABULARY = "cra-evidence/states-1"   # frozen identifier of spec/RECEIPT.md, kept across the 0.10.0 rename
 REFUSAL_CLASSES = ("format_unsupported", "unknown_member", "malformed")
 SUBJECTS = ("sealed_content", "ledger_anchor", "signed_tip", "source_documents", "producer_signature")
 STATES = ("verified", "contradicted", "indeterminate", "not_evaluated")

@@ -16,6 +16,8 @@ import re
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from . import __version__
+
 OSV_BATCH = "https://api.osv.dev/v1/querybatch"
 OSV_QUERY = "https://api.osv.dev/v1/query"
 OSV_BATCH_MAX = 1000   # queries per request (server-side cap of the OSV API implementation); larger inputs are chunked
@@ -32,7 +34,7 @@ def _post_json(url: str, body: Dict[str, Any], timeout: int) -> Any:
 
 
 def _get_json(url: str, timeout: int) -> Any:
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "cra-evidence/0.1"}), timeout=timeout) as r:  # nosec B310
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "omega-cra-evol/" + __version__}), timeout=timeout) as r:  # nosec B310
         return json.loads(r.read().decode() or "{}")
 
 

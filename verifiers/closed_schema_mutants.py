@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Generative, DIFFERENTIAL bench for the closed schema of 2026-10-10 (CHANGELOG «closed schema: a field nobody defined is never
-silent») across the four verifiers: Python reference (`python -m cra_evidence.cli verify`), JS, Go and Rust.
+silent») across the four verifiers: Python reference (`python -m omega_cra_evol.cli verify`), JS, Go and Rust.
 
 Method: the expected class of every mutation comes from the CHANGELOG's rule, never from a verifier; each mutation is fed to
 every verifier that is available, and three things must hold — (1) every verifier gives the class the rule prescribes,
@@ -34,11 +34,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_TREE = os.path.dirname(HERE)
 sys.path.insert(0, DEFAULT_TREE)
-from cra_evidence.canonical import sha3_hex  # noqa: E402
-from cra_evidence.ledger import entry_hash  # noqa: E402
-from cra_evidence.locker import CRAEvidenceLocker, _bind  # noqa: E402
-from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path  # noqa: E402
-from cra_evidence.vuln import VulnerabilityRecord  # noqa: E402
+from omega_cra_evol.canonical import sha3_hex  # noqa: E402
+from omega_cra_evol.ledger import entry_hash  # noqa: E402
+from omega_cra_evol.locker import EvidenceLocker, _bind  # noqa: E402
+from omega_cra_evol.signing import keygen, load_key, sign_pack, sidecar_path  # noqa: E402
+from omega_cra_evol.vuln import VulnerabilityRecord  # noqa: E402
 
 # the closed lists, copied from the CHANGELOG / SRP_FIELDS (not read from a verifier)
 SIDECAR_KEYS = ("signed_pack_sha3", "signer_id", "signed_utc", "public_key_hex", "signature_hex", "alg", "fingerprint")
@@ -81,7 +81,7 @@ def make_sources(root):
     def mk(name, sign):
         d = os.path.join(root, name); os.makedirs(d)
         keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
-        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW, details={"note": "accénti \U0001F9FE", "n": 2 ** 53 - 1}))
         pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
         if sign:
@@ -211,7 +211,7 @@ MAKERS = [m_sidecar_unknown, m_sidecar_unknown_multi, m_sidecar_legacy, m_sideca
 # ---------------------------------------------------------------- the verifiers of a tree
 def discover(tree, tmp, only=None, js_override=None):
     """name -> (cmd, cwd, env). Python runs the CLI from the tree (so THAT tree's package is the one measured); Go and Rust are built there."""
-    v = {"python": ([sys.executable, "-m", "cra_evidence.cli", "verify"], tree, {"PYTHONPATH": tree}),
+    v = {"python": ([sys.executable, "-m", "omega_cra_evol.cli", "verify"], tree, {"PYTHONPATH": tree}),
          "js": (["node", js_override or os.path.join(tree, "verifiers", "js", "cra-verify.mjs")], None, {})}
     if shutil.which("go"):
         out = os.path.join(tmp, "cra-verify-go")
@@ -263,7 +263,7 @@ def main(argv=None):
     try:
         srcs = make_sources(os.path.join(tmp, "src"))
         verifiers = discover(os.path.abspath(a.tree), tmp, set(a.only.split(",")) if a.only else None, a.js)
-        print(f"closed-schema bench (cra-evidence): {n} mutations from {len(srcs)} sources, seed {a.seed}, tree {a.tree}")
+        print(f"closed-schema bench (omega-cra-evol): {n} mutations from {len(srcs)} sources, seed {a.seed}, tree {a.tree}")
         print(f"verifiers: {sorted(verifiers)}")
         out_of_class = {k: 0 for k in verifiers}; silent = {k: 0 for k in verifiers}; unnamed = {k: 0 for k in verifiers}
         disagree = 0; per_class = {}; failures = []

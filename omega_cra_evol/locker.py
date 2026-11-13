@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The CRA evidence locker: every SBOM, vulnerability record, SRP notice and long-term seal goes into one
+"""The evidence locker for the EU Cyber Resilience Act: every SBOM, vulnerability record, SRP notice and long-term seal goes into one
 hash-chained ledger; the evidence pack commits to the ledger state and is anchored back into it; the pack can be
 signed (Ed25519 sidecar) and sealed for the 10-year retention (crypto-agile archive-timestamp chain).
 
@@ -30,7 +30,7 @@ from .vuln import VulnerabilityRecord, parse_utc
 
 ATTACHMENT_FORMATS = {"cyclonedx-vex", "csaf-2.0", "openvex", "cyclonedx-sbom", "spdx-3.0"}
 RETENTION_YEARS = 10
-PACK_KIND = "cra_evidence_pack/1"
+PACK_KIND = "cra_evidence_pack/1"   # frozen: written in every pack since 0.1.0 and checked by the four verifiers; kept across the 0.10.0 rename
 LEGAL_BASIS = ("Reg. (EU) 2024/2847 (Cyber Resilience Act): Annex I Part II(1) SBOM; Art. 14(2) actively exploited "
                "vulnerability (early warning 24 h, notification 72 h, final report 14 days after a corrective or mitigating "
                "measure is available); Art. 14(4) severe incident (24 h, 72 h, final report one month after the submission of "
@@ -65,7 +65,7 @@ def _present(v: Any) -> bool:
     return v is not None and str(v).strip() != ""
 
 
-class CRAEvidenceLocker:
+class EvidenceLocker:
     def __init__(self, ledger_path: str, product_id: str, product_version: str, tip_key: Optional[Tuple[Any, str]] = None,
                  support_period_end: Optional[str] = None, allow_unlocked: bool = False):
         """support_period_end: ISO-8601 instant; the CRA retention is 10 years OR the support period, whichever is
@@ -335,3 +335,13 @@ class CRAEvidenceLocker:
                       "time_anchor": ts_source, "time_anchor_verified_here": False, "signer_ephemeral": signer.ephemeral,
                       "signer_pub": signer.pub})
         return d
+
+
+def __getattr__(name: str) -> Any:
+    """`CRAEvidenceLocker`, the class name until 0.9.0: the same class, with a DeprecationWarning (removed in a release
+    on or after 2027-03-31, see the changelog)"""
+    if name == "CRAEvidenceLocker":
+        import warnings
+        warnings.warn("CRAEvidenceLocker is deprecated: use EvidenceLocker (the same class)", DeprecationWarning, stacklevel=2)
+        return EvidenceLocker
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

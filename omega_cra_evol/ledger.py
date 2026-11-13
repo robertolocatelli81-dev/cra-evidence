@@ -24,7 +24,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from .canonical import MAX_DEPTH, canonical_bytes, deep_recursion, nesting_depth, sha256_hex
 
 GENESIS = "0" * 64
-_log = logging.getLogger("cra_evidence.ledger")
+_log = logging.getLogger("omega_cra_evol.ledger")
 
 
 def _now_ts() -> str:
@@ -223,7 +223,7 @@ class Ledger:
         # declared acceptance that concurrent appends may fork the chain (fail-closed by default)
         self.allow_unlocked = allow_unlocked
         self.path = path
-        self._tip_key = tip_key   # (sk, pk_hex) from cra_evidence.signing.load_key(): signed chain tip after each append
+        self._tip_key = tip_key   # (sk, pk_hex) from omega_cra_evol.signing.load_key(): signed chain tip after each append
         d = os.path.dirname(os.path.abspath(path))
         os.makedirs(d, exist_ok=True)
 

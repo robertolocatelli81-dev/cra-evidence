@@ -123,7 +123,7 @@ class LongTermEvidence:
         (rfc3161_token.check_token: an RFC 3161 TimeStampResp / TimeStampToken with id-ct-TSTInfo and a SHA3-256
         messageImprint over the sealed digest; an OpenTimestamps file header), then stored (and digested) with the
         record. Its signature, its TSA certificate and its time are verified only by a `timestamp_trust_fn` that the
-        caller of `verify` injects: cra-evidence ships none, so `cra seal` and `cra verify` never verify a token (the
+        caller of `verify` injects: this package ships none, so `cra seal` and `cra verify` never verify a token (the
         verdict says `temporal_trust`: "ASSUMED …")."""
         from .rfc3161_token import check_token
         check_token(ts_source, token_b64, self.evidence_digest)

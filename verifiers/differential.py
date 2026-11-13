@@ -10,17 +10,17 @@ except ImportError:   # non-POSIX: the hazard cases then run without a per-child
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from cra_evidence.canonical import sha3_hex
-from cra_evidence.locker import CRAEvidenceLocker
-from cra_evidence.signing import keygen, load_key, sign_pack, sidecar_path
-from cra_evidence.srp_notice import SRPNotice
-from cra_evidence.verify_pack import verify_pack
-from cra_evidence.vuln import VulnerabilityRecord
-from cra_evidence.sbom import sbom_from_cyclonedx
-from cra_evidence.locker import source_file
-from cra_evidence.ledger import load_trust_store
+from omega_cra_evol.canonical import sha3_hex
+from omega_cra_evol.locker import EvidenceLocker
+from omega_cra_evol.signing import keygen, load_key, sign_pack, sidecar_path
+from omega_cra_evol.srp_notice import SRPNotice
+from omega_cra_evol.verify_pack import verify_pack
+from omega_cra_evol.vuln import VulnerabilityRecord
+from omega_cra_evol.sbom import sbom_from_cyclonedx
+from omega_cra_evol.locker import source_file
+from omega_cra_evol.ledger import load_trust_store
 try:
-    from cra_evidence.ledger import read_regular, MAX_DOC_BYTES
+    from omega_cra_evol.ledger import read_regular, MAX_DOC_BYTES
 except ImportError:   # an older reference (positive control against a pre-25/09 checkout): the hazard cases never read in-process
     read_regular, MAX_DOC_BYTES = (lambda p: open(p, "rb").read()), 64 << 20
 FAULT_ENV = "CRA_VERIFY_INJECT_FAULT"
@@ -37,7 +37,7 @@ AW = "2026-09-01T00:00:00Z"
 
 def build(d, tip=True, sign=False):
     keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
-    lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key if tip else None)
+    lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key if tip else None)
     lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW, details={"note": "accénti, 日本語, emoji 🧾, \"quotes\" \\ back/slash", "n": 2 ** 53 - 1, "neg": -7, "b": True, "z": None}))
     n = SRPNotice("vulnerability", "early_warning", {"notification_type": "Vulnerability", "title": "t", "summary": "s", "manufacturer_name": "m",
                                                      "member_states_available": ["IT", "DE"], "product_name": "prodotto-ü", "product_version": "1",
@@ -54,7 +54,7 @@ def build_with_source(d, tamper=None):
     tamper: None | "bytes" (one byte appended to the stored document) | "absent" (stored document removed)."""
     keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
     src = os.path.join(d, "syft.cdx.json"); json.dump(CDX_DOC, open(src, "w"))
-    lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+    lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
     rec = lk.record_sbom(sbom_from_cyclonedx(src, "prodotto-ü", "1"), source_path=src)
     pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
     stored = source_file(os.path.join(d, "l.jsonl"), rec["data"]["source"]["sha256"])
@@ -68,9 +68,9 @@ def build_with_source(d, tamper=None):
 def build_with_raw_source(d, value):
     """a producer-written cra_sbom record whose source.sha256 is `value` (hostile or degenerate): the four verifiers must
     agree — null/"" = no hash (SKIP), anything that is not a 64-hex string = FAIL, never a file path"""
-    from cra_evidence.locker import _bind
+    from omega_cra_evol.locker import _bind
     keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
-    lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+    lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
     lk.ledger.append(_bind({"kind": "cra_sbom", "product_id": "prodotto-ü", "product_version": "1", "sbom": {}, "component_count": 0,
                             "resolved_components": 0, "sbom_floor_met": False, "source": {"sha256": value}}))
     lk.evidence_pack(os.path.join(d, "p.json"))
@@ -106,7 +106,7 @@ def cases(base):
         p = os.path.join(d, "l.jsonl"); lines = open(p).read().splitlines(); open(p, "w").write("\n".join(lines[:-1]) + "\n"); return {"key": key[1]}
     case("tip_tail_truncated", truncated)
     def unsealed(d):
-        lk, key, pack, pk = build(d); lk2 = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1"); lk2.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-3", False, AW)); return {"key": key[1]}
+        lk, key, pack, pk = build(d); lk2 = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1"); lk2.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-3", False, AW)); return {"key": key[1]}
     case("tip_unsealed_tail", unsealed)
     def wrong_key(d):
         build(d); return {"key": "11" * 32}
@@ -254,18 +254,18 @@ def cases(base):
     case("sidecar_pubkey_non_ascii", lambda d: side_field(d, "public_key_hex", "a\u00e9a"))
     case("sidecar_signature_non_ascii", lambda d: side_field(d, "signature_hex", "a\u00e9a"))
     def signer_id_int(d):   # signed by the legitimate key holder through the library internals with a non-string signer_id
-        from cra_evidence.signing import signed_payload, pack_digest
+        from omega_cra_evol.signing import signed_payload, pack_digest
         keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key")); sk, pk = key
-        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
         pj = json.load(open(pack)); side = {"signer_id": 5, "public_key_hex": pk, "alg": "Ed25519", "signed_pack_sha3": pack_digest(pj), "signed_utc": AW}
         side["signature_hex"] = sk.sign(signed_payload(side)).hex(); json.dump(side, open(sidecar_path(pack), "w"))
         json.dump({"5": pk}, open(os.path.join(d, "trust.json"), "w")); return {"trust": os.path.join(d, "trust.json")}
     case("sidecar_signer_id_not_string", signer_id_int)
     def signed_on(d, utc):   # 26/09/2026: a signature dated on an instant that does not exist, signed by the key holder
-        from cra_evidence.signing import signed_payload, pack_digest
+        from omega_cra_evol.signing import signed_payload, pack_digest
         keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key")); sk, pk = key
-        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
         pj = json.load(open(pack)); side = {"signer_id": "acme-ci", "public_key_hex": pk, "alg": "Ed25519", "signed_pack_sha3": pack_digest(pj), "signed_utc": utc}
         side["signature_hex"] = sk.sign(signed_payload(side)).hex(); json.dump(side, open(sidecar_path(pack), "w"))
@@ -273,7 +273,7 @@ def cases(base):
                      ("offset_24h", "2026-09-26T10:00:00+24:00"), ("leap_day_2024", "2024-02-29T10:00:00Z")):
         case(f"sidecar_signed_utc_{tag}", lambda d, u=utc: signed_on(d, u))
     def no_pack_sha3(d):   # pack without pack_sha3 next to an anchor record without anchored_pack_sha3: nothing may match "nothing"
-        from cra_evidence.locker import _bind
+        from omega_cra_evol.locker import _bind
         lk, key, pack, pk = build(d); lk.ledger.append(_bind({"kind": "cra_pack_anchor", "pack_file": "p.json"}))
         j = json.load(open(pack)); del j["pack_sha3"]; json.dump(j, open(pack, "w"))
     case("pack_without_sha3_anchor_without_hash", no_pack_sha3)
@@ -339,7 +339,7 @@ def cases(base):
         build(d); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["honest_scope"] = [j["honest_scope"]]; json.dump(j, open(p, "w")); rehash(p)
     case("honest_scope_is_a_list", scope_list)
     def tip_month_13(d):   # signed by the real log key: only its holder can produce it, the four must still agree
-        from cra_evidence.signing import tip_payload
+        from omega_cra_evol.signing import tip_payload
         lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl.tip.json"); t = json.load(open(p)); sk, pkh = key
         t["ts"] = "2026-13-01T00:00:00Z"; t["signature_hex"] = sk.sign(tip_payload(t["entries"], t["ledger_id"], t["tip_sha256"], t["ts"])).hex()
         json.dump(t, open(p, "w")); return {"key": key[1]}
@@ -350,7 +350,7 @@ def cases(base):
     case("pack_leading_zero_number", lambda d: pack_text(d, lambda t: t.replace('"retention_years": 10', '"retention_years": 010', 1)))
     def raw_tab(d):   # a raw TAB byte inside a string: canonical form identical to the escaped one, so every digest still matches
         keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
-        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prod\tuct", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prod\tuct", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("prod\tuct", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
         t = open(pack, encoding="utf-8").read(); assert "\\t" in t; open(pack, "w", encoding="utf-8").write(t.replace("\\t", "\t"))
     case("pack_raw_control_char_same_digest", raw_tab)
@@ -368,24 +368,24 @@ def cases(base):
             v = [v]
         return v
     def ledger_depth(d, total):   # a well-formed, correctly chained line whose TOTAL bracket depth is `total` (512 accepted, 513 refused, in all four)
-        from cra_evidence.ledger import entry_hash
+        from omega_cra_evol.ledger import entry_hash
         lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl"); last = json.loads(open(p).read().splitlines()[-1])
         e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": {"deep": nested(total - 3)}}   # entry{data{deep[…{x}]}}: 3 levels + n arrays
         e["self_hash"] = entry_hash(e) if total <= 512 else "0" * 64
         line = json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        from cra_evidence.canonical import nesting_depth; assert nesting_depth(line) == total, nesting_depth(line)
+        from omega_cra_evol.canonical import nesting_depth; assert nesting_depth(line) == total, nesting_depth(line)
         open(p, "a").write(line + "\n")
     case("ledger_line_depth_512", lambda d: ledger_depth(d, 512))
     case("ledger_line_depth_513", lambda d: ledger_depth(d, 513))
     def pack_depth(d, total):     # pack alone (ledger removed) with a nested extra field, re-hashed: pack-json must agree at the bound
         build(d); os.remove(os.path.join(d, "l.jsonl")); p = os.path.join(d, "p.json"); j = json.load(open(p)); j["deep"] = nested(total - 2)
-        json.dump(j, open(p, "w")); from cra_evidence.canonical import nesting_depth; assert nesting_depth(open(p).read()) == total
+        json.dump(j, open(p, "w")); from omega_cra_evol.canonical import nesting_depth; assert nesting_depth(open(p).read()) == total
         if total <= 512: rehash(p)
     case("pack_depth_512", lambda d: pack_depth(d, 512))
     case("pack_depth_513", lambda d: pack_depth(d, 513))
     # ---- round 6: keys named __proto__, hex decoders, CLI flag values (python CLI runs too on these: `cli` rows)
     def proto_in_record(d):
-        from cra_evidence.locker import _bind
+        from omega_cra_evol.locker import _bind
         lk, key, pack, pk = build(d); lk.ledger.append(_bind({"kind": "note", "__proto__": {"polluted": True}, "n": 1})); lk.evidence_pack(os.path.join(d, "p.json"))
     case("record_key_named___proto__", proto_in_record)
     def proto_in_pack(d):
@@ -429,9 +429,9 @@ def cases(base):
         build(d, sign=True); return {"raw_args": ["--trust-store"]}
     case("cli_trust_store_flag_without_value", trust_flag_no_value, cli=True)
     def side_signed_over(d, mutate):   # sidecar signed by the real key over a payload whose field is missing / null / not an instant
-        from cra_evidence.signing import signed_payload, pack_digest, canonical_bytes
+        from omega_cra_evol.signing import signed_payload, pack_digest, canonical_bytes
         keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key")); sk, pk = key
-        lk = CRAEvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(d, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
         lk.record_vulnerability(VulnerabilityRecord("prodotto-ü", "CVE-2026-1", True, AW)); pack = os.path.join(d, "p.json"); lk.evidence_pack(pack)
         pj = json.load(open(pack)); side = {"signer_id": "acme-ci", "public_key_hex": pk, "alg": "Ed25519", "signed_pack_sha3": pack_digest(pj), "signed_utc": AW}
         mutate(side)
@@ -445,7 +445,7 @@ def cases(base):
     case("sidecar_signed_utc_null_signed", lambda d: side_signed_over(d, lambda s: s.__setitem__("signed_utc", None)))
     case("sidecar_signed_utc_not_instant_signed", lambda d: side_signed_over(d, lambda s: s.__setitem__("signed_utc", "yesterday")))
     def external_without_hash(d):
-        from cra_evidence.locker import _bind
+        from omega_cra_evol.locker import _bind
         lk, key, pack, pk = build(d)
         lk.ledger.append(_bind({"kind": "cra_sbom", "product_id": "prodotto-ü", "product_version": "1", "sbom": {}, "component_count": 0,
                                 "resolved_components": 0, "sbom_floor_met": False, "source": {"format": "cyclonedx-json", "generator": "syft"}}))
@@ -475,7 +475,7 @@ def cases(base):
     case("pack_path_trailing_slash", lambda d: trailing(d, "/"))
     case("pack_path_trailing_slash_dot", lambda d: trailing(d, "/."))
     def rechained_stale_record_sha3(d):   # record content changed, record_sha3 left stale, the WHOLE chain re-linked coherently: only the binding layer sees it
-        from cra_evidence.ledger import entry_hash
+        from omega_cra_evol.ledger import entry_hash
         build(d); p = os.path.join(d, "l.jsonl"); es = [json.loads(l) for l in open(p).read().splitlines()]
         es[0]["data"]["vuln_id"] = "CVE-9999"; prev = "0" * 64
         for e in es:
@@ -492,7 +492,7 @@ def cases(base):
         keygen(os.path.join(d, "k.key")); key = load_key(os.path.join(d, "k.key"))
         real = os.path.join(d, "real"); os.makedirs(os.path.join(real, "sub")); os.symlink(os.path.join(real, "sub"), os.path.join(d, "sym"))
         src = os.path.join(d, "syft.cdx.json"); json.dump(CDX_DOC, open(src, "w"))
-        lk = CRAEvidenceLocker(os.path.join(real, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
+        lk = EvidenceLocker(os.path.join(real, "l.jsonl"), "prodotto-ü", "1", tip_key=key)
         rec = lk.record_sbom(sbom_from_cyclonedx(src, "prodotto-ü", "1"), source_path=src); pack = os.path.join(real, "p.json"); lk.evidence_pack(pack)
         h = rec["data"]["source"]["sha256"]; stored = source_file(os.path.join(real, "l.jsonl"), h)
         if lexical_copy:
@@ -596,13 +596,13 @@ def cases(base):
             build(d); open(os.path.join(d, "l.jsonl"), "a").write('{"idx": 3, "ts": "x", "prev_hash": "y", "data": {"pad": "' + "a" * (65 << 20) + '"}, "self_hash": "z"}\n')
         case("ledger_line_65MiB_after_anchor", big_line)
         def big_valid(d):   # a WELL-FORMED, correctly chained line above the cap (the producer refuses to write one: built by hand)
-            from cra_evidence.ledger import entry_hash
+            from omega_cra_evol.ledger import entry_hash
             lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl"); last = json.loads(open(p).read().splitlines()[-1])
             e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": {"pad": "a" * (65 << 20)}}; e["self_hash"] = entry_hash(e)
             open(p, "a").write(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
         case("ledger_line_65MiB_valid_record", big_valid)
         def exact(d, content_len):   # a well-formed, correctly chained line whose CONTENT (no terminator) is exactly content_len bytes
-            from cra_evidence.ledger import entry_hash
+            from omega_cra_evol.ledger import entry_hash
             lk, key, pack, pk = build(d); p = os.path.join(d, "l.jsonl"); last = json.loads(open(p).read().splitlines()[-1])
             e = {"idx": last["idx"] + 1, "ts": last["ts"], "prev_hash": last["self_hash"], "data": {"pad": ""}}; e["self_hash"] = entry_hash(e)
             base = len(json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
@@ -631,8 +631,8 @@ def cases(base):
     # (producer-signature detail, pack-schema, ledger-schema); the positive controls keep their verdict. Measured on 0b83a3f (reference
     # closed, ports not): the sidecar and the pack-alone cases verified `signed` in JS/Go/Rust, the appended entry `anchored`.
     KEY = "x_unknown_2026"
-    from cra_evidence.ledger import entry_hash as _eh
-    from cra_evidence.locker import _bind as _bd
+    from omega_cra_evol.ledger import entry_hash as _eh
+    from omega_cra_evol.locker import _bind as _bd
     def closed_sidecar(d, key):
         lk, k, pack, pk = build(d, sign=True); sp = sidecar_path(pack); sd = json.load(open(sp)); sd[key] = "x"; json.dump(sd, open(sp, "w", encoding="utf-8"), ensure_ascii=False)
         return {"expect": {"ok": False, "assessed": True, "authenticity": "FAIL", "fails_include": ["producer-signature"], "detail": ("producer-signature", "sidecar field not in the closed schema: " + key)}}
@@ -773,7 +773,7 @@ def main():
     diverg, n = [], 0
     for name, pack, opts in cases(base):
         if opts.get("hazard") or "unreadable" in opts.get("expect", {}):   # declared outcome, checked row by row (the Python CLI is a row; no in-process read)
-            exp = opts["expect"]; rows = {"python-cli": [sys.executable, "-m", "cra_evidence.cli", "verify"], **vs}; row = {}
+            exp = opts["expect"]; rows = {"python-cli": [sys.executable, "-m", "omega_cra_evol.cli", "verify"], **vs}; row = {}
             for lang, cmd in rows.items():
                 r = run_cli(cmd, pack, opts)
                 row[lang] = "ok" if meets(r, exp) else ("BLOCKED" if r.get("error", "").startswith("timeout") else f"exit {r.get('exit')}" if "error" in r else "WRONG")
@@ -783,7 +783,7 @@ def main():
             print(f"{name:32s} declared={json.dumps(exp)[:60]:60s} " + " ".join(f"{l}={row[l]}" for l in rows))
             continue
         if opts.get("cli"):   # CLI boundary case: the Python CLI is a row like the others; every row must be a usage/unreadable error (exit 2, no verdict)
-            rows = dict(vs); rows["python-cli"] = [sys.executable, "-m", "cra_evidence.cli", "verify"]
+            rows = dict(vs); rows["python-cli"] = [sys.executable, "-m", "omega_cra_evol.cli", "verify"]
             exp = (None, "unreadable-input", None); row = {}
             for lang, cmd in rows.items():
                 r = run_cli(cmd, pack, opts)
@@ -826,7 +826,7 @@ def main():
             ref_r = {**ref, "exit": _exit_for(ref), "fails": exp_fails, "details": {l["layer"]: l.get("detail", "") for l in ref["layers"] if l["status"] == "FAIL"}}
             if not meets(ref_r, opts["expect"]):
                 diverg.append((name, "python", opts["expect"], [], ref_r))
-            vs_rows = {"python-cli": [sys.executable, "-m", "cra_evidence.cli", "verify"], **vs}
+            vs_rows = {"python-cli": [sys.executable, "-m", "omega_cra_evol.cli", "verify"], **vs}
         else:
             vs_rows = vs
         for lang, cmd in vs_rows.items():

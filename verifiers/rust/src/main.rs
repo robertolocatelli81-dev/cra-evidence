@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! cra-verify — independent Rust verifier of a cra-evidence pack. Same layers and authenticity verdict as
-//! cra_evidence/verify_pack.py. json.rs / keccak.rs / sha256.rs are cryptovalid's pure-Rust modules (same profile).
+//! cra-verify — independent Rust verifier of an omega-cra-evol evidence pack. Same layers and authenticity verdict as
+//! omega_cra_evol/verify_pack.py. json.rs / keccak.rs / sha256.rs are cryptovalid's pure-Rust modules (same profile).
 //! Usage: cra-verify <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex] [--require-sources]; exit 0 only if ok.
 //! source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
 //! hash (SHA-256) to that value when present (mismatch = FAIL; absence = SKIP, or FAIL with --require-sources).
@@ -94,7 +94,7 @@ fn ledger_file_name_ok(v: &str) -> bool { !v.is_empty() && v != "." && v != ".."
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const RECORD_KINDS: [&str; 5] = ["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"];
 // Closed schema (2026-10-10, CHANGELOG «closed schema: a field nobody defined is never silent»): the same lists as
-// cra_evidence/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL (pack-schema
+// omega_cra_evol/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL (pack-schema
 // layer, ledger-schema layer, producer-signature detail), never a silent pass — measured 2026-10-11 on this verifier: a sidecar with
 // an extra key verified trusted-signed with no trace. Record payloads (data.*) keep their own rules (SRP_FIELDS.md).
 const PACK_KEYS: [&str; 14] = ["kind", "generated_utc", "legal_basis", "honest_scope", "product_id", "product_version", "retention", "retention_years",

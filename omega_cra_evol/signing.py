@@ -148,7 +148,7 @@ def verify_tip(tip: Dict[str, Any], trusted_pubkey_hex: str, entries: int, ledge
     try:
         _, Ed25519PublicKey, _ = _ed()
     except ImportError:
-        return {"ok": False, "error": "tip_unchecked: a signed tip is present but cannot be checked here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
+        return {"ok": False, "error": "tip_unchecked: a signed tip is present but cannot be checked here (cryptography not installed: pip install 'omega-cra-evol[sign]', or use the JS/Go/Rust verifier)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(trusted_pubkey_hex)).verify(
             bytes.fromhex(tip["signature_hex"]), tip_payload(n, tip["ledger_id"], tip["tip_sha256"], tip["ts"]))
@@ -261,7 +261,7 @@ def verify_pack_signature(pack_path: str, trust_store: Optional[Dict[str, str]] 
         # earlier with the KMS key verified as authenticity=FAIL in a venv without `cryptography` — our own missing
         # library reported with the value of a bad signature, on our own release artifact.
         return {"status": "FAIL", "assessed": False, "reason": "instrument_failure",
-                "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'cra-evidence[sign]', or use the JS/Go/Rust verifier)"}
+                "detail": "signature present but NOT checkable here (cryptography not installed: pip install 'omega-cra-evol[sign]', or use the JS/Go/Rust verifier)"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(side["public_key_hex"])).verify(bytes.fromhex(side["signature_hex"]), signed_payload(side))
     except Exception as e:  # noqa: BLE001

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// cra-verify — independent Go verifier of a cra-evidence pack (standard library only: crypto/sha256, crypto/sha3,
-// crypto/ed25519). Same layers and authenticity verdict as cra_evidence/verify_pack.py; canonical.go/prescan.go are
+// cra-verify — independent Go verifier of an omega-cra-evol evidence pack (standard library only: crypto/sha256, crypto/sha3,
+// crypto/ed25519). Same layers and authenticity verdict as omega_cra_evol/verify_pack.py; canonical.go/prescan.go are
 // the strict parser + canonical encoder of cryptovalid's Go verifier (same profile, same author).
 // Usage: cra-verify <pack.json> [--ledger path] [--trust-store file.json] [--log-pubkey hex] [--require-sources]; exit 0 only if ok.
 // source-documents layer: every cra_sbom record with source.sha256 names <ledger>.sources/<sha256>.json, whose bytes must
@@ -36,7 +36,7 @@ const (
 var recordKinds = map[string]bool{"cra_sbom": true, "cra_vuln": true, "cra_srp_notice": true, "cra_longterm_seal": true, "cra_pack_anchor": true}
 
 // Closed schema (2026-10-10, CHANGELOG «closed schema: a field nobody defined is never silent»): the same lists as
-// cra_evidence/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL
+// omega_cra_evol/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL
 // (pack-schema layer, ledger-schema layer, producer-signature detail), never a silent pass — measured 2026-10-11 on this
 // verifier: a sidecar with an extra key verified trusted-signed with no trace in the receipt. Record payloads (data.*)
 // keep their own rules (SRP_FIELDS.md).

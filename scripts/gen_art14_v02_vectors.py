@@ -21,10 +21,10 @@ from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-from cra_evidence import art14_attest as A                     # noqa: E402
-from cra_evidence import ledger as L                            # noqa: E402
-from cra_evidence.locker import CRAEvidenceLocker               # noqa: E402
-from cra_evidence.srp_notice import DryRunDrop, SRPNotice        # noqa: E402
+from omega_cra_evol import art14_attest as A                     # noqa: E402
+from omega_cra_evol import ledger as L                            # noqa: E402
+from omega_cra_evol.locker import EvidenceLocker               # noqa: E402
+from omega_cra_evol.srp_notice import DryRunDrop, SRPNotice        # noqa: E402
 from gen_art14_vectors import (OTHER_KEY_STRING, SIGNER, TEST_KEY_STRING, VECTORS_TOOL_VERSION, dumps,   # noqa: E402
                                envelope, test_key)
 
@@ -69,7 +69,7 @@ def build_notices(work):
     led, drop = os.path.join(work, "ledger.jsonl"), os.path.join(work, "drop")
     out = {}
     with mock.patch.object(L, "_now_ts", lambda: "2026-11-13T07:00:00Z"):
-        lk = CRAEvidenceLocker(led, PRODUCT, VERSION)
+        lk = EvidenceLocker(led, PRODUCT, VERSION)
         for name, (stage, fields, prev) in NOTICES.items():
             nt = SRPNotice(stream="vulnerability", stage=stage, fields=dict(fields), notice_id=new_id(),
                            generated_utc=NOW.isoformat(timespec="seconds"),
@@ -92,8 +92,8 @@ def to_v02(payload, ids=None, case=None, type_uri=TYPE_V02):
 
 
 def generate(out):
-    import cra_evidence
-    with mock.patch.object(cra_evidence, "__version__", VECTORS_TOOL_VERSION):   # the version of the v0.1 vectors
+    import omega_cra_evol
+    with mock.patch.object(omega_cra_evol, "__version__", VECTORS_TOOL_VERSION):   # the version of the v0.1 vectors
         return _generate(out)
 
 

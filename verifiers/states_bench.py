@@ -46,7 +46,7 @@ import json, sys
 root, sab = sys.argv[1], sys.argv[2]
 sys.path.insert(0, root)
 import importlib
-VP = importlib.import_module("cra_evidence.verify_pack"); S = importlib.import_module("cra_evidence.signing")   # the package exports a function named verify_pack
+VP = importlib.import_module("omega_cra_evol.verify_pack"); S = importlib.import_module("omega_cra_evol.signing")   # the package exports a function named verify_pack
 def _ed_missing():
     raise ImportError("cryptography made unimportable by the bench")
 real_ed = S._ed
@@ -91,7 +91,7 @@ for line in sys.stdin:
 def cli(args, cwd=None, ok_codes=(0,)):
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env["PYTHONPATH"] = ROOT
-    p = subprocess.run([sys.executable, "-B", "-m", "cra_evidence.cli"] + args, capture_output=True, text=True, env=env, cwd=cwd)
+    p = subprocess.run([sys.executable, "-B", "-m", "omega_cra_evol.cli"] + args, capture_output=True, text=True, env=env, cwd=cwd)
     if p.returncode not in ok_codes:
         raise SystemExit(f"bench base build failed: cra {' '.join(args)}: rc {p.returncode} {p.stderr[-400:]}")
     return json.loads(p.stdout) if p.stdout.strip() else None
@@ -192,12 +192,12 @@ def mutations(base, quick):
         os.chmod(os.path.join(d, "cra.ledger.jsonl"), 0)
     def lappend(d):   # an entry after the anchor: chain still valid, the tip (if any) names fewer entries
         sys.path.insert(0, ROOT)
-        from cra_evidence.ledger import Ledger
+        from omega_cra_evol.ledger import Ledger
         Ledger(os.path.join(d, "cra.ledger.jsonl")).append({"kind": "note", "x": 1})
     def rechain(d, change):
         """change(entries) edits entry data in place; the chain is then recomputed (a consistent rewrite)."""
         sys.path.insert(0, ROOT)
-        from cra_evidence.ledger import entry_hash
+        from omega_cra_evol.ledger import entry_hash
         p = os.path.join(d, "cra.ledger.jsonl"); es = [json.loads(x) for x in open(p, encoding="utf-8").read().splitlines() if x.strip()]
         change(es)
         prev = "0" * 64
@@ -210,7 +210,7 @@ def mutations(base, quick):
         rechain(d, ch)
     def lsrcbad(d):      # a source hash that is not hex, record re-bound, chain recomputed
         sys.path.insert(0, ROOT)
-        from cra_evidence.canonical import sha3_hex
+        from omega_cra_evol.canonical import sha3_hex
         def ch(es):
             for e in es:
                 src = e["data"].get("source")
@@ -220,7 +220,7 @@ def mutations(base, quick):
         rechain(d, ch)
     def rehash(d, key, val):
         sys.path.insert(0, ROOT)
-        from cra_evidence.canonical import sha3_hex
+        from omega_cra_evol.canonical import sha3_hex
         p = jload(os.path.join(d, "cra_pack.json")); p[key] = val
         p["pack_sha3"] = sha3_hex({k: v for k, v in p.items() if k != "pack_sha3"}); jdump(p, os.path.join(d, "cra_pack.json"))
     for key, val in (("verification", {"chain_ok": False, "record_digests_bound": True}), ("verification", {}), ("ledger_entries", 999),
@@ -393,7 +393,7 @@ def main():
         raise SystemExit(f"unknown sabotage {sab!r}; one of {SABOTAGES}")
     sys.path.insert(0, ROOT)
     import importlib
-    VP = importlib.import_module("cra_evidence.verify_pack")
+    VP = importlib.import_module("omega_cra_evol.verify_pack")
     work = tempfile.mkdtemp(prefix="cra-states-bench-")
     try:
         bases = build_bases(work)

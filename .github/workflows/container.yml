@@ -1,10 +1,10 @@
 name: container
 
-# Builds ghcr.io/robertolocatelli81-dev/cra-evidence:<version> from the wheel of a GitHub Release exactly as released
+# Builds ghcr.io/robertolocatelli81-dev/omega-cra-evol:<version> from the wheel of a GitHub Release exactly as released
 # (checked against the release's SHA256SUMS, nothing rebuilt), proves that the image verifies the release's own signed
 # evidence pack and refuses a tampered copy, pushes it, and attests its build provenance (Sigstore, stored in the
-# registry): `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:<version> --repo robertolocatelli81-dev/cra-evidence
-# --signer-workflow robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml --source-ref refs/tags/v<version>`.
+# registry): `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/omega-cra-evol:<version> --repo robertolocatelli81-dev/omega-cra-evol
+# --signer-workflow robertolocatelli81-dev/omega-cra-evol/.github/workflows/container.yml --source-ref refs/tags/v<version>`.
 # Runs on a published release, or by hand for an existing tag: then "Use workflow from" must be that same tag (checked
 # below), so the Dockerfile is always the tag's and the attestation names refs/tags/v<version>, which action.yml requires.
 
@@ -28,7 +28,7 @@ jobs:
       id-token: write
       attestations: write
     env:
-      IMAGE: ghcr.io/robertolocatelli81-dev/cra-evidence
+      IMAGE: ghcr.io/robertolocatelli81-dev/omega-cra-evol
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,11 +49,11 @@ jobs:
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D rel
           cd rel
           sha256sum -c SHA256SUMS
-          for f in "cra_evidence-$v-py3-none-any.whl" "cra-evidence-$v-cra_pack.json" "cra-evidence-$v-cra_pack.json.sig.json" \
-                   "cra-evidence-$v-cra.ledger.jsonl" "cra-evidence-$v-trust.json"; do
+          for f in "omega_cra_evol-$v-py3-none-any.whl" "omega-cra-evol-$v-cra_pack.json" "omega-cra-evol-$v-cra_pack.json.sig.json" \
+                   "omega-cra-evol-$v-cra.ledger.jsonl" "omega-cra-evol-$v-trust.json"; do
             awk -v f="$f" '$2==f {found=1} END {exit !found}' SHA256SUMS || { echo "$f is not listed in SHA256SUMS"; exit 1; }
           done
-          cp "cra_evidence-$v-py3-none-any.whl" ../dist/
+          cp "omega_cra_evol-$v-py3-none-any.whl" ../dist/
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Build
         env:
@@ -65,15 +65,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(docker run --rm "$IMAGE:$V" --version)" = "cra-evidence $V"
+          test "$(docker run --rm "$IMAGE:$V" --version)" = "omega-cra-evol $V"
           chmod -R a+rX rel
-          run() { docker run --rm -v "$PWD/rel:/work:ro" "$IMAGE:$V" verify "$1" --ledger "cra-evidence-$V-cra.ledger.jsonl" --trust-store "cra-evidence-$V-trust.json"; }
-          run "cra-evidence-$V-cra_pack.json" > ok.json
+          run() { docker run --rm -v "$PWD/rel:/work:ro" "$IMAGE:$V" verify "$1" --ledger "omega-cra-evol-$V-cra.ledger.jsonl" --trust-store "omega-cra-evol-$V-trust.json"; }
+          run "omega-cra-evol-$V-cra_pack.json" > ok.json
           python3 -c "import json,sys; d=json.load(open('ok.json')); sys.exit(0 if (d['ok'], d['authenticity']) == (True, 'trusted-signed') else 1)"
-          sed "s/\"$V\"/\"$V-tampered\"/" "rel/cra-evidence-$V-cra_pack.json" > rel/tampered.json
-          cp "rel/cra-evidence-$V-cra_pack.json.sig.json" rel/tampered.json.sig.json
+          sed "s/\"$V\"/\"$V-tampered\"/" "rel/omega-cra-evol-$V-cra_pack.json" > rel/tampered.json
+          cp "rel/omega-cra-evol-$V-cra_pack.json.sig.json" rel/tampered.json.sig.json
           chmod a+r rel/tampered.json rel/tampered.json.sig.json
-          cmp -s "rel/cra-evidence-$V-cra_pack.json" rel/tampered.json && { echo "positive control: the tampered copy is identical"; exit 1; }
+          cmp -s "rel/omega-cra-evol-$V-cra_pack.json" rel/tampered.json && { echo "positive control: the tampered copy is identical"; exit 1; }
           rc=0; run tampered.json > bad.json || rc=$?
           test "$rc" -eq 1 || { echo "tampered pack: exit $rc, expected 1"; exit 1; }
           python3 -c "import json,sys; sys.exit(0 if json.load(open('bad.json'))['ok'] is False else 1)"

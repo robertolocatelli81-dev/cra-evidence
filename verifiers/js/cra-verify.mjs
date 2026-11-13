@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// cra-verify — independent JavaScript verifier of a cra-evidence pack (Node ≥ 18, no dependencies).
-// Same layers and the same authenticity verdict as cra_evidence/verify_pack.py, re-implemented from the profile:
+// cra-verify — independent JavaScript verifier of an omega-cra-evol evidence pack (Node ≥ 18, no dependencies).
+// Same layers and the same authenticity verdict as omega_cra_evol/verify_pack.py, re-implemented from the profile:
 // canonical JSON = Python json.dumps(sort_keys, separators=(",",":"), ensure_ascii) (canon/pyEscape are the
 // functions of cryptovalid's cvverify.mjs); SHA-256 chain; SHA3-256 pack/record digests; Ed25519 sidecar over
 // {"alg","kind":"cra_pack_sig/1","public_key_hex","signed_pack_sha3","signed_utc","signer_id"}; cryptovalid_tip/1.
@@ -15,7 +15,7 @@ import { basename, dirname, join } from "node:path";
 const PACK_KIND = "cra_evidence_pack/1", SCOPE_MARK = "NOT a conformity assessment", GENESIS = "0".repeat(64);
 const RECORD_KINDS = new Set(["cra_sbom", "cra_vuln", "cra_srp_notice", "cra_longterm_seal", "cra_pack_anchor"]);
 // Closed schema (2026-10-10, CHANGELOG «closed schema: a field nobody defined is never silent»): the same lists as
-// cra_evidence/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL (pack-schema
+// omega_cra_evol/verify_pack.py PACK_KEYS / ENTRY_KEYS and signing.py SIDECAR_KEYS. A key nobody defined is a NAMED FAIL (pack-schema
 // layer, ledger-schema layer, producer-signature detail), never a silent pass — measured 2026-10-11 on this verifier: a sidecar with
 // an extra key verified trusted-signed with no trace. Record payloads (data.*) keep their own rules (SRP_FIELDS.md).
 const PACK_KEYS = new Set(["kind", "generated_utc", "legal_basis", "honest_scope", "product_id", "product_version", "retention", "retention_years",

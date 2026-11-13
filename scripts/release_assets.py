@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Build the release assets of cra-evidence WITH cra-evidence (the discipline the tool asks of its users).
+"""Build the release assets of omega-cra-evol WITH omega-cra-evol (the discipline the tool asks of its users).
 
-OUT/: wheel + sdist (python -m build), CycloneDX SBOM of the wheel (sha256 inside), the CRA evidence pack of this
+OUT/: wheel + sdist (python -m build), CycloneDX SBOM of the wheel (sha256 inside), the evidence pack of this
 release (SBOM record + anchored pack in a fresh ledger) and its ledger. Publishes nothing. Exit 1 unless the pack
 verifies with the offline verifier.  Usage: python scripts/release_assets.py <version> <out_dir> [tip_key]
 """
 import hashlib, json, os, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cra_evidence import CRAEvidenceLocker, SBOMComponent, SBOMRecord, verify_pack
+from omega_cra_evol import EvidenceLocker, SBOMComponent, SBOMRecord, verify_pack
 
-PRODUCT = "cra-evidence"
+PRODUCT = "omega-cra-evol"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
     led = os.path.join(out, f"{PRODUCT}-{version}-cra.ledger.jsonl")
     if os.path.exists(led):
         os.remove(led)
-    lk = CRAEvidenceLocker(led, PRODUCT, version, tip_key=tip_key)
+    lk = EvidenceLocker(led, PRODUCT, version, tip_key=tip_key)
     lk.record_sbom(sbom)
     pack_path = os.path.join(out, f"{PRODUCT}-{version}-cra_pack.json")
     pack = lk.evidence_pack(pack_path)

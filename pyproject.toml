@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cra-evidence"
-version = "0.9.0"
+name = "omega-cra-evol"
+version = "0.10.0"
 description = "Firm-side, offline-verifiable evidence for the EU Cyber Resilience Act: SBOM records, the Art. 14 clock, SRP-aligned notices, a 10-year crypto-agile seal — in the cryptovalid ledger profile"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -19,13 +19,14 @@ dependencies = []
 sign = ["cryptography>=41"]
 
 [project.scripts]
-cra = "cra_evidence.cli:main"
+cra = "omega_cra_evol.cli:main"
+omega-cra-evol = "omega_cra_evol.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/robertolocatelli81-dev/cra-evidence"
+Homepage = "https://github.com/robertolocatelli81-dev/omega-cra-evol"
 
 [tool.setuptools]
-packages = ["cra_evidence"]
+packages = ["omega_cra_evol", "cra_evidence"]   # cra_evidence: the earlier import name, a deprecated alias (removed not before 2027-03-31)
 
 [tool.setuptools.package-data]
-cra_evidence = ["data/*.json"]
+omega_cra_evol = ["data/*.json"]

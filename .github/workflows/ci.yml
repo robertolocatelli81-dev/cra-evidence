@@ -39,7 +39,7 @@ jobs:
           python - <<'PY'
           import json, os, subprocess, sys, tempfile
           d = tempfile.mkdtemp(); led = os.path.join(d, "l.jsonl"); pack = os.path.join(d, "p.json")
-          base = ["python", "-m", "cra_evidence.cli"]
+          base = ["python", "-m", "omega_cra_evol.cli"]
           c = base + ["sbom", "--ledger", led, "--product", "p", "--version", "1", "--installed", "pip"]
           assert subprocess.run(c).returncode == 0
           assert subprocess.run(base + ["pack", "--ledger", led, "--product", "p", "--version", "1", "--out", pack]).returncode == 0
@@ -48,6 +48,15 @@ jobs:
           assert subprocess.run(base + ["verify", pack]).returncode != 0, "tampered pack must FAIL"
           print("gate ok")
           PY
+      - name: Both commands are installed and print the package version; the earlier import name still works and warns
+        shell: bash
+        run: |
+          v=$(python -c "import omega_cra_evol; print(omega_cra_evol.__version__)")
+          test "$(cra --version)" = "omega-cra-evol $v"
+          test "$(omega-cra-evol --version)" = "omega-cra-evol $v"
+          if python -W error::DeprecationWarning -c "import cra_evidence" 2>/dev/null; then echo "positive control: import cra_evidence must warn"; exit 1; fi
+          python -W ignore::DeprecationWarning -c "import cra_evidence, omega_cra_evol; assert cra_evidence.EvidenceLocker is omega_cra_evol.EvidenceLocker"
+          echo "commands and alias ok"
   test-sign-only:
     # cryptography present, no jsonschema and no cryptovalid wheel: the schema/interop tests skip, everything else runs
     runs-on: ubuntu-latest
@@ -110,9 +119,9 @@ jobs:
           python - <<'PY'
           import glob, json, os, subprocess, sys
           sys.path.insert(0, ".")
-          from cra_evidence.sbom import sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx
+          from omega_cra_evol.sbom import sbom_from_cyclonedx, sbom_from_installed, sbom_from_spdx
           recs = [(os.path.basename(p), (sbom_from_spdx if "spdx" in p else sbom_from_cyclonedx)(p, "tiny-cra-sample", "1.0.0")) for p in sorted(glob.glob("tests/fixtures/real_tools/*.json"))]
-          recs.append(("installed", sbom_from_installed("cra-evidence", "0.3.0", ["cryptography"], transitive=True)))
+          recs.append(("installed", sbom_from_installed("omega-cra-evol", "0.3.0", ["cryptography"], transitive=True)))
           n = 0
           for p in sorted(glob.glob("tests/fixtures/real_tools/*cyclonedx*.json")):   # the generators' documents themselves
               v = json.load(open(p))["specVersion"]

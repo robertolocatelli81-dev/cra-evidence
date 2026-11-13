@@ -36,7 +36,7 @@ STAGES = ("early_warning", "notification", "final_report")   # the glossary's th
 RULE9_STAGES = ("intermediate", "users_informed")
 ALL_STAGES = STAGES + RULE9_STAGES
 STREAMS = ("vulnerability", "incident")
-SOURCE_TOOLS = ("cra-evidence", "sbomify")
+SOURCE_TOOLS = ("cra-evidence", "sbomify")   # "cra-evidence": the frozen value of a notice built here (signed statements carry it), kept across the 0.10.0 rename
 CONVERSIONS = ("product_type", "member_states", "utc_offset", "pec_option")   # the closed conversions of the sbomify import
 
 # ── glossary 20260929 (page "Version 1.3. Last update: 25 September 2026"): the tables of cra-evidence 0.4.0 – 0.6.0,

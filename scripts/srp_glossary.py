@@ -165,7 +165,7 @@ def fetch(url: str = URL, timeout: float = 60.0, attempts: int = 3, wait: float 
     """The page, or the last error. HTTP 429 and 5xx and network errors are retried (`attempts` in all, `wait` x attempt
     seconds apart): ENISA's site answered 429 to repeated fetches on 12/11/2026 (measured on its FAQ page)."""
     import time
-    req = urllib.request.Request(url, headers={"User-Agent": "cra-evidence glossary drift check (+https://github.com/robertolocatelli81-dev/cra-evidence)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "omega-cra-evol glossary drift check (+https://github.com/robertolocatelli81-dev/omega-cra-evol)"})
     for i in range(1, attempts + 1):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:   # nosec: a fixed https URL, read-only
@@ -214,7 +214,7 @@ def check(html: Optional[str], snapshot_path: str, out=sys.stdout) -> int:
     for line in d:
         print("  " + line, file=out)
     print("Next: save the page, write spec/sources/enisa_srp_glossary_YYYYMMDD.json with `extract`, update "
-          "spec/SRP_FIELDS.md, then cra_evidence/srp_notice.py and the tests.", file=out)
+          "spec/SRP_FIELDS.md, then omega_cra_evol/srp_notice.py and the tests.", file=out)
     return 1
 
 

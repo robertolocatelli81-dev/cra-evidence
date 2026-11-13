@@ -27,6 +27,8 @@ from .ledger import Ledger, read_regular
 from .srp_notice import ALL_STAGES, GLOSSARIES, RULE9_STAGES, SOURCE_TOOLS, STREAMS, schema
 from .vuln import EARLY_WARNING_HOURS, NOTIFICATION_HOURS, parse_utc
 
+# The two TypeURIs are frozen opaque identifiers (in every signed statement): they keep the repository name they were
+# defined under, also after the 0.10.0 rename; a new version of the predicate takes a new TypeURI.
 TYPE_URI = "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.1"
 TYPE_URI_V02 = "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.2"
 VERSIONS = {TYPE_URI: "v0.1", TYPE_URI_V02: "v0.2"}
@@ -160,7 +162,7 @@ def build_statement(drop_path: str, ledger_path: str, product_id: Optional[str] 
     (written by `cra notice`) or a cra-srp/3 notice that `cra check-notice` verifies against this ledger.
     product: from the ledger record when it carries it (0.8.0 on; a different --product/--version is refused), else
     from the arguments (required then). filing (cra-srp/2 only): {"srp_reference", "filed_at", "filed_by"} declared
-    by the operator of cra-evidence; for cra-srp/3 the filing is the one of the drop file.
+    by the operator of this tool; for cra-srp/3 the filing is the one of the drop file.
     predicate: "v0.1" (the library default, the bytes of 0.8.0 but source.toolVersion of a cra-srp/2 notice, which is
     this package's version) or "v0.2" (`cra attest`'s
     default): v0.2 carries the notice's CVE / EUVD identifiers (read from the drop file, v0.2 §6; one out of form is
@@ -589,7 +591,7 @@ def verify_envelope(env_path: str, trust_store: Dict[str, str], drop_path: Optio
         if Ed25519PublicKey is None and any(r.get("result") == "not_checkable" for r in out["signatures"]):
             out["assessed"] = False
             _r(reasons, "not_checkable", "cryptography is not installed: the signatures cannot be checked here "
-                                         "(pip install 'cra-evidence[sign]')")
+                                         "(pip install 'omega-cra-evol[sign]')")
         else:
             _r(reasons, "not_trusted", "no signature verifies with a trusted key")
             reasons.extend(listed)

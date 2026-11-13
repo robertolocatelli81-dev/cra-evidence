@@ -108,7 +108,7 @@ class SBOMRecord:
             primary_ref += "#product"
         out = {"bomFormat": "CycloneDX", "specVersion": spec_version, "serialNumber": f"urn:uuid:{self.record_id}", "version": 1,
                "metadata": {"timestamp": self.generated_utc,
-                            "tools": {"components": [{"type": "application", "name": "cra-evidence", "version": __version__}]},
+                            "tools": {"components": [{"type": "application", "name": "omega-cra-evol", "version": __version__}]},
                             "component": {"type": self.product_type if self.product_type in CYCLONEDX_COMPONENT_TYPES else "application",
                                           "bom-ref": primary_ref, "name": self.product_id, "version": self.product_version},
                             "properties": [
