@@ -303,7 +303,7 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--aws-kms-key-id", help="KMS key id/ARN (key spec ECC_NIST_EDWARDS25519); credentials from AWS_* env or --aws-creds-file")
     s.add_argument("--aws-region"); s.add_argument("--aws-creds-file", help="KEY=VALUE file with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY [/ AWS_SESSION_TOKEN]")
     s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp); --tip-key = the sealing identity"); common(s)
-    s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted"); s.add_argument("--token-b64", help="RFC 3161 / OTS token (required when --ts-source is not 'asserted')")
+    s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted", choices=("asserted", "rfc3161", "ots")); s.add_argument("--token-b64", help="RFC 3161 / OTS token, standard base64 (required when --ts-source is not 'asserted'; its shape is checked, its signature and time are not: the verdict stays temporal_trust ASSUMED)")
     s.add_argument("--renew", help="JSON file with the previous seal (lte dict) to extend the chain")
     s = sub.add_parser("attest", help="sign an in-toto statement (predicate art14-filing v0.2 or v0.1, DSSE, Ed25519) about a notice drop file and its ledger entry",
                        description="Writes a DSSE envelope (payloadType application/vnd.in-toto+json) whose Statement names the drop file's "
@@ -324,7 +324,7 @@ def _main(argv: List[str] = None) -> int:
     s.add_argument("--predicate", choices=("v0.2", "v0.1"), default="v0.2",
                    help="v0.2 (default): with the notice's CVE / EUVD identifiers (vulnerabilityIds) and --case-reference; v0.1: "
                         "the statement of cra-evidence 0.8.0, no identifiers (for a verifier of 0.8.0, or to say nothing about them)")
-    s.add_argument("--case-reference", nargs=2, metavar=("ISSUER", "ID"),
+    s.add_argument("--case-reference", nargs=2, metavar=("ISSUER", "ID"), action="append",
                    help="v0.2: the reference ISSUER (a CSIRT, a CNA, the manufacturer…) gave to the case; declared, never checkable")
     s.add_argument("--key", help="Ed25519 seed file"); s.add_argument("--signer-id", required=True)
     s.add_argument("--aws-kms-key-id", help="KMS key id/ARN (key spec ECC_NIST_EDWARDS25519)")
@@ -456,7 +456,9 @@ def _main(argv: List[str] = None) -> int:
         else:
             p.error("attest: give --key or --aws-kms-key-id")
         try:
-            cref = None if a.case_reference is None else {"issuer": a.case_reference[0], "id": a.case_reference[1]}
+            if a.case_reference is not None and len(a.case_reference) > 1:
+                p.error("attest: --case-reference given more than once (a statement carries one case reference)")
+            cref = None if a.case_reference is None else {"issuer": a.case_reference[0][0], "id": a.case_reference[0][1]}
             payload = build_statement(a.drop, a.ledger, a.product, a.version, filing=fil, predicate=a.predicate,
                                       case_reference=cref)
         except (AttestRefused, ValueError, OSError) as e:
@@ -491,7 +493,11 @@ def _main(argv: List[str] = None) -> int:
     if a.cmd == "seal":
         lk = _locker(a)
         prev = _load_json(a.renew) if a.renew else None
-        d = lk.seal_longterm(a.pack_sha3, ts_source=a.ts_source, previous=prev, token_b64=a.token_b64)
+        from .rfc3161_token import TokenRefused
+        try:
+            d = lk.seal_longterm(a.pack_sha3, ts_source=a.ts_source, previous=prev, token_b64=a.token_b64)
+        except TokenRefused as e:
+            _p({"sealed": False, "reasons": [str(e)[:400]]}); return 1
         v = LongTermEvidence.from_dict(d).verify(now=datetime.now(timezone.utc).timestamp())
         _p({"seal": d, "verify": v})
         return 0 if v["ok"] else 1

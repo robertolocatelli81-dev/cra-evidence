@@ -63,8 +63,9 @@ The same attestation for a notice built here, without sbomify:
 
 ```bash
 cat > ew.json <<'EOF'
-{"notification_type": "Vulnerability", "title": "Auth bypass in Acme D1", "summary": "Exploitation observed.",
- "manufacturer_name": "Acme", "member_states_available": ["IT"], "product_name": "Acme D1",
+{"notification_type": "Vulnerability", "title": "Synthetic example (fictitious product Acme D1)",
+ "summary": "Synthetic example: the CVE / EUVD identifiers are real public records, used here only for their form.",
+ "manufacturer_name": "Acme (fictitious)", "member_states_available": ["IT"], "product_name": "Acme D1",
  "product_version": "1.0.7", "awareness_datetime_utc": "2026-11-12T08:00:00Z",
  "cve_id": "CVE-2024-3094", "euvd_id": "EUVD-2024-31700"}
 EOF
@@ -123,7 +124,7 @@ nothing about identifiers.
 Re-run on 13/11/2026 on the code of this branch (cra-evidence 0.9.0, unreleased; `git archive` of the commit, fresh
 virtual environments):
 
-- The test suite: 430 tests, OK on Python 3.9.25, 3.11.2 and 3.12.15 with `[sign]`, jsonschema, referencing and the
+- The test suite: 439 tests, OK on Python 3.9.25, 3.11.2 and 3.12.15 with `[sign]`, jsonschema, referencing and the
   cryptovalid wheel; 1 skipped (the live feeds check, which needs the network).
 - The attestation vectors: v0.1, 52 (10 valid, 42 each breaking one rule), and v0.2, 53 (10 valid, 43 refused): each
   gives the exit code and exactly the set of reason codes its `manifest.json` expects.
@@ -195,7 +196,8 @@ Every subcommand has `--help`. `cra verify` gives one authenticity verdict (`tru
 - **Identifiers and case reference (v0.2):** the CVE / EUVD identifiers are compared with the notice only when the
   notice file is given; a case reference is the signer's declaration, which no file can check.
 - **Time:** the ledger orders records; it is an objective time anchor only with an attached RFC 3161 / OpenTimestamps
-  token, which this tool stores and does not verify.
+  token, which this tool stores after checking its shape (`cra seal`: an RFC 3161 token must carry a SHA3-256 imprint
+  of the sealed digest) and does not verify (signature, TSA certificate, time: `temporal_trust` stays ASSUMED).
 - **Verifiers:** the JavaScript, Go and Rust verifiers and cryptovalid's are by the same author as this tool; they are
   separate implementations of a written profile, not separate parties.
 

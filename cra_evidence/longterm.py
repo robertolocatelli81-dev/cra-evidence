@@ -119,12 +119,14 @@ class LongTermEvidence:
 
     def seal(self, signer: Signer, t: float, ts_source: str = "asserted", stronger_digest: Optional[str] = None,
              hash_alg: str = DEFAULT_HASH, token_b64: Optional[str] = None) -> Dict:
-        """ts_source != "asserted" REQUIRES the third-party token (RFC 3161 / OTS) so that the label can never be a
-        bare claim; the token is stored (and digested) with the record. It is verified only by a `timestamp_trust_fn`
-        that the caller of `verify` injects: cra-evidence ships none, so `cra seal` and `cra verify` never verify a token
-        (the verdict says `temporal_trust`: "ASSUMED …")."""
-        if ts_source != "asserted" and not token_b64:
-            raise ValueError(f"ts_source={ts_source!r} needs the timestamp token (token_b64); without it the time is 'asserted'")
+        """ts_source is one of "asserted", "rfc3161", "ots"; "rfc3161" and "ots" REQUIRE the token, whose SHAPE is checked
+        (rfc3161_token.check_token: an RFC 3161 TimeStampResp / TimeStampToken with id-ct-TSTInfo and a SHA3-256
+        messageImprint over the sealed digest; an OpenTimestamps file header), then stored (and digested) with the
+        record. Its signature, its TSA certificate and its time are verified only by a `timestamp_trust_fn` that the
+        caller of `verify` injects: cra-evidence ships none, so `cra seal` and `cra verify` never verify a token (the
+        verdict says `temporal_trust`: "ASSUMED …")."""
+        from .rfc3161_token import check_token
+        check_token(ts_source, token_b64, self.evidence_digest)
         rehash = stronger_digest or ""
         # t is stored as repr(float): Python's repr is the shortest round-trip string, float(repr(x)) == x exactly
         rec = {"alg": signer.alg, "hash": hash_alg, "t": repr(float(t)), "pub": signer.pub, "ts_source": ts_source,

@@ -3,7 +3,8 @@
 statements that break it, each with its expected verdict, reason codes and receipt values in manifest.json.
 
 The v0.2 statements are built here WITHOUT the v0.2 producer: a v0.1 statement of `build_statement` (0.8.0 code) is
-re-typed to the v0.2 TypeURI and given the new fields by hand, so the vectors are an independent check of `cra attest`
+re-typed to the v0.2 TypeURI and given the new fields by hand, so the vectors check `cra attest` from a second path
+(same author, not the v0.2 producer)
 (tests/test_art14_v02_20261113.py compares the producer's payload with them).
 
 TEST-ONLY KEYS: the two keys of the v0.1 vectors (seed = SHA-256 of a fixed public string; never a real key).

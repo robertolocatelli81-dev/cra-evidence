@@ -18,14 +18,24 @@ Specification written before the code: `spec/art14-filing/v0.2/README.md` (a del
 - **`cra verify-attestation`** accepts v0.1 and v0.2. The receipt of a v0.2 statement has `vulnerability_ids`
   (`declared`, `notice`, `result`) and `case_reference`; a v0.1 statement keeps the receipt of 0.8.0 byte for byte:
   measured on the 52 v0.1 vectors of 0.8.0, 51 identical receipts; the 52nd, `predicate_type_wrong`, used the v0.2
-  TypeURI as its wrong value and is now refused by rule 5 instead (its drop file carries a `cve_id`). That vector
-  now uses `…/v0.3`. The receipts of 0.8.0 are vendored in `tests/fixtures/art14_v01_receipts_080/` and compared by a
+  TypeURI as its wrong value and is now read as a v0.2 statement without identifiers: with its drop file it is
+  refused by rule 5 (the drop file carries a `cve_id`), without the drop file it verifies (exit 0). That vector
+  now uses `…/v0.3`. The reason text of a statement refused with `predicate_type` now lists both TypeURIs. The receipts of 0.8.0 are vendored in `tests/fixtures/art14_v01_receipts_080/` and compared by a
   test.
 - **`cra attest`** writes v0.2 by default, with the identifiers read from the notice (an identifier out of its form is
   refused, nothing written; there is no option to type others: rule 5 would refuse them as soon as the notice is
-  given), `--case-reference ISSUER ID`, and `--predicate v0.1` for the statement of 0.8.0 (the same bytes; for a
-  verifier of 0.8.0, or to say nothing about identifiers, e.g. under embargo). The library default of
+  given), `--case-reference ISSUER ID` (given twice: usage error, exit 2), and `--predicate v0.1` for the statement
+  of 0.8.0 (the same bytes; for a verifier of 0.8.0, or to say nothing about identifiers, e.g. under embargo). A
+  notice whose `cve_id` / `euvd_id` is not in its form (e.g. lower case, which `cra notice` records) was attested by
+  0.8.0 and is now refused by default; `--predicate v0.1` attests it as before. The library default of
   `build_statement` stays v0.1.
+- **`cra seal`:** `--ts-source` is one of `asserted`, `rfc3161`, `ots` (until 0.8.0 any text was recorded as the
+  seal's time source); a `rfc3161` token must be, in standard base64, an RFC 3161 TimeStampResp (granted) or
+  TimeStampToken whose content is a TSTInfo with a SHA3-256 messageImprint over the sealed digest; an `ots` token
+  must start with the OpenTimestamps file header; `asserted` takes no token. Anything else is refused (exit 1,
+  nothing recorded). Until 0.8.0 any non-empty string was stored (measured: `--token-b64 AAAA` gave `ok: true`).
+  The token's signature, TSA certificate and time are still not verified: the verdict stays `temporal_trust`
+  ASSUMED.
 - **Vectors** `spec/art14-filing/v0.2/vectors/`: 53 (10 valid, 43 refused), built by
   `scripts/gen_art14_v02_vectors.py` from v0.1 statements without the v0.2 producer; the producer gives the same
   payload bytes (test). Synthetic notices carrying real identifiers (CVE-2024-3094 / EUVD-2024-31700, CVE-2021-44228 /
@@ -40,7 +50,7 @@ Specification written before the code: `spec/art14-filing/v0.2/README.md` (a del
   being refused vectors whose payload has a duplicate key, a float or no base64.
 - **Docstrings:** `canonical.py` "independent cryptovalid checkers" → "by the same author"; `longterm.seal` no longer
   reads as if the stored RFC 3161 / OTS token were verified (a caller-injected `timestamp_trust_fn` is the only
-  check; cra-evidence ships none).
+  verification; cra-evidence ships none).
 - **Tests:** test files committed before the code (red: 10186 failures and 5 errors on the 0.8.0 code), generative
   refusals (an unknown key in every new object, every wrong JSON type on every new leaf, 6000 random identifiers and
   4000 random references against oracles written without regular expressions); 30 hand mutants of the new rules, each
