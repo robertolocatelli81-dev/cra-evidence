@@ -1,0 +1,694 @@
+{
+ "generated_by": "scripts/gen_art14_vectors.py (deterministic: fixed clock, fixed ids, Ed25519 signatures)",
+ "how_to_run": "cra verify-attestation <envelope> --trust-store <trust_store> [--drop <drop>] [--ledger <ledger>]; the exit code and the reason codes must be the expected ones",
+ "payload_type": "application/vnd.in-toto+json",
+ "predicate_type": "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.1",
+ "test_keys": {
+  "not-in-trust-store": {
+   "public_key_hex": "099c0c7d410e9f4eb96297d04500c14218290fe5c969115f564534b0924f6449",
+   "seed_string": "cra-evidence art14-filing v0.1 vectors: a second TEST-ONLY key, not in the trust store"
+  },
+  "test-signer": {
+   "public_key_hex": "126a8a85cb3a8db59592b58b64e70a2f743ac4a01c365b7746a7e3e028be43da",
+   "seed_string": "cra-evidence art14-filing v0.1 vectors: TEST-ONLY signing key, public by design, never a real key"
+  },
+  "warning": "TEST-ONLY keys: seed = SHA-256 of the UTF-8 string below; public by design, never a real key"
+ },
+ "vectors": [
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "valid_early_warning.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_early_warning",
+   "rule": "§2-§5: an imported early warning (complete false), drop and ledger checked",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_intermediate.json",
+   "envelope": "valid_intermediate.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_intermediate",
+   "rule": "rule 9: complete null at intermediate",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "valid_without_ledger.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "ledger": "not_evaluated",
+    "verified": true
+   },
+   "ledger": null,
+   "name": "valid_without_ledger",
+   "rule": "§4.2 rule 3: no ledger = not_evaluated, never PASS",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": null,
+   "envelope": "valid_without_drop_and_ledger.intoto.json",
+   "expect": {
+    "codes": [],
+    "drop": "not_evaluated",
+    "exit": 0,
+    "ledger": "not_evaluated",
+    "verified": true
+   },
+   "ledger": null,
+   "name": "valid_without_drop_and_ledger",
+   "rule": "signature and closed predicate only",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "valid_extra_statement_field.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "statement_unrecognized": [
+     "comment"
+    ],
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_extra_statement_field",
+   "rule": "§3: unrecognized Statement fields ignored for the verdict and listed",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "valid_url_safe_base64_unpadded.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_url_safe_base64_unpadded",
+   "rule": "§5: either base64 alphabet accepted",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "valid_second_signature_unknown_keyid.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "listed": [
+     "unknown_keyid"
+    ],
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_second_signature_unknown_keyid",
+   "rule": "§5: trusted if one signature verifies with a trusted key; the unknown keyid is listed",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "valid_extra_envelope_field.intoto.json",
+   "expect": {
+    "codes": [],
+    "envelope_unrecognized": [
+     "x-extension"
+    ],
+    "exit": 0,
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_extra_envelope_field",
+   "rule": "DSSE envelope.md: unrecognized fields ignored (listed)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "payload_type_wrong.intoto.json",
+   "expect": {
+    "codes": [
+     "payload_type"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "payload_type_wrong",
+   "rule": "§2 payloadType",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "payload_bad_base64.intoto.json",
+   "expect": {
+    "codes": [
+     "base64"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "payload_bad_base64",
+   "rule": "§5 envelope decodes",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "signature_bad_base64.intoto.json",
+   "expect": {
+    "codes": [
+     "base64"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "signature_bad_base64",
+   "rule": "§5 envelope decodes",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "payload_tampered.intoto.json",
+   "expect": {
+    "codes": [
+     "not_trusted",
+     "signature_failed"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "payload_tampered",
+   "rule": "§5 signature over PAE",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "signed_by_untrusted_key.intoto.json",
+   "expect": {
+    "codes": [
+     "not_trusted",
+     "signature_failed"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "signed_by_untrusted_key",
+   "rule": "§5 trusted key",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "keyid_not_in_trust_store.intoto.json",
+   "expect": {
+    "codes": [
+     "not_trusted",
+     "unknown_keyid"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "keyid_not_in_trust_store",
+   "rule": "§5 keyid selects the candidate key",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "small_order_trusted_key.intoto.json",
+   "expect": {
+    "codes": [
+     "weak_key",
+     "not_trusted"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "small_order_trusted_key",
+   "rule": "§5 small-order key refused",
+   "trust_store": "trust_store_small_order.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "envelope_duplicate_key.intoto.json",
+   "expect": {
+    "codes": [
+     "envelope_malformed"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "envelope_duplicate_key",
+   "rule": "§3 duplicate key",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "envelope_without_signatures.intoto.json",
+   "expect": {
+    "codes": [
+     "envelope_malformed"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "envelope_without_signatures",
+   "rule": "DSSE envelope.md: signatures required",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "statement_type_wrong.intoto.json",
+   "expect": {
+    "codes": [
+     "statement_type"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "statement_type_wrong",
+   "rule": "§2 _type",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_type_wrong.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_type_wrong",
+   "rule": "§2 predicateType",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "two_subjects.intoto.json",
+   "expect": {
+    "codes": [
+     "subject"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "two_subjects",
+   "rule": "§2 exactly one subject",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "subject_name_wrong.intoto.json",
+   "expect": {
+    "codes": [
+     "subject"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "subject_name_wrong",
+   "rule": "§2 subject name",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "subject_without_sha3.intoto.json",
+   "expect": {
+    "codes": [
+     "subject"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "subject_without_sha3",
+   "rule": "§2 both digests required",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "subject_digest_upper_case.intoto.json",
+   "expect": {
+    "codes": [
+     "subject"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "subject_digest_upper_case",
+   "rule": "§2 64 lower-case hex",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "subject_digest_of_other_bytes.intoto.json",
+   "expect": {
+    "codes": [
+     "subject_digest"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "subject_digest_of_other_bytes",
+   "rule": "§2 subject = the drop file's bytes",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_unknown_key.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_unknown_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_unknown_key",
+   "rule": "§3 closed predicate",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_unknown_nested_key.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_unknown_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_unknown_nested_key",
+   "rule": "§3 closed at every level",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_missing_key.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_missing_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_missing_key",
+   "rule": "§3 required keys",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_wrong_type.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_wrong_type",
+   "rule": "§3 JSON types",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_float_index.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_float_index",
+   "rule": "§3 JSON types",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_duplicate_key.intoto.json",
+   "expect": {
+    "codes": [
+     "duplicate_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_duplicate_key",
+   "rule": "§3 duplicate key anywhere in the payload",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "predicate_value_outside_enum.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_enum"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "predicate_value_outside_enum",
+   "rule": "§3 enumerations",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "timestamp_with_offset.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_timestamp"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "timestamp_with_offset",
+   "rule": "§3 RFC 3339 UTC with Z",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "timestamp_seven_fraction_digits.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_timestamp"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "timestamp_seven_fraction_digits",
+   "rule": "§3 at most 6 fractional digits",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "complete_null_at_early_warning.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "complete_null_at_early_warning",
+   "rule": "§4.1 complete null only at intermediate / users_informed",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "declared_by_not_source_tool.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "declared_by_not_source_tool",
+   "rule": "§4.1 filing.declaredBy = source.tool",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "missing_required_with_complete_true.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "missing_required_with_complete_true",
+   "rule": "§4 missingRequired [] when complete is true",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "deadline_not_from_awareness.intoto.json",
+   "expect": {
+    "codes": [
+     "deadline"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "deadline_not_from_awareness",
+   "rule": "§4 deadlineAt computed from awareAt",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "rule1_glossary_differs.intoto.json",
+   "expect": {
+    "codes": [
+     "rule1"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": null,
+   "name": "rule1_glossary_differs",
+   "rule": "§4.2 rule 1",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "rule2_completeness_differs.intoto.json",
+   "expect": {
+    "codes": [
+     "rule2"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": null,
+   "name": "rule2_completeness_differs",
+   "rule": "§4.2 rule 2",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "rule3_entry_hash_differs.intoto.json",
+   "expect": {
+    "codes": [
+     "rule3"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "rule3_entry_hash_differs",
+   "rule": "§4.2 rule 3",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "rule3_entry_is_the_event.intoto.json",
+   "expect": {
+    "codes": [
+     "rule3"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "rule3_entry_is_the_event",
+   "rule": "§4.2 rule 3: a cra_srp_notice record",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "rule3_entry_of_another_notice.intoto.json",
+   "expect": {
+    "codes": [
+     "rule3"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "rule3_entry_of_another_notice",
+   "rule": "§4.2 rule 3: drop_sha3 and stage of the record",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "rule3_entry_index_beyond_ledger.intoto.json",
+   "expect": {
+    "codes": [
+     "rule3"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "rule3_entry_index_beyond_ledger",
+   "rule": "§4.2 rule 3",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "rule4_attested_before_filed.intoto.json",
+   "expect": {
+    "codes": [
+     "rule4"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "rule4_attested_before_filed",
+   "rule": "§4.2 rule 4",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "aware_at_differs_from_notice.intoto.json",
+   "expect": {
+    "codes": [
+     "drop_mismatch"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "aware_at_differs_from_notice",
+   "rule": "§4.4 the recorded awareness instant",
+   "trust_store": "trust_store.json"
+  }
+ ]
+}

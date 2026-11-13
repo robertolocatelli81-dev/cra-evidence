@@ -1,0 +1,79 @@
+{
+ "complete": null,
+ "deadline_utc": null,
+ "fields": {
+  "attack_vector": "Adjacent network (local web API, TCP 8080)",
+  "awareness_datetime_utc": "2026-11-09T07:30:00+00:00",
+  "component_name": "acme-localapi",
+  "cve_id": "CVE-2099-0001",
+  "end_of_support": "No",
+  "euvd_id": "EUVD-2099-0001",
+  "general_information": "The session middleware of the local web API treats a request carrying an empty X-Session header as authenticated. Requests to /api/admin/* then run with installer privileges.",
+  "malicious_actor": "Unattributed botnet operator",
+  "member_states_available": [
+   "AT",
+   "DE",
+   "IT"
+  ],
+  "mitigating_measure_expected_shortly": "Yes",
+  "product_category": "Smart home thermostat",
+  "product_class": "Class I",
+  "product_name": "Acme Smart Thermostat T100 (synthetic)",
+  "product_type": "Important",
+  "product_version": "4.2.0 - 4.2.4",
+  "sensitivity_justification": "TLP:AMBER",
+  "severity_description": "High: CVSS 3.1 base score 8.1 (AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N).",
+  "summary": "An unauthenticated attacker on the same network can call privileged endpoints of the T100 local web API. Exploitation observed in the wild (synthetic scenario).",
+  "title": "Actively exploited authentication bypass in Acme T100 local web API",
+  "user_action_reduce_impact": "Disable the local web API in Settings > Network until the update is installed.",
+  "vulnerability_occurred_datetime_utc": "2026-11-08T22:15:00+00:00"
+ },
+ "filing": {
+  "declared_by": "sbomify",
+  "filed_at": "2026-11-12T10:00:00Z",
+  "filed_by": "psirt@example.com",
+  "srp_reference": "SRP-IR-2099-000103"
+ },
+ "generated_utc": "2026-11-13T06:00:00+00:00",
+ "glossary_source": "ENISA CRA SRP Glossary (43 fields; page \"Version 1.6. Last update: 21 October 2026\"), read 2026-11-12 — snapshot vendored in spec/sources/enisa_srp_glossary_20261112.json; per-stage codes derived from it by tests/test_srp_glossary_16.py",
+ "glossary_version": "enisa_srp_glossary_20261112",
+ "missing_required": [],
+ "notice_id": "5053110d-1902-5a1e-b541-16633e2ddf8a",
+ "notice_sha3": "62bc8029ae284982910ad5b2975bf864c0f926b6486e2d544aa1b2a8fe7388b2",
+ "previous_fields": null,
+ "schema": "cra-srp/3",
+ "source": {
+  "absent_at_source": [
+   "1",
+   "4",
+   "7a",
+   "41"
+  ],
+  "document_sha256": "94b8115e880a85d941d4fb5946372ac53e2e0e0b5b546520040524b9232f7bea",
+  "later_stage": [],
+  "normalisations": [
+   {
+    "conversion": "product_type",
+    "from": "Important Product with Digital Elements",
+    "sbomify_id": "product_type",
+    "to": "Important"
+   },
+   {
+    "conversion": "member_states",
+    "from": "AT, DE, IT",
+    "sbomify_id": "member_states",
+    "to": [
+     "AT",
+     "DE",
+     "IT"
+    ]
+   }
+  ],
+  "readings": [],
+  "tool": "sbomify",
+  "tool_version": "4ef61281e69d693e3560185bf81ec5474179ea98"
+ },
+ "stage": "intermediate",
+ "stream": "vulnerability",
+ "submission": "NOT submitted by this tool: the SRP is a human web portal (EU Login + MFA, Assigned Representative); this payload is the evidence of what existed and when"
+}
