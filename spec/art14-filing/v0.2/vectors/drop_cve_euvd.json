@@ -1,0 +1,29 @@
+{
+ "complete": true,
+ "deadline_utc": "2026-11-13T09:00:00+00:00",
+ "fields": {
+  "awareness_datetime_utc": "2026-11-12T09:00:00Z",
+  "cve_id": "CVE-2024-3094",
+  "euvd_id": "EUVD-2024-31700",
+  "manufacturer_name": "Example Gateways SpA (synthetic)",
+  "member_states_available": [
+   "IT"
+  ],
+  "notification_type": "Vulnerability",
+  "product_name": "Acme Gateway G2 (synthetic)",
+  "product_version": "2.0.1",
+  "summary": "Synthetic early warning built with cra notice.",
+  "title": "Exploited flaw A in Acme G2 (synthetic)"
+ },
+ "generated_utc": "2026-11-13T07:00:00+00:00",
+ "glossary_source": "ENISA CRA SRP Glossary (43 fields; page \"Version 1.6. Last update: 21 October 2026\"), read 2026-11-12 — snapshot vendored in spec/sources/enisa_srp_glossary_20261112.json; per-stage codes derived from it by tests/test_srp_glossary_16.py",
+ "glossary_version": "enisa_srp_glossary_20261112",
+ "missing_required": [],
+ "notice_id": "970c04cc-b32f-5ea1-be87-dd1452b03be5",
+ "notice_sha3": "b2c812807a935613e1061b6885e9f5ccff032895519c3a552b3d86127181ca2f",
+ "previous_fields": null,
+ "schema": "cra-srp/2",
+ "stage": "early_warning",
+ "stream": "vulnerability",
+ "submission": "NOT submitted by this tool: the SRP is a human web portal (EU Login + MFA, Assigned Representative); this payload is the evidence of what existed and when"
+}

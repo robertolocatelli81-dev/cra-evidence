@@ -402,7 +402,7 @@
    },
    "ledger": "ledger.jsonl",
    "name": "predicate_type_wrong",
-   "rule": "§2 predicateType",
+   "rule": "§2 predicateType (v0.3: a version not defined; until 0.8.0 this vector used v0.2, defined since)",
    "trust_store": "trust_store.json"
   },
   {

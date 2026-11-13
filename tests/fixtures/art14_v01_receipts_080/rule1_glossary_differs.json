@@ -1,0 +1,13 @@
+{
+ "argv": [
+  "verify-attestation",
+  "rule1_glossary_differs.intoto.json",
+  "--trust-store",
+  "trust_store.json",
+  "--drop",
+  "drop_early_warning.json"
+ ],
+ "exit": 1,
+ "stdout": "{\n \"assessed\": true,\n \"drop\": \"FAIL\",\n \"envelope\": \"rule1_glossary_differs.intoto.json\",\n \"envelope_unrecognized\": [],\n \"ledger\": \"not_evaluated\",\n \"predicate_type\": \"https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.1\",\n \"product\": \"not_evaluated (compared with the ledger record only: give --ledger)\",\n \"reasons\": [\n  {\n   \"code\": \"rule1\",\n   \"detail\": \"drop file glossary_version 'enisa_srp_glossary_20261112' differs from the predicate's 'enisa_srp_glossary_20260929' (§4.2 rule 1)\"\n  }\n ],\n \"scope\": \"a declaration recorded and signed by the manufacturer: not a proof that the notice reached ENISA's platform, nor that the awareness instant is true, nor conformity\",\n \"signatures\": [\n  {\n   \"index\": 0,\n   \"keyid\": \"test-signer\",\n   \"result\": \"verified\"\n  }\n ],\n \"signatures_not_verified\": [],\n \"statement\": \"accepted\",\n \"statement_unrecognized\": [],\n \"trusted\": true,\n \"trusted_by\": [\n  \"test-signer\"\n ],\n \"verified\": false\n}\n",
+ "taken_with": "cra-evidence 0.8.0 (commit 653de92), cra verify-attestation, cwd = spec/art14-filing/v0.1/vectors"
+}

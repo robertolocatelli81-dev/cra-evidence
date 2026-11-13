@@ -200,7 +200,8 @@ def generate(out):
     add("envelope_without_signatures", e, bad("envelope_malformed"), rule="DSSE envelope.md: signatures required")
     # ── §2: Statement ──
     add("statement_type_wrong", envelope(mut(pset(["_type"], "https://in-toto.io/Statement/v0.1")), k1), bad("statement_type"), rule="§2 _type")
-    add("predicate_type_wrong", envelope(mut(pset(["predicateType"], A.TYPE_URI.replace("v0.1", "v0.2"))), k1), bad("predicate_type"), rule="§2 predicateType")
+    add("predicate_type_wrong", envelope(mut(pset(["predicateType"], A.TYPE_URI.replace("v0.1", "v0.3"))), k1), bad("predicate_type"),
+        rule="§2 predicateType (v0.3: a version not defined; until 0.8.0 this vector used v0.2, defined since)")
     add("two_subjects", envelope(mut(lambda st: st["subject"].append(dict(st["subject"][0]))), k1), bad("subject"), rule="§2 exactly one subject")
     add("subject_name_wrong", envelope(mut(pset(["subject", 0, "name"], "srp-notice:vulnerability:notification")), k1), bad("subject"), rule="§2 subject name")
     add("subject_without_sha3", envelope(mut(pdel(["subject", 0, "digest", "sha3_256"])), k1), bad("subject"), rule="§2 both digests required")

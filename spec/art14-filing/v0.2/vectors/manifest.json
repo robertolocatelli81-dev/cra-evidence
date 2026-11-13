@@ -1,0 +1,895 @@
+{
+ "generated_by": "scripts/gen_art14_v02_vectors.py (deterministic: fixed clock, fixed ids, Ed25519 signatures)",
+ "how_to_run": "cra verify-attestation <envelope> --trust-store <trust_store> [--drop <drop>] [--ledger <ledger>]; the exit code must be the expected one, the set of reason codes in `reasons` must equal the expected codes, and each expected receipt value must be the receipt's",
+ "identifiers": "CVE-2024-3094/EUVD-2024-31700, CVE-2021-44228/EUVD-2021-34768, CVE-2024-21762/EUVD-2024-19376: real public records (spec v0.2 §8), in synthetic notices; refused vectors mutate them",
+ "payload_type": "application/vnd.in-toto+json",
+ "predicate_type": "https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.2",
+ "test_keys": {
+  "not-in-trust-store": {
+   "public_key_hex": "099c0c7d410e9f4eb96297d04500c14218290fe5c969115f564534b0924f6449",
+   "seed_string": "cra-evidence art14-filing v0.1 vectors: a second TEST-ONLY key, not in the trust store"
+  },
+  "test-signer": {
+   "public_key_hex": "126a8a85cb3a8db59592b58b64e70a2f743ac4a01c365b7746a7e3e028be43da",
+   "seed_string": "cra-evidence art14-filing v0.1 vectors: TEST-ONLY signing key, public by design, never a real key"
+  },
+  "warning": "TEST-ONLY keys of the v0.1 vectors: seed = SHA-256 of the UTF-8 string below; public by design, never a real key"
+ },
+ "vectors": [
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "valid_no_identifiers.intoto.json",
+   "expect": {
+    "case_reference_result": "none declared",
+    "codes": [],
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [],
+    "vulnerability_ids_notice": [],
+    "vulnerability_ids_result": "matched"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_no_identifiers",
+   "rule": "§1: v0.2 without the two fields (v0.1 content, v0.2 TypeURI); the notice carries no identifier either",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "valid_cve_euvd_matched.intoto.json",
+   "expect": {
+    "case_reference_result": "none declared",
+    "codes": [],
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [
+     {
+      "id": "CVE-2024-3094",
+      "scheme": "cve"
+     },
+     {
+      "id": "EUVD-2024-31700",
+      "scheme": "euvd"
+     }
+    ],
+    "vulnerability_ids_notice": [
+     {
+      "id": "CVE-2024-3094",
+      "scheme": "cve"
+     },
+     {
+      "id": "EUVD-2024-31700",
+      "scheme": "euvd"
+     }
+    ],
+    "vulnerability_ids_result": "matched"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_cve_euvd_matched",
+   "rule": "§3 rule 5: the statement's identifiers equal the notice's",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": null,
+   "envelope": "valid_cve_euvd_without_drop.intoto.json",
+   "expect": {
+    "case_reference_result": "none declared",
+    "codes": [],
+    "drop": "not_evaluated",
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [
+     {
+      "id": "CVE-2024-3094",
+      "scheme": "cve"
+     },
+     {
+      "id": "EUVD-2024-31700",
+      "scheme": "euvd"
+     }
+    ],
+    "vulnerability_ids_result": "declared, not checked (no drop file given)"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_cve_euvd_without_drop",
+   "rule": "§3: without the drop file the identifiers are declared, not checked",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": null,
+   "envelope": "valid_cve_only_without_drop.intoto.json",
+   "expect": {
+    "case_reference_result": "none declared",
+    "codes": [],
+    "drop": "not_evaluated",
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [
+     {
+      "id": "CVE-2021-44228",
+      "scheme": "cve"
+     }
+    ],
+    "vulnerability_ids_result": "declared, not checked (no drop file given)"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_cve_only_without_drop",
+   "rule": "§1: same product and stage as valid_cve_euvd_without_drop, other identifiers: the receipts differ",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "valid_case_reference_only.intoto.json",
+   "expect": {
+    "case_reference_result": "declared by the signer, not checkable",
+    "codes": [],
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [],
+    "vulnerability_ids_notice": [],
+    "vulnerability_ids_result": "matched"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_case_reference_only",
+   "rule": "§2.2: a case reference alone; never checkable",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "valid_identifiers_and_case_reference.intoto.json",
+   "expect": {
+    "case_reference_result": "declared by the signer, not checkable",
+    "codes": [],
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [
+     {
+      "id": "CVE-2024-3094",
+      "scheme": "cve"
+     },
+     {
+      "id": "EUVD-2024-31700",
+      "scheme": "euvd"
+     }
+    ],
+    "vulnerability_ids_result": "matched"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_identifiers_and_case_reference",
+   "rule": "§2: both fields",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_previous.json",
+   "envelope": "valid_identifiers_from_previous_fields.intoto.json",
+   "expect": {
+    "case_reference_result": "none declared",
+    "codes": [],
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [
+     {
+      "id": "CVE-2024-21762",
+      "scheme": "cve"
+     },
+     {
+      "id": "EUVD-2024-19376",
+      "scheme": "euvd"
+     }
+    ],
+    "vulnerability_ids_notice": [
+     {
+      "id": "CVE-2024-21762",
+      "scheme": "cve"
+     },
+     {
+      "id": "EUVD-2024-19376",
+      "scheme": "euvd"
+     }
+    ],
+    "vulnerability_ids_result": "matched"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_identifiers_from_previous_fields",
+   "rule": "§3: an intermediate report whose identifiers are in previous_fields (rule 8 of SRP_FIELDS.md)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "valid_case_reference_255_characters.intoto.json",
+   "expect": {
+    "case_reference_result": "declared by the signer, not checkable",
+    "codes": [],
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_result": "matched"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_case_reference_255_characters",
+   "rule": "§2.2: 255 characters (code points, not bytes) is the bound, accepted",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": null,
+   "envelope": "valid_no_identifiers_without_drop.intoto.json",
+   "expect": {
+    "case_reference_result": "none declared",
+    "codes": [],
+    "drop": "not_evaluated",
+    "exit": 0,
+    "verified": true,
+    "vulnerability_ids_declared": [],
+    "vulnerability_ids_result": "declared, not checked (no drop file given)"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_no_identifiers_without_drop",
+   "rule": "§3: a v0.2 statement without identifiers about a notice that has them: accepted while the notice is not given",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "ids_differ_from_notice.intoto.json",
+   "expect": {
+    "codes": [
+     "vulnerability_ids"
+    ],
+    "exit": 1,
+    "verified": false,
+    "vulnerability_ids_result": "FAIL"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "ids_differ_from_notice",
+   "rule": "§3 rule 5: an identifier the notice does not carry, one it carries missing",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "notice_has_ids_statement_none.intoto.json",
+   "expect": {
+    "codes": [
+     "vulnerability_ids"
+    ],
+    "exit": 1,
+    "verified": false,
+    "vulnerability_ids_result": "FAIL"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "notice_has_ids_statement_none",
+   "rule": "§3 rule 5: no vulnerabilityIds while the notice carries two: refused when the notice is given",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "statement_has_ids_notice_none.intoto.json",
+   "expect": {
+    "codes": [
+     "vulnerability_ids"
+    ],
+    "exit": 1,
+    "verified": false,
+    "vulnerability_ids_result": "FAIL"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "statement_has_ids_notice_none",
+   "rule": "§3 rule 5: an identifier the notice does not carry",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "statement_subset_of_notice.intoto.json",
+   "expect": {
+    "codes": [
+     "vulnerability_ids"
+    ],
+    "exit": 1,
+    "verified": false,
+    "vulnerability_ids_result": "FAIL"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "statement_subset_of_notice",
+   "rule": "§3 rule 5: the EUVD identifier of the notice left out",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_lower_case.json",
+   "envelope": "notice_value_not_in_form.intoto.json",
+   "expect": {
+    "codes": [
+     "vulnerability_ids"
+    ],
+    "exit": 1,
+    "verified": false,
+    "vulnerability_ids_result": "FAIL"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "notice_value_not_in_form",
+   "rule": "§3 rule 5: the notice's cve_id is lower case: no statement entry can equal it (no normalisation)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_lower_case.json",
+   "envelope": "notice_value_not_in_form_statement_none.intoto.json",
+   "expect": {
+    "codes": [
+     "vulnerability_ids"
+    ],
+    "exit": 1,
+    "verified": false,
+    "vulnerability_ids_result": "FAIL"
+   },
+   "ledger": "ledger.jsonl",
+   "name": "notice_value_not_in_form_statement_none",
+   "rule": "§3 rule 5: a notice value out of form is still an identifier of the notice",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "scheme_unknown.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_enum"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "scheme_unknown",
+   "rule": "§2.1 scheme cve or euvd",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "scheme_upper_case.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_enum"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "scheme_upper_case",
+   "rule": "§2.1 scheme: exact string",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "scheme_not_a_string.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "scheme_not_a_string",
+   "rule": "§2.1 types",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "id_not_a_string.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "id_not_a_string",
+   "rule": "§2.1 types",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "cve_three_digit_sequence.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "cve_three_digit_sequence",
+   "rule": "§2.1 CVE form: 4 to 19 digits",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "cve_twenty_digit_sequence.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "cve_twenty_digit_sequence",
+   "rule": "§2.1 CVE form: 4 to 19 digits",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "cve_lower_case.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "cve_lower_case",
+   "rule": "§2.1 CVE form, no normalisation",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "cve_trailing_newline.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "cve_trailing_newline",
+   "rule": "§2.1 CVE form, full match (a `$` that accepts a final newline would pass it)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "cve_non_ascii_digits.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "cve_non_ascii_digits",
+   "rule": "§2.1 CVE form: ASCII digits only (a Unicode \\d would pass fullwidth digits)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "cve_surrounding_space.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "cve_surrounding_space",
+   "rule": "§2.1 CVE form",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "euvd_two_digit_year.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "euvd_two_digit_year",
+   "rule": "§2.1 EUVD form: four-digit year",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "euvd_no_sequence.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "euvd_no_sequence",
+   "rule": "§2.1 EUVD form: 1 to 19 digits",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "euvd_id_under_cve_scheme.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "euvd_id_under_cve_scheme",
+   "rule": "§2.1 the id in its scheme's form",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "list_empty.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "list_empty",
+   "rule": "§2.1 one form for no identifiers: omit the key",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "duplicate_entry.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "duplicate_entry",
+   "rule": "§2.1 no duplicates",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "two_cve_entries.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "two_cve_entries",
+   "rule": "§2.1 at most one entry per scheme",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "entries_out_of_order.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "entries_out_of_order",
+   "rule": "§2.1 cve before euvd",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "entry_unknown_key.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_unknown_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "entry_unknown_key",
+   "rule": "§2.1 closed entry",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "entry_missing_id.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_missing_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "entry_missing_id",
+   "rule": "§2.1 closed entry",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "entry_not_an_object.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "entry_not_an_object",
+   "rule": "§2.1 entries are objects",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "ids_not_a_list.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "ids_not_a_list",
+   "rule": "§2.1 a list",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "ids_null.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "ids_null",
+   "rule": "§2.1 null is not admitted: omit the key",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "entry_duplicate_key.intoto.json",
+   "expect": {
+    "codes": [
+     "duplicate_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "entry_duplicate_key",
+   "rule": "v0.1 §3: a duplicate key anywhere in the payload",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_null.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_null",
+   "rule": "§2.2 null is not admitted: omit the key",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_unknown_key.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_unknown_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_unknown_key",
+   "rule": "§2.2 closed object",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_missing_issuer.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_missing_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_missing_issuer",
+   "rule": "§2.2 closed object",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_id_not_a_string.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type_error"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_id_not_a_string",
+   "rule": "§2.2 strings",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_empty_id.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_empty_id",
+   "rule": "§2.2 1 to 255 characters",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_256_characters.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_256_characters",
+   "rule": "§2.2 1 to 255 characters",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_control_character.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_control_character",
+   "rule": "§2.2 no control character (C0)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_c1_control.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_c1_control",
+   "rule": "§2.2 no control character (C1: U+0085)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_del.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_del",
+   "rule": "§2.2 no control character (U+007F)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "case_reference_trailing_space.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_identifier"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "case_reference_trailing_space",
+   "rule": "§2.2 no leading or trailing U+0020",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "v01_with_vulnerability_ids.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_unknown_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "v01_with_vulnerability_ids",
+   "rule": "§2: the v0.1 predicate does not admit the new keys",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_no_ids.json",
+   "envelope": "v01_with_case_reference.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_unknown_key"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "v01_with_case_reference",
+   "rule": "§2: the v0.1 predicate does not admit the new keys",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "type_v03_unknown.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_type"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "type_v03_unknown",
+   "rule": "v0.1 §2: an unknown TypeURI is refused",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "v01_statement_still_valid.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "no_v02_keys": true,
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "v01_statement_still_valid",
+   "rule": "§1: a v0.1 statement is judged by v0.1 and its receipt has no v0.2 key",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cve_euvd.json",
+   "envelope": "v02_signed_by_untrusted_key.intoto.json",
+   "expect": {
+    "codes": [
+     "not_trusted",
+     "signature_failed"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "v02_signed_by_untrusted_key",
+   "rule": "v0.1 §5: unchanged for v0.2",
+   "trust_store": "trust_store.json"
+  }
+ ]
+}

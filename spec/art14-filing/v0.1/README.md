@@ -168,3 +168,6 @@ the expected refusal reason. Every verifier of this format MUST give the expecte
   built by cra-evidence) admitted as subjects. Before any release, after review: a signature without `keyid` (or with an
   empty one) is tried with every trusted key, as DSSE reads an unset keyid (§5); `absentAtSource` defined as the rows no
   pair of the source document carries (§4, §4.3).
+- 13/11/2026 (cra-evidence 0.9.0, no change of rule): v0.2 is defined ([`../v0.2/`](../v0.2/README.md)); the verifier
+  accepts both TypeURIs and judges a v0.1 statement by these rules, with the receipt of 0.8.0. The vector
+  `predicate_type_wrong` used the v0.2 TypeURI as its wrong value: it now uses `…/v0.3`.
