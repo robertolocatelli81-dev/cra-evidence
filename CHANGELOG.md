@@ -11,13 +11,18 @@ The package's code is that of 0.7.0; only the version changes. New:
   `--require-hashes`; build context limited to the wheel and that file (`.dockerignore`); runs as uid 10001. Before
   the push the workflow runs the image on the release's own evidence pack (`trusted-signed`) and on a tampered copy
   (exit 1); after the push it attests the image's build provenance (Sigstore, stored in the registry):
-  `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:<version> --repo robertolocatelli81-dev/cra-evidence`.
+  `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:<version> --repo robertolocatelli81-dev/cra-evidence
+  --signer-workflow robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml --source-ref refs/tags/v<version>`.
+  Run by hand, the workflow refuses to build unless it runs from the tag it publishes.
 - **GitHub Action** (`action.yml`): `uses: robertolocatelli81-dev/cra-evidence@v0.7.1` with `args:`. It pulls the image,
-  verifies the provenance of the pulled digest (signer workflow `container.yml` of this repository) and runs `cra`
-  from that digest as the runner's user, in the workspace, without network unless `network: bridge` (for
-  `cra feeds`); arguments are split on whitespace and never pass through a shell. Linux runners with docker.
+  verifies the provenance of the pulled digest (signer: `container.yml` of this repository, run for the tag
+  `v<version>` on a GitHub-hosted runner) and runs `cra` from that digest as the runner's user, in the workspace,
+  without network unless `network: bridge` (needed by `cra feeds` and `cra sign --aws-kms-key-id`); arguments are
+  split on whitespace and never pass through a shell. Linux runners with docker.
 - `tests/test_distribution_20261113.py`: the pins above (digest, hashes, actions by commit, build context, the
-  action's default version = the package version), each with a positive control on a broken copy.
+  action's default version = the package version) and the action's two steps run with bash against docker/gh stubs
+  (digest of this repository, exact signer identity, no shell, network `none`, exit code); every parser and both
+  steps have a positive control on a broken copy.
 
 ## 0.7.0 — 2026-11-13 — ENISA SRP glossary "Version 1.6" (21/10/2026); the glossary recorded in every notice; drift check
 

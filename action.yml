@@ -6,8 +6,9 @@ branding:
   color: "blue"
 
 # Linux runners with docker (GitHub-hosted ubuntu-*). The image is pulled, its build provenance is verified for the
-# pulled digest (`gh attestation verify`: built by .github/workflows/container.yml of this repository), and the cra
-# command runs from that digest, as the runner's user, in the workspace. Arguments are split on whitespace (no shell).
+# pulled digest (`gh attestation verify`: built on a GitHub-hosted runner by .github/workflows/container.yml of this
+# repository at the tag v<version>), and the cra command runs from that digest, as the runner's user, in the workspace.
+# Arguments are split on whitespace (no shell).
 # Usage:
 #   - uses: robertolocatelli81-dev/cra-evidence@v0.7.1
 #     with:
@@ -22,7 +23,7 @@ inputs:
     required: false
     default: "0.7.1"
   network:
-    description: "Network of the container: `none` (default; every cra command except `cra feeds` works offline) or `bridge` (for `cra feeds`)"
+    description: "Network of the container: `none` (default) or `bridge`, needed only by `cra feeds` and `cra sign --aws-kms-key-id` (the action passes no AWS_* variable to the container)"
     required: false
     default: "none"
   token:
@@ -34,7 +35,7 @@ outputs:
     description: "The image that ran, by digest"
     value: ${{ steps.verify.outputs.image }}
   exit-code:
-    description: "Exit code of the cra command (the step fails unless it is 0)"
+    description: "Exit code of `docker run`: that of the cra command, or 125-127 when docker itself fails (the step fails unless it is 0)"
     value: ${{ steps.run.outputs.exit-code }}
 
 runs:
@@ -52,12 +53,20 @@ runs:
         case "$V" in *[!0-9.]*) echo "::error::version '$V' is not X.Y.Z"; exit 1;; esac
         image="ghcr.io/$REPO"
         docker pull --quiet "$image:$V" > /dev/null
-        ref=$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$V")
-        digest="${ref#*@}"
-        case "$digest" in sha256:[0-9a-f]*) ;; *) echo "::error::no digest for $image:$V"; exit 1;; esac
+        # RepoDigests lists every repository the local image was pulled under, sorted: take the entry of this repository
+        ref=""
+        for r in $(docker inspect --format '{{range .RepoDigests}}{{.}} {{end}}' "$image:$V"); do
+          case "$r" in "$image@"*) ref="$r"; break;; esac
+        done
+        digest="${ref#"$image@"}"
+        case "$digest" in sha256:[0-9a-f]*) ;; *) echo "::error::no digest of $image for $image:$V"; exit 1;; esac
+        case "$digest" in sha256:*[!0-9a-f]*) echo "::error::malformed digest '$digest'"; exit 1;; esac
+        # exact signer identity: container.yml of this repository run for the tag v$V on a GitHub-hosted runner
+        # (--signer-workflow alone is a prefix match and accepts any ref, e.g. a workflow_dispatch from a branch)
         gh attestation verify "oci://$image@$digest" --repo "$REPO" \
-          --signer-workflow "$REPO/.github/workflows/container.yml" > /dev/null
-        echo "provenance verified: $image@$digest (built by $REPO/.github/workflows/container.yml)"
+          --cert-identity "https://github.com/$REPO/.github/workflows/container.yml@refs/tags/v$V" \
+          --source-ref "refs/tags/v$V" --deny-self-hosted-runners > /dev/null
+        echo "provenance verified: $image@$digest (built by $REPO/.github/workflows/container.yml at refs/tags/v$V)"
         echo "image=$image@$digest" >> "$GITHUB_OUTPUT"
     - id: run
       shell: bash

@@ -32,7 +32,8 @@ pip install ".[sign]"    # from a checkout; no runtime dependency, [sign] adds E
 Container image (Linux x86_64, `[sign]` included, provenance attested by the release workflow):
 
 ```
-gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.7.1 --repo robertolocatelli81-dev/cra-evidence
+gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.7.1 --repo robertolocatelli81-dev/cra-evidence \
+  --signer-workflow robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml --source-ref refs/tags/v0.7.1
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/cra-evidence:0.7.1 verify pack.json --ledger cra.ledger.jsonl
 ```
 

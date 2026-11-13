@@ -3,8 +3,10 @@ name: container
 # Builds ghcr.io/robertolocatelli81-dev/cra-evidence:<version> from the wheel of a GitHub Release exactly as released
 # (checked against the release's SHA256SUMS, nothing rebuilt), proves that the image verifies the release's own signed
 # evidence pack and refuses a tampered copy, pushes it, and attests its build provenance (Sigstore, stored in the
-# registry): `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:<version> --repo robertolocatelli81-dev/cra-evidence`.
-# Runs on a published release, or by hand for an existing tag (the Dockerfile is the one of the commit that runs).
+# registry): `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:<version> --repo robertolocatelli81-dev/cra-evidence
+# --signer-workflow robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml --source-ref refs/tags/v<version>`.
+# Runs on a published release, or by hand for an existing tag: then "Use workflow from" must be that same tag (checked
+# below), so the Dockerfile is always the tag's and the attestation names refs/tags/v<version>, which action.yml requires.
 
 on:
   release:
@@ -25,7 +27,6 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-      artifact-metadata: write
     env:
       IMAGE: ghcr.io/robertolocatelli81-dev/cra-evidence
     steps:
@@ -41,6 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "tag '$TAG' is not vX.Y.Z"; exit 1;; esac
+          [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "run from $GITHUB_REF, expected refs/tags/$TAG (Use workflow from: the tag)"; exit 1; }
           v="${TAG#v}"
           case "$v" in *[!0-9.]*) echo "version '$v' is not X.Y.Z"; exit 1;; esac
           rm -rf rel dist; mkdir rel dist
