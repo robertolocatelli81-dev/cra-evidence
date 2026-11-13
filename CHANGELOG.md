@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 — unreleased — art14-filing v0.2: the CVE / EUVD identifiers of the notice and a declared case reference
+## 0.9.0 — 2026-11-13 — art14-filing v0.2: the CVE / EUVD identifiers of the notice and a declared case reference
 
 Specification written before the code: `spec/art14-filing/v0.2/README.md` (a delta over v0.1).
 

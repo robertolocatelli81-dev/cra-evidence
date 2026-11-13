@@ -121,7 +121,7 @@ nothing about identifiers.
 
 ## What is measured
 
-Re-run on 13/11/2026 on the code of this branch (cra-evidence 0.9.0, unreleased; `git archive` of the commit, fresh
+Re-run on 13/11/2026 on this release's code (cra-evidence 0.9.0; `git archive` of the commit, fresh
 virtual environments):
 
 - The test suite: 439 tests, OK on Python 3.9.25, 3.11.2 and 3.12.15 with `[sign]`, jsonschema, referencing and the
@@ -147,17 +147,17 @@ pip install ".[sign]"    # from a checkout; no runtime dependency, [sign] adds E
 Container image (Linux x86_64, `[sign]` included, build provenance attested by the release workflow):
 
 ```
-gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.8.0 --repo robertolocatelli81-dev/cra-evidence \
-  --cert-identity https://github.com/robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml@refs/tags/v0.8.0 \
-  --source-ref refs/tags/v0.8.0 --deny-self-hosted-runners
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/cra-evidence:0.8.0 verify pack.json --ledger cra.ledger.jsonl
+gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.9.0 --repo robertolocatelli81-dev/cra-evidence \
+  --cert-identity https://github.com/robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml@refs/tags/v0.9.0 \
+  --source-ref refs/tags/v0.9.0 --deny-self-hosted-runners
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/cra-evidence:0.9.0 verify pack.json --ledger cra.ledger.jsonl
 ```
 
 GitHub Action (verifies the provenance of the image digest it pulled, then runs `cra` in the workspace, without
 network by default):
 
 ```yaml
-- uses: robertolocatelli81-dev/cra-evidence@v0.8.0
+- uses: robertolocatelli81-dev/cra-evidence@v0.9.0
   with:
     args: verify dist/pack.json --ledger evidence/cra.ledger.jsonl --trust-store evidence/trust.json
 ```

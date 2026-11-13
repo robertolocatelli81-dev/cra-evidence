@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use cra-evidence, cite it as below. It is not a conformity assessment, not CE marking and not the official CSIRT/ENISA reporting channel."
 title: "cra-evidence: firm-side, offline-verifiable evidence for the EU Cyber Resilience Act"
 type: software
-version: 0.8.0
+version: 0.9.0
 date-released: "2026-11-13"
 doi: 10.5281/zenodo.24172960
 identifiers:
