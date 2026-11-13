@@ -120,7 +120,9 @@ class LongTermEvidence:
     def seal(self, signer: Signer, t: float, ts_source: str = "asserted", stronger_digest: Optional[str] = None,
              hash_alg: str = DEFAULT_HASH, token_b64: Optional[str] = None) -> Dict:
         """ts_source != "asserted" REQUIRES the third-party token (RFC 3161 / OTS) so that the label can never be a
-        bare claim; the token is stored (and digested) with the record and verified by `timestamp_trust_fn`."""
+        bare claim; the token is stored (and digested) with the record. It is verified only by a `timestamp_trust_fn`
+        that the caller of `verify` injects: cra-evidence ships none, so `cra seal` and `cra verify` never verify a token
+        (the verdict says `temporal_trust`: "ASSUMED …")."""
         if ts_source != "asserted" and not token_b64:
             raise ValueError(f"ts_source={ts_source!r} needs the timestamp token (token_b64); without it the time is 'asserted'")
         rehash = stronger_digest or ""
