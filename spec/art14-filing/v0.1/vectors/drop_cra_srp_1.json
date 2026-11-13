@@ -1,0 +1,28 @@
+{
+ "complete": true,
+ "deadline_utc": "2026-11-02T08:00:00+00:00",
+ "fields": {
+  "awareness_datetime_utc": "2026-11-01T08:00:00Z",
+  "corrective_available_date": "2026-11-02T00:00:00Z",
+  "cve_id": "CVE-2026-0002",
+  "manufacturer_name": "m",
+  "member_states_available": [
+   "IT"
+  ],
+  "notification_type": "Vulnerability",
+  "product_name": "p",
+  "product_version": "1.0",
+  "summary": "s",
+  "title": "t",
+  "user_measures": "patch"
+ },
+ "generated_utc": "2026-11-12T21:22:47+00:00",
+ "glossary_source": "ENISA CRA SRP Glossary (39 fields), read 2026-09-15 — snapshot vendored in spec/sources/enisa_srp_glossary_20260915.json; per-stage codes derived from it by tests/test_council_r2.py",
+ "missing_required": [],
+ "notice_id": "8d0a9c38-4596-4396-993e-3629d585eb50",
+ "notice_sha3": "6fa8f18a618800c91f80b26637359c6377c4b7794eb585934db72063e61bf183",
+ "schema": "cra-srp/1",
+ "stage": "early_warning",
+ "stream": "vulnerability",
+ "submission": "NOT submitted by this tool: the SRP is a human web portal (EU Login + MFA, Assigned Representative); this payload is the evidence of what existed and when"
+}

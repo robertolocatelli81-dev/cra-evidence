@@ -20,6 +20,13 @@ from cra_evidence import art14_attest as A                     # noqa: E402
 from cra_evidence import ledger as L                            # noqa: E402
 from cra_evidence.locker import CRAEvidenceLocker               # noqa: E402
 from cra_evidence.sbomify_import import run_import              # noqa: E402
+from cra_evidence.srp_notice import DryRunDrop, SRPNotice        # noqa: E402
+
+NATIVE_EW = {"notification_type": "Vulnerability", "title": "Second exploited flaw in Acme T100 (synthetic)",
+             "summary": "Synthetic early warning built with cra notice.", "manufacturer_name": "Example Widgets GmbH (synthetic)",
+             "member_states_available": ["AT", "DE"], "product_name": "Acme Smart Thermostat T100 (synthetic)",
+             "product_version": "4.2.4", "awareness_datetime_utc": "2026-11-12T10:00:00Z", "cve_id": "CVE-2099-0002"}
+LEGACY = os.path.join(ROOT, "tests", "fixtures", "srp_legacy_nemesis", "vulnerability_early_warning_8d0a9c38-4596-4396-993e-3629d585eb50.json")
 
 TEST_KEY_STRING = "cra-evidence art14-filing v0.1 vectors: TEST-ONLY signing key, public by design, never a real key"
 OTHER_KEY_STRING = "cra-evidence art14-filing v0.1 vectors: a second TEST-ONLY key, not in the trust store"
@@ -64,7 +71,15 @@ def build_notices(work):
                        [os.path.join(FIX, "filing_s1AfwOnAgUPN_early_warning_1.json"),
                         os.path.join(FIX, "filing_s1AfwOnAgUPN_intermediate_1.json")],
                        lk, drop, "4ef61281e69d693e3560185bf81ec5474179ea98", now=NOW, new_id=new_id)
-    return led, {x["stage"]: os.path.join(drop, x["drop_file"]) for x in r["notices"]}
+        # a notice built here (cra-srp/2, as `cra notice` writes it), for another vulnerability of the same product
+        n = SRPNotice(stream="vulnerability", stage="early_warning", fields=dict(NATIVE_EW), notice_id=new_id(),
+                      generated_utc=NOW.isoformat(timespec="seconds"))
+        lk.bind_notice(n)
+        dr = DryRunDrop(drop).prepare(n)
+        lk.record_notice(n, dr)
+    out = {x["stage"]: os.path.join(drop, x["drop_file"]) for x in r["notices"]}
+    out["native"] = os.path.join(drop, dr["drop_file"])
+    return led, out
 
 
 def generate(out):
@@ -78,6 +93,12 @@ def generate(out):
         shutil.copyfile(led, os.path.join(out, "ledger.jsonl"))
         shutil.copyfile(drops["early_warning"], os.path.join(out, "drop_early_warning.json"))
         shutil.copyfile(drops["intermediate"], os.path.join(out, "drop_intermediate.json"))
+        shutil.copyfile(drops["native"], os.path.join(out, "drop_native_early_warning.json"))
+        shutil.copyfile(LEGACY, os.path.join(out, "drop_cra_srp_1.json"))
+        nat = A.build_statement(drops["native"], led, attested_at=ATTESTED)
+        nat_f = A.build_statement(drops["native"], led, attested_at=ATTESTED,
+                                  filing={"srp_reference": "SRP-EW-2099-000401", "filed_at": "2026-11-12T20:00:00+01:00",
+                                          "filed_by": "psirt@example.com"})
         ew = A.build_statement(drops["early_warning"], led, "acme-thermostat-t100", "4.2.4", attested_at=ATTESTED)
         ir = A.build_statement(drops["intermediate"], led, "acme-thermostat-t100", "4.2.4", attested_at=ATTESTED)
         entries = list(L.Ledger(led).entries())
@@ -121,7 +142,31 @@ def generate(out):
     def bad(*codes):
         return {"verified": False, "exit": 1, "codes": list(codes)}
     # ── valid ──
-    add("valid_early_warning", envelope(ew, k1), ok, rule="§2-§5: an imported early warning (complete false), drop and ledger checked")
+    def nmut(fn):
+        st = json.loads(nat)
+        fn(st)
+        return dumps(st)
+    okp = {**ok, "product": "PASS"}
+    add("valid_native_early_warning", envelope(nat, k1), okp, drop="drop_native_early_warning.json",
+        rule="§2/§4: a cra-srp/2 notice built by cra notice, source cra-evidence, filing null")
+    add("valid_native_with_declared_filing", envelope(nat_f, k1), okp, drop="drop_native_early_warning.json",
+        rule="§4: a filing declared when attesting (declaredBy cra-evidence)")
+    add("native_document_sha256_not_the_subject", envelope(nmut(pset(["predicate", "source", "documentSha256"], "0" * 64)), k1),
+        bad("predicate_rule"), drop="drop_native_early_warning.json", rule="§4: cra-evidence source = the subject's sha256")
+    add("native_absent_at_source_not_empty", envelope(nmut(pset(["predicate", "source", "absentAtSource"], ["4"])), k1),
+        bad("predicate_rule"), drop="drop_native_early_warning.json", rule="§4: cra-evidence source carries every row it has")
+    add("native_drop_claimed_by_sbomify", envelope(nmut(lambda st: st["predicate"]["source"].update(tool="sbomify")), k1),
+        bad("drop_mismatch"), drop="drop_native_early_warning.json", ledger=None, rule="§4.2 rule 1: a cra-srp/2 drop is cra-evidence's")
+    with open(LEGACY, "rb") as f:
+        legacy_raw = f.read()
+    def on_legacy(st):
+        st["subject"][0]["digest"] = {"sha256": hashlib.sha256(legacy_raw).hexdigest(), "sha3_256": hashlib.sha3_256(legacy_raw).hexdigest()}
+        st["predicate"]["source"]["documentSha256"] = st["subject"][0]["digest"]["sha256"]
+    add("subject_is_a_cra_srp_1_drop", envelope(nmut(on_legacy), k1),
+        bad("rule1"), drop="drop_cra_srp_1.json", ledger=None, rule="§4.2 rule 1: cra-srp/2 or cra-srp/3 only")
+    add("product_differs_from_the_ledger", envelope(mut(pset(["predicate", "product", "version"], "4.2.5")), k1), bad("product"),
+        rule="§4.2 rule 3: the product the ledger records")
+    add("valid_early_warning", envelope(ew, k1), okp, rule="§2-§5: an imported early warning (complete false), drop and ledger checked")
     add("valid_intermediate", envelope(ir, k1), ok, drop="drop_intermediate.json", rule="rule 9: complete null at intermediate")
     add("valid_without_ledger", envelope(ew, k1), {**ok, "ledger": "not_evaluated"}, ledger=None, rule="§4.2 rule 3: no ledger = not_evaluated, never PASS")
     add("valid_without_drop_and_ledger", envelope(ew, k1), {**ok, "drop": "not_evaluated", "ledger": "not_evaluated"}, drop=None, ledger=None,

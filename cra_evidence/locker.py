@@ -191,7 +191,10 @@ class CRAEvidenceLocker:
         (`cra import sbomify`: the tool, the sha256 of the filing and report documents kept in <ledger>.sources/, the
         source's own ids). Absent for a notice built here: the record keeps the keys it always had."""
         bound_to = self.bind_notice(notice, divergence_reason)
-        rec = {"kind": "cra_srp_notice", "stream": notice.stream, "stage": notice.stage,
+        # product_id / product_version since 0.8.0: the product the locker records for (art14-filing v0.1 §4.2 rule 3
+        # compares them with a statement's `product`); records written before do not carry them
+        rec = {"kind": "cra_srp_notice", "product_id": self.product_id, "product_version": self.product_version,
+               "stream": notice.stream, "stage": notice.stage,
                "glossary_version": notice.glossary_version,
                "notice_id": notice.notice_id, "notice_sha3": notice.canonical_hash(),
                "complete": notice.complete(), "missing_required": notice.missing(),

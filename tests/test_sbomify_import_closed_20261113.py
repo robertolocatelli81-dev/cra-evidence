@@ -209,7 +209,7 @@ class TestRefusals(_Tmp, unittest.TestCase):
         self.assertEqual(rc, 0, out + err)
 
     def test_values_that_do_not_convert(self):
-        for sid, value in (("product_type", "Medium"), ("product_type", "important"), ("member_states", "AT, XX"),
+        for sid, value in (("member_states", "AT, AT"), ("member_states", "AT, DE, AT"), ("product_type", "Medium"), ("product_type", "important"), ("member_states", "AT, XX"),
                            ("member_states", "AT,,DE"), ("member_states", "UK"), ("member_states", "at"),
                            ("member_states", ""), ("end_of_support", "Maybe")):
             with self.subTest(sid=sid, value=value):
@@ -441,9 +441,10 @@ class TestCheckNoticeV3(_Tmp, unittest.TestCase):
 class TestAttestRefusals(_Tmp, unittest.TestCase):
     def test_attest_refuses_a_cra_srp_2_drop_and_an_unbound_drop(self):
         from cra_evidence.art14_attest import AttestRefused, build_statement
-        legacy = sorted(glob.glob(os.path.join(ROOT, "tests", "fixtures", "srp_legacy_060", "*.json")))[0]
-        with self.assertRaises(AttestRefused):
+        legacy = os.path.join(ROOT, "tests", "fixtures", "srp_legacy_nemesis", "vulnerability_early_warning_8d0a9c38-4596-4396-993e-3629d585eb50.json")
+        with self.assertRaises(AttestRefused) as cm:
             build_statement(legacy, os.path.join(self.d, "none.jsonl"), "p", "1")
+        self.assertIn("cra-srp/2 or cra-srp/3", str(cm.exception))
         rc, out, err, led, drop = self.imp(REP_I, I_FILINGS[:1], tag="a")
         d = glob.glob(os.path.join(drop, "incident_*.json"))[0]
         other = os.path.join(self.d, "other.jsonl")
@@ -453,6 +454,85 @@ class TestAttestRefusals(_Tmp, unittest.TestCase):
         st = json.loads(build_statement(d, led, "p", "1"))
         self.assertEqual(st["predicate"]["ledger"]["entryIndex"], 1)
         self.assertIsNotNone(st["predicate"]["deadlineAt"])
+
+    def test_rule9_keeps_the_future_awareness_refusal(self):
+        from cra_evidence.srp_notice import SRPNotice
+        for stage in ("intermediate", "users_informed"):
+            with self.assertRaises(ValueError) as cm:
+                SRPNotice("vulnerability", stage, {"awareness_datetime_utc": "2099-01-01T00:00:00Z"})
+            self.assertIn("future", str(cm.exception))
+
+    def native(self):
+        led = os.path.join(self.d, "n.jsonl")
+        ew = {"notification_type": "Vulnerability", "title": "t", "summary": "s", "manufacturer_name": "m", "member_states_available": ["IT"],
+              "product_name": "p", "product_version": "1", "awareness_datetime_utc": "2026-11-01T08:00:00Z", "cve_id": "CVE-2026-0002"}
+        rc, out, err = self.cli("notice", "--ledger", led, "--product", "prod", "--version", "9", "--stage", "early_warning",
+                                "--fields", self.write(ew), "--drop", os.path.join(self.d, "nd"))
+        self.assertEqual(rc, 0, out + err)
+        return led, os.path.join(self.d, "nd", json.loads(out)["drop_file"])
+
+    def test_native_statement(self):
+        from cra_evidence import __version__
+        from cra_evidence.art14_attest import AttestRefused, build_statement
+        led, d = self.native()
+        with open(d, "rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()
+        st = json.loads(build_statement(d, led))
+        pr = st["predicate"]
+        self.assertEqual(pr["source"], {"tool": "cra-evidence", "toolVersion": __version__, "documentSha256": sha, "absentAtSource": []})
+        self.assertIsNone(pr["filing"]); self.assertEqual(pr["product"], {"id": "prod", "version": "9"})
+        self.assertTrue(pr["complete"]); self.assertEqual(st["subject"][0]["digest"]["sha256"], sha)
+        st = json.loads(build_statement(d, led, filing={"srp_reference": "", "filed_at": "2026-11-01T21:00:00+01:00", "filed_by": ""}))
+        self.assertEqual(st["predicate"]["filing"], {"declaredBy": "cra-evidence", "srpReference": "", "filedAt": "2026-11-01T20:00:00Z", "filedBy": ""})
+        for kw, why in (({"product_id": "other"}, "differs from the product"), ({"product_version": "8"}, "differs from the product"),
+                        ({"filing": {"srp_reference": "x", "filed_at": "2026-11-01T21:00:00", "filed_by": ""}}, "--filed-at"),
+                        ({"filing": {"srp_reference": "x", "filed_at": "", "filed_by": ""}}, "--filed-at")):
+            with self.subTest(kw=kw):
+                with self.assertRaises(AttestRefused) as cm:
+                    build_statement(d, led, **kw)
+                self.assertIn(why, str(cm.exception))
+        rc, out, err, led3, drop3 = self.imp(REP_I, I_FILINGS[:1], tag="f3")
+        d3 = glob.glob(os.path.join(drop3, "incident_*.json"))[0]
+        with self.assertRaises(AttestRefused) as cm:
+            build_statement(d3, led3, filing={"srp_reference": "", "filed_at": "2026-11-12T13:00:00Z", "filed_by": ""})
+        self.assertIn("cra-srp/3", str(cm.exception))
+        rc, out, err = self.cli("attest", d, "--ledger", led, "--key", "k", "--signer-id", "a", "--out", os.path.join(self.d, "o"),
+                                "--srp-reference", "SRP-1")
+        self.assertEqual(rc, 2)
+
+    def test_product_not_evaluated_only_when_the_record_lacks_it(self):
+        from cra_evidence.art14_attest import AttestRefused, build_statement, check_statement
+        from cra_evidence.canonical import sha3_hex
+        from cra_evidence.ledger import Ledger
+        led, d = self.native()
+        old = os.path.join(self.d, "old.jsonl")              # the same records as cra-evidence 0.7.1 wrote them: no product
+        for e in Ledger(led).entries():
+            data = {k: v for k, v in e["data"].items() if k not in ("product_id", "product_version", "record_sha3")}
+            data["record_sha3"] = sha3_hex(data)
+            Ledger(old).append(data, ts=e["ts"])
+        with self.assertRaises(AttestRefused) as cm:
+            build_statement(d, old)
+        self.assertIn("does not carry the product", str(cm.exception))
+        st = json.loads(build_statement(d, old, "declared-product", "7"))
+        self.assertEqual(st["predicate"]["product"], {"id": "declared-product", "version": "7"})
+        if HAVE_CRYPTO:
+            key = os.path.join(self.d, "k")
+            rc, out, _ = self.cli("keygen", key)
+            ts = self.write({"a": json.loads(out)["public_key_hex"]})
+            for ledger, product, want, rc_want in ((old, ["--product", "declared-product", "--version", "7"], "not_evaluated", 0),
+                                                   (led, [], "PASS", 0)):
+                env = os.path.join(self.d, "e.json")
+                rc, out, err = self.cli("attest", d, "--ledger", ledger, "--key", key, "--signer-id", "a", "--out", env, *product)
+                self.assertEqual(rc, 0, out + err)
+                rc, out, err = self.cli("verify-attestation", env, "--trust-store", ts, "--drop", d, "--ledger", ledger)
+                r = json.loads(out)
+                self.assertEqual(rc, rc_want, out); self.assertTrue(r["product"].startswith(want), r["product"])
+            # a statement whose ledger entry is not the one given: rule 3 refuses it, the product is not judged on it
+            rc, out, err = self.cli("attest", d, "--ledger", old, "--key", key, "--signer-id", "a", "--out", env, "--product", "x", "--version", "7")
+            rc, out, err = self.cli("verify-attestation", env, "--trust-store", ts, "--drop", d, "--ledger", led)
+            r = json.loads(out)
+            self.assertEqual(rc, 1); self.assertIn("rule3", [x["code"] for x in r["reasons"]])
+            self.assertTrue(r["product"].startswith("not_evaluated (the ledger entry"), r["product"])
 
     def test_verify_attestation_usage(self):
         v = os.path.join(ROOT, "spec", "art14-filing", "v0.1", "vectors")

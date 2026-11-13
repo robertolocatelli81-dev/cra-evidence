@@ -303,15 +303,21 @@ def _main(argv: List[str] = None) -> int:
     s = sub.add_parser("seal", help="long-term seal of a pack digest (crypto-agile archive timestamp); --tip-key = the sealing identity"); common(s)
     s.add_argument("--pack-sha3", required=True); s.add_argument("--ts-source", default="asserted"); s.add_argument("--token-b64", help="RFC 3161 / OTS token (required when --ts-source is not 'asserted')")
     s.add_argument("--renew", help="JSON file with the previous seal (lte dict) to extend the chain")
-    s = sub.add_parser("attest", help="sign an in-toto statement (predicate art14-filing v0.1, DSSE, Ed25519) about a cra-srp/3 drop file and its ledger entry",
+    s = sub.add_parser("attest", help="sign an in-toto statement (predicate art14-filing v0.1, DSSE, Ed25519) about a notice drop file and its ledger entry",
                        description="Writes a DSSE envelope (payloadType application/vnd.in-toto+json) whose Statement names the drop file's "
-                       "bytes (sha256 and sha3_256) and states its stage, glossary, completeness, awareness instant, filing as declared by "
-                       "the source tool, source document and ledger entry (spec/art14-filing/v0.1/README.md). Refused (exit 1, nothing "
-                       "written) unless the drop file is cra-srp/3 and `cra check-notice DROP --ledger L` verifies it. The keyid is "
-                       "--signer-id: the name of the key in the verifier's trust store. Not a proof of submission to ENISA's platform.")
-    s.add_argument("drop", help="the cra-srp/3 drop file"); s.add_argument("--ledger", required=True)
-    s.add_argument("--product", required=True, help="product id stated in the predicate (drop files do not carry it)")
-    s.add_argument("--version", dest="version", required=True, help="product version stated in the predicate")
+                       "bytes (sha256 and sha3_256) and states its stage, glossary, completeness, awareness instant, filing as declared, "
+                       "source and ledger entry (spec/art14-filing/v0.1/README.md). Refused (exit 1, nothing written) unless the drop file "
+                       "is cra-srp/2 (written by `cra notice`) or cra-srp/3 (imported) and `cra check-notice DROP --ledger L` verifies it. "
+                       "For cra-srp/2 the source is cra-evidence and the filing is null unless declared with --filed-at [--srp-reference] "
+                       "[--filed-by]; for cra-srp/3 it is the filing its source recorded. The keyid is --signer-id: the name of the key in "
+                       "the verifier's trust store. Not a proof of submission to ENISA's platform.")
+    s.add_argument("drop", help="the cra-srp/2 or cra-srp/3 drop file"); s.add_argument("--ledger", required=True)
+    s.add_argument("--product", help="product id of the predicate: taken from the ledger record when it carries it (cra-evidence 0.8.0 "
+                                     "on; a different value is refused), required otherwise")
+    s.add_argument("--version", dest="version", help="product version of the predicate (same rule as --product)")
+    s.add_argument("--srp-reference", help="cra-srp/2 only, with --filed-at: the SRP reference of the filing, declared")
+    s.add_argument("--filed-at", help="cra-srp/2 only: the instant the notice was filed on the SRP, declared (RFC 3339 with zone)")
+    s.add_argument("--filed-by", help="cra-srp/2 only, with --filed-at: who filed it, declared")
     s.add_argument("--key", help="Ed25519 seed file"); s.add_argument("--signer-id", required=True)
     s.add_argument("--aws-kms-key-id", help="KMS key id/ARN (key spec ECC_NIST_EDWARDS25519)")
     s.add_argument("--aws-region"); s.add_argument("--aws-creds-file", help="KEY=VALUE file with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY [/ AWS_SESSION_TOKEN]")
@@ -417,6 +423,11 @@ def _main(argv: List[str] = None) -> int:
         import hashlib
         from .art14_attest import AttestRefused, build_statement, sign_envelope
         from .outputs import write_file
+        fil = None
+        if a.filed_at is not None or a.srp_reference is not None or a.filed_by is not None:
+            if a.filed_at is None:
+                p.error("attest: --srp-reference / --filed-by need --filed-at")
+            fil = {"srp_reference": a.srp_reference or "", "filed_at": a.filed_at, "filed_by": a.filed_by or ""}
         if a.aws_kms_key_id:
             from .kms import KMSSigner, load_creds_file
             if not a.aws_region:
@@ -429,7 +440,7 @@ def _main(argv: List[str] = None) -> int:
         else:
             p.error("attest: give --key or --aws-kms-key-id")
         try:
-            payload = build_statement(a.drop, a.ledger, a.product, a.version)
+            payload = build_statement(a.drop, a.ledger, a.product, a.version, filing=fil)
         except (AttestRefused, ValueError, OSError) as e:
             _p({"attested": False, "reasons": [str(e)[:400]]}); return 1
         env = sign_envelope(payload, key, a.signer_id)

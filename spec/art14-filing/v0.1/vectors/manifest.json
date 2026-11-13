@@ -16,11 +16,115 @@
  },
  "vectors": [
   {
+   "drop": "drop_native_early_warning.json",
+   "envelope": "valid_native_early_warning.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "product": "PASS",
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_native_early_warning",
+   "rule": "§2/§4: a cra-srp/2 notice built by cra notice, source cra-evidence, filing null",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_native_early_warning.json",
+   "envelope": "valid_native_with_declared_filing.intoto.json",
+   "expect": {
+    "codes": [],
+    "exit": 0,
+    "product": "PASS",
+    "verified": true
+   },
+   "ledger": "ledger.jsonl",
+   "name": "valid_native_with_declared_filing",
+   "rule": "§4: a filing declared when attesting (declaredBy cra-evidence)",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_native_early_warning.json",
+   "envelope": "native_document_sha256_not_the_subject.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "native_document_sha256_not_the_subject",
+   "rule": "§4: cra-evidence source = the subject's sha256",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_native_early_warning.json",
+   "envelope": "native_absent_at_source_not_empty.intoto.json",
+   "expect": {
+    "codes": [
+     "predicate_rule"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "native_absent_at_source_not_empty",
+   "rule": "§4: cra-evidence source carries every row it has",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_native_early_warning.json",
+   "envelope": "native_drop_claimed_by_sbomify.intoto.json",
+   "expect": {
+    "codes": [
+     "drop_mismatch"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": null,
+   "name": "native_drop_claimed_by_sbomify",
+   "rule": "§4.2 rule 1: a cra-srp/2 drop is cra-evidence's",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_cra_srp_1.json",
+   "envelope": "subject_is_a_cra_srp_1_drop.intoto.json",
+   "expect": {
+    "codes": [
+     "rule1"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": null,
+   "name": "subject_is_a_cra_srp_1_drop",
+   "rule": "§4.2 rule 1: cra-srp/2 or cra-srp/3 only",
+   "trust_store": "trust_store.json"
+  },
+  {
+   "drop": "drop_early_warning.json",
+   "envelope": "product_differs_from_the_ledger.intoto.json",
+   "expect": {
+    "codes": [
+     "product"
+    ],
+    "exit": 1,
+    "verified": false
+   },
+   "ledger": "ledger.jsonl",
+   "name": "product_differs_from_the_ledger",
+   "rule": "§4.2 rule 3: the product the ledger records",
+   "trust_store": "trust_store.json"
+  },
+  {
    "drop": "drop_early_warning.json",
    "envelope": "valid_early_warning.intoto.json",
    "expect": {
     "codes": [],
     "exit": 0,
+    "product": "PASS",
     "verified": true
    },
    "ledger": "ledger.jsonl",

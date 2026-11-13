@@ -55,11 +55,12 @@ class TestVectors(unittest.TestCase):
                     self.assertEqual(r["statement"], "accepted")
                 else:
                     self.assertTrue(codes)
-                for k in ("drop", "ledger"):
+                for k in ("drop", "ledger", "product"):
                     if k in v["expect"]:
                         self.assertEqual(r[k], v["expect"][k])
-                    if v[k] is None:
-                        self.assertEqual(r[k], "not_evaluated")      # never PASS without the object (§4.2 rule 3)
+                    obj = v["ledger"] if k == "product" else v[k]
+                    if obj is None:
+                        self.assertTrue(r[k].startswith("not_evaluated"))   # never PASS without the object (§4.2 rule 3)
                     elif r["verified"]:
                         self.assertEqual(r[k], "PASS")
                 for k in ("statement_unrecognized", "envelope_unrecognized"):
@@ -112,8 +113,8 @@ class TestVectors(unittest.TestCase):
                                  "envelope_malformed", "statement_type", "predicate_type", "subject", "subject_digest",
                                  "predicate_unknown_key", "predicate_missing_key", "predicate_type_error", "duplicate_key",
                                  "predicate_enum", "predicate_timestamp", "predicate_rule", "deadline", "rule1", "rule2",
-                                 "rule3", "rule4", "drop_mismatch"})
-        self.assertEqual(sum(1 for v in manifest()["vectors"] if v["expect"]["verified"]), 8)
+                                 "rule3", "rule4", "drop_mismatch", "product"})
+        self.assertEqual(sum(1 for v in manifest()["vectors"] if v["expect"]["verified"]), 10)
 
 
 class TestWithoutCryptography(unittest.TestCase):

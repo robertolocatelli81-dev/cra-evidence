@@ -105,22 +105,27 @@ def _case_value(p: Dict[str, Any], k: str) -> Any:
     return (p.get("previous_fields") or {}).get(k)
 
 
-def build_statement(drop_path: str, ledger_path: str, product_id: str, product_version: str,
-                    attested_at: Optional[datetime] = None) -> bytes:
-    """The Statement's exact bytes (canonical JSON, keys sorted). Refused unless the drop file is a cra-srp/3 notice that
-    `cra check-notice` verifies against this ledger."""
+def build_statement(drop_path: str, ledger_path: str, product_id: Optional[str] = None, product_version: Optional[str] = None,
+                    attested_at: Optional[datetime] = None, filing: Optional[Dict[str, str]] = None) -> bytes:
+    """The Statement's exact bytes (canonical JSON, keys sorted). Refused unless the drop file is a cra-srp/2 notice
+    (written by `cra notice`) or a cra-srp/3 notice that `cra check-notice` verifies against this ledger.
+    product: from the ledger record when it carries it (0.8.0 on; a different --product/--version is refused), else
+    from the arguments (required then). filing (cra-srp/2 only): {"srp_reference", "filed_at", "filed_by"} declared
+    by the operator of cra-evidence; for cra-srp/3 the filing is the one of the drop file."""
+    from . import __version__
     from .notice_check import check_notice, load_json_object
-    for name, v in (("--product", product_id), ("--version", product_version)):
-        if not isinstance(v, str) or not v:
-            raise AttestRefused(f"{name}: a non-empty string")
     raw = read_regular(drop_path)
     p = load_json_object(drop_path)
-    if p.get("schema") != "cra-srp/3":
-        raise AttestRefused(f"schema {p.get('schema')!r}: the subject of art14-filing v0.1 is a cra-srp/3 drop file")
+    sch = p.get("schema")
+    if sch not in ("cra-srp/2", "cra-srp/3"):
+        raise AttestRefused(f"schema {sch!r}: the subject of art14-filing v0.1 is a cra-srp/2 or cra-srp/3 drop file")
+    if filing is not None and sch != "cra-srp/2":
+        raise AttestRefused("--srp-reference/--filed-at/--filed-by: a cra-srp/3 notice carries the filing its source recorded")
     r = check_notice(drop_path, ledger_path)
     if not r["verified"]:
         raise AttestRefused(f"the drop file does not verify against the ledger: {r['reasons'][:3]}")
     sha3 = hashlib.sha3_256(raw).hexdigest()
+    sha256 = hashlib.sha256(raw).hexdigest()
     hits = []
     for e in Ledger(ledger_path).entries():
         d = e.get("data")
@@ -129,6 +134,16 @@ def build_statement(drop_path: str, ledger_path: str, product_id: str, product_v
             hits.append(e)
     if len(hits) != 1:
         raise AttestRefused(f"{len(hits)} ledger entries record this drop file (exactly one expected)")
+    rec = hits[0]["data"]
+    if "product_id" in rec or "product_version" in rec:
+        for name, given, recorded in (("--product", product_id, rec.get("product_id")),
+                                      ("--version", product_version, rec.get("product_version"))):
+            if given is not None and given != recorded:
+                raise AttestRefused(f"{name} {given!r} differs from the product the ledger records for this notice ({recorded!r})")
+        product_id, product_version = rec.get("product_id"), rec.get("product_version")
+    for name, v in (("--product", product_id), ("--version", product_version)):
+        if not isinstance(v, str) or not v:
+            raise AttestRefused(f"{name}: a non-empty string (the ledger record does not carry the product)")
     aw = _case_value(p, "awareness_datetime_utc")
     if not isinstance(aw, str) or not aw:
         raise AttestRefused("the notice carries no awareness instant (awareAt is required)")
@@ -139,22 +154,37 @@ def build_statement(drop_path: str, ledger_path: str, product_id: str, product_v
         deadline = z(aware + timedelta(hours=EARLY_WARNING_HOURS))
     elif stage == "notification":
         deadline = z(aware + timedelta(hours=NOTIFICATION_HOURS))
-    src, fil = p["source"], p["filing"]
+    if sch == "cra-srp/3":
+        src, fil = p["source"], p["filing"]
+        source = {"tool": src["tool"], "toolVersion": src["tool_version"], "documentSha256": src["document_sha256"],
+                  "absentAtSource": list(src["absent_at_source"])}
+        filing_p = (None if fil is None else {"declaredBy": fil["declared_by"], "srpReference": fil["srp_reference"],
+                                              "filedAt": z(parse_utc(fil["filed_at"])), "filedBy": fil["filed_by"]})
+    else:   # a notice built here: the source is this tool, the document is the notice file itself
+        source = {"tool": "cra-evidence", "toolVersion": __version__, "documentSha256": sha256, "absentAtSource": []}
+        filing_p = None
+        if filing is not None:
+            for k in ("srp_reference", "filed_at", "filed_by"):
+                if not isinstance(filing.get(k), str):
+                    raise AttestRefused(f"filing: {k} must be a string")
+            if not filing["filed_at"]:
+                raise AttestRefused("--filed-at is required to declare a filing")
+            try:
+                fat = parse_utc(filing["filed_at"])
+            except ValueError as e:
+                raise AttestRefused(f"--filed-at: {e}") from None
+            filing_p = {"declaredBy": "cra-evidence", "srpReference": filing["srp_reference"], "filedAt": z(fat),
+                        "filedBy": filing["filed_by"]}
     now = attested_at or datetime.now(timezone.utc)
     pred = {"regulation": REGULATION, "stream": p["stream"], "stage": stage,
             "product": {"id": product_id, "version": product_version},
             "glossaryVersion": p["glossary_version"], "noticeRules": GLOSSARIES[p["glossary_version"]]["rules"],
             "complete": p["complete"], "missingRequired": list(p["missing_required"]),
-            "awareAt": z(aware), "deadlineAt": deadline,
-            "filing": (None if fil is None else {"declaredBy": fil["declared_by"], "srpReference": fil["srp_reference"],
-                                                 "filedAt": z(parse_utc(fil["filed_at"])), "filedBy": fil["filed_by"]}),
-            "source": {"tool": src["tool"], "toolVersion": src["tool_version"], "documentSha256": src["document_sha256"],
-                       "absentAtSource": list(src["absent_at_source"])},
+            "awareAt": z(aware), "deadlineAt": deadline, "filing": filing_p, "source": source,
             "ledger": {"entryIndex": hits[0]["idx"], "entryHash": hits[0]["self_hash"]},
             "attestedAt": z(now.replace(microsecond=0))}
     st = {"_type": STATEMENT_TYPE, "predicateType": TYPE_URI, "predicate": pred,
-          "subject": [{"name": f"srp-notice:{p['stream']}:{stage}",
-                       "digest": {"sha256": hashlib.sha256(raw).hexdigest(), "sha3_256": sha3}}]}
+          "subject": [{"name": f"srp-notice:{p['stream']}:{stage}", "digest": {"sha256": sha256, "sha3_256": sha3}}]}
     payload = json.dumps(st, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     errs = check_statement(payload)[1]      # the producer's statement must pass the verifier's own closed reading
     if errs:
@@ -228,6 +258,11 @@ def check_statement(payload: bytes) -> Tuple[Optional[Dict[str, Any]], List[Dict
     _check_predicate(pr, reasons)
     if not reasons and sub[0]["name"] != f"srp-notice:{pr['stream']}:{pr['stage']}":
         _r(reasons, "subject", f"subject[0].name {sub[0]['name'][:80]!r} is not srp-notice:{pr['stream']}:{pr['stage']}")
+    if not reasons and pr["source"]["tool"] == "cra-evidence":
+        if pr["source"]["documentSha256"] != sub[0]["digest"]["sha256"]:
+            _r(reasons, "predicate_rule", "source.tool cra-evidence: documentSha256 must be the subject's sha256 (§4)")
+        if pr["source"]["absentAtSource"]:
+            _r(reasons, "predicate_rule", "source.tool cra-evidence: absentAtSource must be [] (§4)")
     return (None if reasons else st), reasons, unrec
 
 
@@ -332,7 +367,7 @@ def verify_envelope(env_path: str, trust_store: Dict[str, str], drop_path: Optio
                            "trusted": False, "assessed": True, "signatures": [], "signatures_not_verified": [], "envelope_unrecognized": [],
                            "statement_unrecognized": [], "statement": "not_evaluated",
                            "drop": "not_evaluated", "ledger": "not_evaluated",
-                           "product": "not_evaluated (cra-srp/3 drop files carry no product_id / product_version)",
+                           "product": "not_evaluated (compared with the ledger record only: give --ledger)",
                            "reasons": reasons,
                            "scope": "a declaration recorded and signed by the manufacturer: not a proof that the notice reached "
                                     "ENISA's platform, nor that the awareness instant is true, nor conformity"}
@@ -452,14 +487,14 @@ def _check_drop(drop_path: str, pr: Dict[str, Any], dg: Dict[str, str], out: Dic
         _r(reasons, "subject_digest", "the drop file's bytes do not match the subject digest (sha256 and sha3_256)")
         out["drop"] = "FAIL"
         return
-    if p.get("schema") != "cra-srp/3":
-        _r(reasons, "rule1", f"the subject is not a cra-srp/3 drop file (schema {p.get('schema')!r})")
+    sch = p.get("schema")
+    if sch not in ("cra-srp/2", "cra-srp/3"):
+        _r(reasons, "rule1", f"the subject is not a cra-srp/2 or cra-srp/3 drop file (schema {sch!r})")
         out["drop"] = "FAIL"
         return
     gv = p.get("glossary_version")
     pairs = (("stream", p.get("stream"), pr["stream"]), ("stage", p.get("stage"), pr["stage"]),
-             ("glossary_version", gv, pr["glossaryVersion"]),
-             ("rules", GLOSSARIES[gv]["rules"] if gv in GLOSSARIES else None, pr["noticeRules"]))
+             ("glossary_version", gv, pr["glossaryVersion"]))
     for k, have, want in pairs:
         if have != want:
             _r(reasons, "rule1", f"drop file {k} {have!r} differs from the predicate's {want!r} (§4.2 rule 1)")
@@ -476,6 +511,11 @@ def _check_drop(drop_path: str, pr: Dict[str, Any], dg: Dict[str, str], out: Dic
         aw = _case_value(p, "awareness_datetime_utc")
         if not isinstance(aw, str) or parse_utc(aw) != parse_utc(pr["awareAt"]):
             _r(reasons, "drop_mismatch", f"awareAt differs from the notice's awareness instant {aw!r}")
+        if sch == "cra-srp/2":   # a notice built here: the filing, if any, is declared in the statement only
+            if pr["source"]["tool"] != "cra-evidence":
+                _r(reasons, "drop_mismatch", f"a cra-srp/2 drop file is a notice of cra-evidence, not of {pr['source']['tool']!r}")
+            out["drop"] = "PASS" if len(reasons) == n0 else "FAIL"
+            return
         src, fil = p["source"], p["filing"]
         if (src["tool"], src["tool_version"], src["document_sha256"], src["absent_at_source"]) != (
                 pr["source"]["tool"], pr["source"]["toolVersion"], pr["source"]["documentSha256"], pr["source"]["absentAtSource"]):
@@ -498,6 +538,7 @@ def _check_ledger(ledger_path: str, pr: Dict[str, Any], dg: Dict[str, str], out:
         return
     ch = Ledger(ledger_path).verify(entries)
     i = pr["ledger"]["entryIndex"]
+    out["product"] = "not_evaluated (the ledger entry named by the statement does not pass rule 3)"
     if not ch["chain_ok"]:
         _r(reasons, "rule3", f"the ledger chain does not verify: {ch['failures'][:2]}")
     elif i >= len(entries):
@@ -519,4 +560,14 @@ def _check_ledger(ledger_path: str, pr: Dict[str, Any], dg: Dict[str, str], out:
                             ("complete", pr["complete"]), ("missing_required", pr["missingRequired"])):
                 if not _same(d.get(k), want):
                     _r(reasons, "rule3", f"entry {i}: {k} {d.get(k)!r} differs from the predicate's {want!r}")
+            if "product_id" in d or "product_version" in d:
+                if (d.get("product_id"), d.get("product_version")) == (pr["product"]["id"], pr["product"]["version"]):
+                    out["product"] = "PASS"
+                else:
+                    out["product"] = "FAIL"
+                    _r(reasons, "product", f"entry {i} records product {d.get('product_id')!r} {d.get('product_version')!r}, "
+                                           f"the predicate says {pr['product']['id']!r} {pr['product']['version']!r}")
+            else:
+                out["product"] = ("not_evaluated (the ledger record does not carry the product: written by cra-evidence "
+                                  "0.7.1 or earlier)")
     out["ledger"] = "PASS" if len(reasons) == n0 else "FAIL"

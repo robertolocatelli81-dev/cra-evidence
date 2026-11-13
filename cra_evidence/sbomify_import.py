@@ -284,6 +284,8 @@ def place_filing(filing: Dict[str, Any], kind: str, name: str = "filing") -> Dic
                 norms.append({"sbomify_id": sid, "from": raw, "to": value, "conversion": "product_type"})
         elif sid == "member_states":
             parts = [p.strip() for p in raw.split(",")]
+            if len(set(parts)) != len(parts):
+                raise ImportRefused(f"{where}: a Member State code repeated in {raw!r} (refused, never de-duplicated)")
             for p in parts:
                 if p not in EU_MEMBER_STATES:
                     raise ImportRefused(f"{where}: {p!r} is not an EU Member State code (ISO 3166-1 alpha-2, or EL)"
