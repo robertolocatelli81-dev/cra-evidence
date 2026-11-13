@@ -110,6 +110,8 @@ Written before the code. No notice recorded before carries these stages or keys,
    for them. A notice at these stages is judged by rules 1 (unknown field), 4 (`csirt_note`) and 5 (type) only: no
    field is "not at this stage", none is required, `complete` is `null` (not evaluated, never `true`),
    `missing_required` is `[]`, the deadline is `null`. Any field of the stream may be in `fields` or `previous_fields`.
+   The invariant of every stage still applies: an awareness instant (v26/i37) later than the recording host's clock
+   plus 5 minutes is refused.
 10. **Imported notices** (`cra import sbomify`, below). The drop file is `"schema": "cra-srp/3"`: the keys of
    `cra-srp/2` plus `"source"` and `"filing"`.
    - `source`: `{"tool", "tool_version", "document_sha256", "absent_at_source", "later_stage", "readings", "normalisations"}` — the tool that recorded the notice
@@ -154,7 +156,8 @@ Conversions — closed lists; any other value refuses the import with the field 
 - `product_type`: "Default"→"Default", "Important Product with Digital Elements"→"Important", "Critical Product with
   Digital Elements"→"Critical".
 - `member_states`: split on commas, each part stripped, each an EU Member State code (the 27 ISO 3166-1 alpha-2 codes,
-  "EL" accepted for Greece as in EU usage); empty parts refused.
+  "EL" accepted for Greece as in EU usage); empty parts refused; a code given twice ("AT, AT") refused, never
+  de-duplicated.
 - dates: an offset other than `Z`/`+00:00` is converted to the same instant in UTC (listed as a normalisation);
   no offset is refused.
 - `pec`, `pec_delay_reason` (free text in sbomify, a set of three checkboxes in the glossary): the exact text of one

@@ -38,8 +38,8 @@ open-source software (the subject of the Eclipse ORC "cra-attestations" work) ar
   the standard and the URL-safe alphabet (DSSE `protocol.md`).
 - **Statement:** in-toto Statement v1, `_type` `https://in-toto.io/Statement/v1`, `predicateType` the TypeURI above.
 - **Subject:** exactly one element: `name` `srp-notice:<stream>:<stage>`, `digest`
-  `{"sha256": <64 lowercase hex>, "sha3_256": <64 lowercase hex>}` of the exact bytes of the notice file (the `cra-srp/3`
-  drop file, spec/SRP_FIELDS.md), both required (algorithm names as in in-toto `digest_set.md`; `sha3_256` is the digest
+  `{"sha256": <64 lowercase hex>, "sha3_256": <64 lowercase hex>}` of the exact bytes of the notice file (a `cra-srp/2`
+  drop file written by `cra notice`, or a `cra-srp/3` drop file of an imported notice; spec/SRP_FIELDS.md), both required (algorithm names as in in-toto `digest_set.md`; `sha3_256` is the digest
   the ledger records as `drop_sha3`). Matching is by digest only (in-toto `statement.md`).
 
 ## 3. Parsing rules
@@ -73,7 +73,7 @@ Field names are lowerCamelCase; every timestamp is RFC 3339 with `Z` and says in
   "awareAt": "2026-11-13T08:00:00Z",              // the manufacturer's declared awareness instant (§4.4)
   "deadlineAt": "2026-11-14T08:00:00Z",           // computed from awareAt for early_warning / notification; null otherwise
   "filing": {                                     // null when nothing was recorded about a filing
-    "declaredBy": "sbomify",                      // "cra-evidence" | "sbomify"
+    "declaredBy": "sbomify",                      // "cra-evidence" | "sbomify" (= source.tool)
     "srpReference": "SRP-2026-000123",            // string, "" when the tool recorded none
     "filedAt": "2026-11-13T09:12:00Z",
     "filedBy": "psirt@example.com"                // string, "" when the tool recorded none
@@ -97,16 +97,31 @@ Field names are lowerCamelCase; every timestamp is RFC 3339 with `Z` and says in
 All keys above are required; `filing` and `deadlineAt` may be `null`; `complete` may be `null` only for the stages
 `intermediate` and `users_informed`. `filing.declaredBy` MUST equal `source.tool`.
 
+Notices built by cra-evidence (`cra-srp/2` drop files, written by `cra notice`): `source.tool` is `"cra-evidence"`,
+`source.toolVersion` the cra-evidence version that writes the statement, `source.documentSha256` the subject's `sha256`
+(the notice file is its own source document) and `source.absentAtSource` `[]`; `filing` is `null` unless the operator
+declares it when attesting (`cra attest --filed-at` [`--srp-reference`] [`--filed-by`]), and then `filing.declaredBy`
+is `"cra-evidence"`: a declaration of the operator, recorded nowhere else, not a proof of submission. A statement
+whose `source.tool` is `"cra-evidence"` with another `documentSha256` or a non-empty `absentAtSource` is refused.
+
 ### 4.2 Consistency rules (checked by the verifier)
 
-1. The notice file (subject) parses as a drop file whose `stream`, `stage`, `product_id`, `product_version`,
-   `glossary_version` and `rules` equal the predicate's `stream`, `stage`, `product`, `glossaryVersion`, `noticeRules`.
+1. The notice file (subject) parses as a `cra-srp/2` or `cra-srp/3` drop file whose `stream`, `stage` and
+   `glossary_version` equal the predicate's `stream`, `stage` and `glossaryVersion`. Drop files carry no product and no
+   rules: `noticeRules` MUST equal the rules of `glossaryVersion` (spec/SRP_FIELDS.md, "Glossary versions"; checked on
+   the statement itself), and `product` is checked against the ledger (rule 3). For a `cra-srp/2` drop file
+   `source.tool` MUST be `"cra-evidence"`; for a `cra-srp/3` one, `source` and `filing` MUST equal its `source` and
+   `filing` blocks.
 2. Rebuilding the notice under its recorded glossary (as `cra check-notice` does) gives the same `complete` and
    `missingRequired`, and for `early_warning` / `notification` the same `deadlineAt`.
 3. When a ledger is given: the chain verifies; entry `entryIndex` exists and its `self_hash` is `entryHash`; its data
    is a `cra_srp_notice` record whose `drop.drop_sha3` equals the subject's `sha3_256` and whose `stream`, `stage`,
    `glossary_version`, `complete` and `missing_required` equal the predicate's. Without a ledger the receipt says
    `ledger: not_evaluated` — never `PASS`.
+   The product: records written from cra-evidence 0.8.0 on carry `product_id` and `product_version` (the locker is
+   per product); when the entry carries them they MUST equal `product.id` and `product.version` (receipt
+   `product: PASS` / `FAIL`). An entry written before carries no product: the receipt says `product: not_evaluated`, as
+   it does without a ledger — the drop file never carries the product.
 4. `attestedAt` is not earlier than `filing.filedAt` when both are present.
 
 ### 4.3 Imported notices (`source.tool` other than `cra-evidence`)
@@ -144,4 +159,6 @@ the expected refusal reason. Every verifier of this format MUST give the expecte
 
 ## 7. Change log
 
-- v0.1 (13/11/2026): first draft.
+- v0.1 (13/11/2026): first draft. Same day, before any release: rule 1 compares stream, stage and glossary only
+  (drop files carry no product and no rules); `product` checked against the ledger entry; `cra-srp/2` drop files (notices
+  built by cra-evidence) admitted as subjects.
