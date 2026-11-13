@@ -2,7 +2,7 @@
 
 ## 0.10.0 — 2026-11-13 — renamed to omega-cra-evol
 
-Renamed from `cra-evidence` to `omega-cra-evol`. The earlier name was not available as a PyPI project name. Formats,
+Renamed from `cra-evidence` to `omega-cra-evol`. The name was changed on purpose, so that this project is not mistaken for other products with a similar name; it is not affiliated with any of them. The earlier name was also not available as a PyPI project name. Formats,
 exit codes and verification are unchanged; packs, ledgers and attestations made with earlier versions verify as before.
 
 - **Distribution** `omega-cra-evol`, **package** `omega_cra_evol`, **commands** `cra` (as before) and `omega-cra-evol`

@@ -1,6 +1,6 @@
 # omega-cra-evol
 
-_Renamed from `cra-evidence` to `omega-cra-evol` in 0.10.0 (13/11/2026). The earlier name was not available as a PyPI project name. Formats, exit codes and verification are unchanged; packs, ledgers and attestations made with earlier versions verify as before._
+_Renamed from `cra-evidence` to `omega-cra-evol` in 0.10.0 (13/11/2026). The name was changed on purpose, so that this project is not mistaken for other products with a similar name; it is not affiliated with any of them. The earlier name was also not available as a PyPI project name. Formats, exit codes and verification are unchanged; packs, ledgers and attestations made with earlier versions verify as before._
 
 **Manufacturers of products with digital elements on the EU market now report in hours.** Under the Cyber Resilience
 Act (Regulation (EU) 2024/2847), Article 14 applies since **11 September 2026**, also to products placed on the market
