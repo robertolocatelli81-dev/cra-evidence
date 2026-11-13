@@ -101,6 +101,27 @@ built, `cra notice` exits 1 and writes nothing):
    awareness instant different from the recorded one, without `--divergence-reason`) is refused before the drop file is
    written.
 
+### Amendment of 13/11/2026 (cra-evidence 0.8.0): two stages without a glossary column; imported notices
+
+Written before the code. No notice recorded before carries these stages or keys, so no recorded verdict changes.
+
+9. **Stages `intermediate` and `users_informed`.** Article 14(6) (an intermediate report when the CSIRT designated as
+   coordinator requests one) and 14(8) (the impacted users informed) name two more steps; the glossary has no column
+   for them. A notice at these stages is judged by rules 1 (unknown field), 4 (`csirt_note`) and 5 (type) only: no
+   field is "not at this stage", none is required, `complete` is `null` (not evaluated, never `true`),
+   `missing_required` is `[]`, the deadline is `null`. Any field of the stream may be in `fields` or `previous_fields`.
+10. **Imported notices** (`cra import sbomify`, below). The drop file is `"schema": "cra-srp/3"`: the keys of
+   `cra-srp/2` plus `"source"` and `"filing"`.
+   - `source`: `{"tool", "tool_version", "document_sha256", "absent_at_source"}` — the tool that recorded the notice
+     (`"cra-evidence"` for a notice built here, or `"sbomify"`), its version or commit, the sha256 of the exact source
+     document (the export file, kept byte for byte), and the glossary rows the source does not carry (never filled in).
+   - `filing`: `null`, or `{"declared_by", "srp_reference", "filed_at", "filed_by"}` exactly as the source recorded it —
+     a declaration of that tool, not a proof of submission.
+   - Every non-empty (field, value) pair of the source document ends up in exactly one place: a field of `fields`, of
+     `previous_fields`, or the importer's list of unmapped pairs; an import with a non-empty unmapped list is refused
+     and writes nothing. A value that does not convert is refused, never replaced by a default.
+   - `notice_sha3` covers `source` and `filing` too.
+
 ## Rules `srp-notice/1` (glossaries `enisa_srp_glossary_20260915`, `enisa_srp_glossary_20260929`)
 
 Frozen as they were in cra-evidence 0.6.0, so that a notice recorded then is judged now as it was judged then: unknown

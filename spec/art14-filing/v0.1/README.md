@@ -38,8 +38,8 @@ open-source software (the subject of the Eclipse ORC "cra-attestations" work) ar
   the standard and the URL-safe alphabet (DSSE `protocol.md`).
 - **Statement:** in-toto Statement v1, `_type` `https://in-toto.io/Statement/v1`, `predicateType` the TypeURI above.
 - **Subject:** exactly one element: `name` `srp-notice:<stream>:<stage>`, `digest`
-  `{"sha256": <64 lowercase hex>, "sha3_256": <64 lowercase hex>}` of the exact bytes of the notice file (the drop
-  file, spec/SRP_FIELDS.md), both required (algorithm names as in in-toto `digest_set.md`; `sha3_256` is the digest
+  `{"sha256": <64 lowercase hex>, "sha3_256": <64 lowercase hex>}` of the exact bytes of the notice file (the `cra-srp/3`
+  drop file, spec/SRP_FIELDS.md), both required (algorithm names as in in-toto `digest_set.md`; `sha3_256` is the digest
   the ledger records as `drop_sha3`). Matching is by digest only (in-toto `statement.md`).
 
 ## 3. Parsing rules
@@ -67,7 +67,7 @@ Field names are lowerCamelCase; every timestamp is RFC 3339 with `Z` and says in
   "stage": "early_warning",                       // "early_warning" | "notification" | "intermediate" | "final_report" | "users_informed"
   "product": {"id": "acme-router", "version": "4.2.1"},
   "glossaryVersion": "enisa_srp_glossary_20261112",
-  "noticeRules": "srp-notice/3",
+  "noticeRules": "srp-notice/2",
   "complete": true,                               // true | false | null (null: the glossary has no column for this stage)
   "missingRequired": [],                          // field names; [] when complete is true or null
   "awareAt": "2026-11-13T08:00:00Z",              // the manufacturer's declared awareness instant (§4.4)
