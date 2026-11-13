@@ -200,9 +200,12 @@ class TestLedgerNegatives(_Tmp, unittest.TestCase):
 
 class TestMoreRefusals(_Tmp, unittest.TestCase):
     def test_unknown_schema_is_a_reason(self):
-        p = SRPNotice("vulnerability", "early_warning", dict(EW)).payload(); p["schema"] = "cra-srp/3"
+        p = SRPNotice("vulnerability", "early_warning", dict(EW)).payload(); p["schema"] = "cra-srp/4"
         r = check_notice(self.write("s.json", p))
-        self.assertFalse(r["verified"]); self.assertIn("not cra-srp/1 or cra-srp/2", r["reasons"][0])
+        self.assertFalse(r["verified"]); self.assertIn("not cra-srp/1, cra-srp/2 or cra-srp/3", r["reasons"][0])
+        p["schema"] = "cra-srp/3"           # exists since 0.8.0 (rule 10): a cra-srp/2 payload relabelled lacks source and filing
+        r = check_notice(self.write("s3.json", p))
+        self.assertFalse(r["verified"]); self.assertIn("missing top-level keys for cra-srp/3: ['filing', 'source']", r["reasons"][0])
 
     def test_a_carried_value_missing_from_the_file_fields(self):
         p = SRPNotice("vulnerability", "notification", {"general_information": "g"},

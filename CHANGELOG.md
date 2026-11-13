@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.8.0 — unreleased — notices recorded in sbomify imported as cra-srp/3; in-toto attestations of an Art. 14 notice (art14-filing v0.1)
+
+Specifications written before the code: `spec/art14-filing/v0.1/README.md` and, in `spec/SRP_FIELDS.md`, the amendment of
+13/11/2026 (rules 9 and 10) and "Importing from sbomify".
+
+- **Stages `intermediate` and `users_informed`** (rule 9, srp-notice/2 glossaries only): judged by rules 1, 4 and 5;
+  `complete` is `null`, `missing_required` `[]`, the deadline `null`. A notice with an awareness instant in the future
+  is still refused at these stages, as at the other three.
+- **`cra import sbomify --report R --filing F [--filing F …] --ledger L --product P --version V --drop-dir D
+  --source-version COMMIT`.** Reads the JSON of sbomify's CRA reporting API as received (measured at commit 4ef6128 on
+  3 reports and 9 filings of synthetic data, all five stages, now in `tests/fixtures/sbomify_4ef6128/` byte for byte),
+  records the event once per report, then one notice per filing in `filed_at` order, written as `cra-srp/3` drop files
+  (`source`, `filing`). Each document is closed: an unknown key, a wrong JSON type or a duplicate key anywhere is
+  refused; so are a snapshot pair the 39-row mapping does not place, a value that does not convert (product type,
+  Member State code, PEC text, a date without offset), a filing recorded before 2026-10-21T00:00:00Z, a filing its
+  report does not list or lists differently, a filing already imported. A refusal exits 1 and writes nothing (no
+  ledger line, no drop file, no stored source). The report and filing documents are kept byte for byte in
+  `<ledger>.sources/` and in the drop folder. Rows 1, 4, 7a and 41 are not carried by sbomify: they are listed in
+  `absent_at_source` and never filled in, so an imported early warning is recorded as incomplete. `filing` is what
+  sbomify recorded: a declaration, not a proof of submission.
+- **`cra check-notice`** reads `cra-srp/3` (closed `source` and `filing` blocks; with `--ledger`, the kept source
+  document must hash to `document_sha256` and re-derive the same notice). `cra-srp/1` and `cra-srp/2` files are read as
+  before: on the 5 drop files of the repository, and on an early warning and a 72 h notification written by 0.7.1's and
+  by this `cra notice`, the receipts of 0.7.1's checker and of this one are identical (measured 13/11/2026).
+- **`cra attest DROP --ledger L --product P --version V (--key K | --aws-kms-key-id …) --signer-id ID --out X`** and
+  **`cra verify-attestation X --trust-store T [--drop D] [--ledger L]`**: predicate type `art14-filing` v0.1, in-toto
+  Statement v1 in a DSSE envelope, Ed25519. Exit 0 trusted and every check run passed, 1 refused or not verified
+  (reason codes in the receipt), 2 usage. Without `--ledger` the receipt says `ledger: not_evaluated`.
+- **Vectors** `spec/art14-filing/v0.1/vectors/`: 45 (8 valid, 37 each breaking one rule of §2-§5), from
+  `scripts/gen_art14_vectors.py` with two test-only keys derived from fixed public strings; `manifest.json` gives each
+  expected verdict, exit code and reason code.
+- **Tests:** 376 (41 new: the zero-loss test, committed before the importer and failing then, with a positive control
+  that removes one mapping entry; the vectors; generative refusals — an unknown key in every object, a wrong type on
+  every leaf, a duplicate key in every object of the real documents). Measured 13/11/2026: OK on Python 3.9.25, 3.11.2
+  and 3.12.15 with `[sign]`, jsonschema and referencing (2 skipped: live feeds, cryptovalid wheel absent), and on 3.12.15
+  with no optional dependency (53 skipped). 16 hand mutants of the new code, each failing at least one test.
+- **Limits.** `cra-srp/3` drop files carry no `product_id` / `product_version`, so the verifier cannot compare the
+  predicate's `product` with the drop file (§4.2 rule 1): the receipt says `product: not_evaluated`. `cra notice` still
+  writes `cra-srp/2`, so only imported notices can be attested in this release. An event with no CVE or EUVD id
+  (sbomify incidents, a report whose `cve_id` was cleared) is recorded under `sbomify-report:<id>`, and rule 8 binds no
+  notice to it.
+
 ## 0.7.1 — 2026-11-13 — installable without PyPI: a container image with verified provenance, and a GitHub Action
 
 The package's code is that of 0.7.0; only the version changes. New:

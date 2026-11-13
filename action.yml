@@ -21,7 +21,7 @@ inputs:
   version:
     description: "cra-evidence version of the image (default: the version of this action's release)"
     required: false
-    default: "0.7.1"
+    default: "0.8.0"
   network:
     description: "Network of the container: `none` (default) or `bridge`, needed only by `cra feeds` and `cra sign --aws-kms-key-id` (the action passes no AWS_* variable to the container)"
     required: false
