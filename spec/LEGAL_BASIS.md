@@ -37,7 +37,7 @@ Re-check of 29/09/2026 (what changed: one glossary field; nothing in the obligat
 
 Re-check of 17/10/2026 by Athena, the project's confined research agent (EUR-Lex served no text to her fetcher; she read
 a secondary reproduction), reviewed by Noûs on 19/10/2026 against the primary texts below. What changed: no obligation;
-the provisions are newly used by `cra_evidence/applicability.py`, `cra obligations` and `VulnerabilityRecord.overdue()`.
+the provisions are newly used by `omega_cra_evol/applicability.py`, `cra obligations` and `VulnerabilityRecord.overdue()`.
 - Regulation (EU) 2024/2847, OJ L, 2024/2847, 20.11.2024, Official Journal XHTML from the Publications Office
   (http://publications.europa.eu/resource/celex/32024R2847 → cellar 21b7d4eb-a6e2-11ef-85f0-01aa75ed71a1.0006.03, sha256
   fe0cca4a0caec50e7cf5a91432b94a19b211f86be8584fdba56372bdcea571ed, downloaded 19/10/2026):

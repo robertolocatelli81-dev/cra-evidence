@@ -216,3 +216,4 @@ are real public records, chosen for their form, and say nothing about the synthe
   `predicate_type` of a statement with an undefined TypeURI written down as implemented; "an empty list" added to the
   values that are not present (§3); the duplicate and order checks of §2.1 are one rule in the code (the order of
   the distinct schemes), with the same reason code; the example issuers are fictitious.
+- 13/11/2026 (omega-cra-evol 0.10.0, no change of rule): The project is renamed from cra-evidence to omega-cra-evol in 0.10.0 (13/11/2026); this TypeURI, the value `"cra-evidence"` of `source.tool` and `declaredBy` for a notice built by the tool, and the vectors with their seed strings are identifiers and stay as they are.

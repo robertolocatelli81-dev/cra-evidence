@@ -1,6 +1,6 @@
 # The receipt of `cra verify` — admission, states, policy (states vocabulary `cra-evidence/states-1`, since 0.6.0)
 
-Status: normative for the Python reference verifier (`cra_evidence.verify_pack.verify_pack`, `cra verify`) from 0.6.0.
+Status: normative for the Python reference verifier (`omega_cra_evol.verify_pack.verify_pack`, `cra verify`) from 0.6.0.
 Written before the code (19/10/2026). The Go, JS and Rust verifiers do NOT carry these fields in 0.6.0 (§7).
 
 The fields of 0.5.1 — `ok`, `assessed`, `authenticity`, `anchored`, `layers`, `pack_sha3` — keep their meaning and
@@ -32,7 +32,8 @@ The 0.5.1 layers are still all reported on a refused pack (the layers after a re
 ## 2. `states_vocabulary` and `states`
 
 `states_vocabulary` is `"cra-evidence/states-1"`, the identifier of the vocabulary this text defines; an identifier
-never changes meaning (a change of a state or of a reason is a new identifier). It is aligned with
+never changes meaning (a change of a state or of a reason is a new identifier), and it is not renamed with the project
+(omega-cra-evol since 0.10.0). It is aligned with
 draft-krausz-verification-state-03 §3.1, §3.3, §5.4.2 (an individual Internet-Draft, work in progress) and with
 ap2-evidence-pack 1.6.0 SPEC §6.9; neither is the identifier.
 

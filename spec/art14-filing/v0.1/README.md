@@ -86,7 +86,7 @@ Field names are lowerCamelCase; every timestamp is RFC 3339 with `Z` and says in
   },
   "ledger": {
     "entryIndex": 7,                              // the ledger entry's `idx` (0-based) holding the cra_srp_notice record
-    "entryHash": "<64 hex>"                       // that entry's `self_hash` (cra_evidence/ledger.py: SHA-256 of the canonical entry)
+    "entryHash": "<64 hex>"                       // that entry's `self_hash` (omega_cra_evol/ledger.py: SHA-256 of the canonical entry)
   },
   "attestedAt": "2026-11-13T09:15:03Z"            // when this statement was produced
 }
@@ -171,3 +171,4 @@ the expected refusal reason. Every verifier of this format MUST give the expecte
 - 13/11/2026 (cra-evidence 0.9.0, no change of rule): v0.2 is defined ([`../v0.2/`](../v0.2/README.md)); the verifier
   accepts both TypeURIs and judges a v0.1 statement by these rules, with the receipt of 0.8.0. The vector
   `predicate_type_wrong` used the v0.2 TypeURI as its wrong value: it now uses `…/v0.3`.
+- 13/11/2026 (omega-cra-evol 0.10.0, no change of rule): The project is renamed from cra-evidence to omega-cra-evol in 0.10.0 (13/11/2026); this TypeURI, the value `"cra-evidence"` of `source.tool` and `declaredBy` for a notice built by the tool, and the vectors with their seed strings are identifiers and stay as they are.
