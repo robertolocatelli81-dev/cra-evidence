@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use cra-evidence, cite it as below. It is not a conformity assessment, not CE marking and not the official CSIRT/ENISA reporting channel."
 title: "cra-evidence: firm-side, offline-verifiable evidence for the EU Cyber Resilience Act"
 type: software
-version: 0.7.0
+version: 0.7.1
 date-released: "2026-11-13"
 doi: 10.5281/zenodo.24172960
 identifiers:
@@ -10,8 +10,8 @@ identifiers:
     value: 10.5281/zenodo.24172960
     description: "Concept DOI: always resolves to the latest version"
   - type: doi
-    value: 10.5281/zenodo.24183509
-    description: "Version 0.7.0"
+    value: 10.5281/zenodo.24184561
+    description: "Version 0.7.1"
 license: AGPL-3.0-or-later
 authors:
   - family-names: Locatelli
