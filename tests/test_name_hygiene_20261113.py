@@ -15,8 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 A, B = "CRA", "Evidence"
 CLASS = A + B + "Locker"
 FORBIDDEN = [
-    re.compile(A + r"[  _-]" + B),                         # the two words with those capitals, joined or spaced
-    re.compile(r"(?i)\b" + A.lower() + r"[\s ]+" + B.lower()),   # the two words in any case, separated by white space
+    re.compile(A + r"[ \u00a0_-]" + B),                         # the two words with those capitals, joined or spaced
+    re.compile(r"(?i)\b" + A.lower() + r"[\s\u00a0]+" + B.lower()),   # the two words in any case, separated by white space
     re.compile(r"(?i)" + A.lower() + B.lower() + r"(?!Locker)"),       # joined, any case (a package or domain name)
     re.compile(r"(?i:" + A.lower() + B.lower() + r"locker)(?<!" + CLASS + r")"),   # the class name in another case
 ]
