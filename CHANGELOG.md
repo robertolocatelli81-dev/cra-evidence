@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.10.0 — 2026-11-13 — renamed to omega-cra-evol
+
+Renamed from `cra-evidence` to `omega-cra-evol`. The earlier name was not available as a PyPI project name. Formats,
+exit codes and verification are unchanged; packs, ledgers and attestations made with earlier versions verify as before.
+
+- **Distribution** `omega-cra-evol`, **package** `omega_cra_evol`, **commands** `cra` (as before) and `omega-cra-evol`
+  (the same entry point; the name `pipx run` and `uvx` look for). `cra --version` prints `omega-cra-evol 0.10.0`.
+- **Class** `CRAEvidenceLocker` is now `EvidenceLocker`.
+- **Deprecated aliases, removed in a release on or after 2027-03-31:** the import name `cra_evidence` (every submodule,
+  `from cra_evidence.ledger import Ledger` and the like, gives the same module object as under `omega_cra_evol`),
+  `python -m cra_evidence.cli` (runs the same command), and the class name `CRAEvidenceLocker` (the same class, from
+  `omega_cra_evol`, `omega_cra_evol.locker` or `cra_evidence`). Each emits a `DeprecationWarning`.
+- **Container image** `ghcr.io/robertolocatelli81-dev/omega-cra-evol`, labels `org.opencontainers.image.source` and
+  `.title` with the new name; the image build checks both commands. **GitHub Action**
+  `robertolocatelli81-dev/omega-cra-evol@v0.10.0`; it verifies the provenance against
+  `robertolocatelli81-dev/omega-cra-evol/.github/workflows/container.yml` at the tag.
+- **Release assets** are named `omega-cra-evol-<version>-…` (wheel `omega_cra_evol-<version>-py3-none-any.whl`); the
+  product id of the release's own evidence pack is `omega-cra-evol`.
+- **Names written by the tool:** `metadata.tools` of the CycloneDX export of an SBOM record names `omega-cra-evol`; the
+  User-Agent of `cra feeds` is `omega-cra-evol/<version>`; the logger is `omega_cra_evol.ledger`; the Go verifier's
+  module path is `github.com/robertolocatelli81-dev/omega-cra-evol/verifiers/go`.
+- **Identifiers kept as they are** (they are inside evidence already written and signed; tests/test_frozen_identifiers.py
+  checks each one): the pack `kind` `cra_evidence_pack/1`; the CycloneDX property names `cra-evidence:*`, the profile
+  value `cra-evidence-min` and the generator `cra-evidence:importlib.metadata`; the states vocabulary
+  `cra-evidence/states-1` of `cra verify`; the TypeURIs of `art14-filing` v0.1 and v0.2
+  (`https://github.com/robertolocatelli81-dev/cra-evidence/tree/master/spec/art14-filing/v0.x`); the value
+  `"cra-evidence"` of `source.tool` / `declaredBy` for a notice built by this tool (spec v0.1 §4, `cra-srp/3`
+  `source.tool`); the reason texts of the receipts; the attestation vectors and their seed strings, the committed
+  example `examples/self_evidence/` (made by 0.4.0) and the vendored fixtures.
+
+What breaks, and what to change:
+
+- `uses: robertolocatelli81-dev/cra-evidence@…` stops working when the repository is renamed (GitHub does not redirect
+  actions of a renamed repository): change it to `robertolocatelli81-dev/omega-cra-evol@v0.10.0`.
+- `pip install … cra-evidence` keeps installing 0.9.0 and will not see newer versions: install `omega-cra-evol`.
+- `docker pull ghcr.io/robertolocatelli81-dev/cra-evidence:<tag>` holds up to 0.9.0; newer versions are only in
+  `ghcr.io/robertolocatelli81-dev/omega-cra-evol`, and the action's `version` input takes 0.10.0 or later.
+- `import cra_evidence` works with a `DeprecationWarning` until a release on or after 2027-03-31.
+- Anything that compares the output of `cra --version`, or the tool name in `metadata.tools` of an SBOM export, sees the
+  new name.
+- The Go verifier's module path changed.
+- Nothing changes in the files: packs, ledgers, sidecars, seals, notices, attestations and exit codes.
+
 ## 0.9.0 — 2026-11-13 — art14-filing v0.2: the CVE / EUVD identifiers of the notice and a declared case reference
 
 Specification written before the code: `spec/art14-filing/v0.2/README.md` (a delta over v0.1).

@@ -6,7 +6,7 @@ parties is included in this repository.
 | what | where | origin / licence |
 |---|---|---|
 | CycloneDX JSON schemas 1.6 and 1.7 (`bom-1.6.schema.json`, `bom-1.7.schema.json`, `jsf-0.82.schema.json`) | `spec/schemas/` | OWASP CycloneDX, Apache License 2.0 — https://github.com/CycloneDX/specification |
-| SPDX licence-id list (`spdx.schema.json`) | `spec/schemas/`, `cra_evidence/data/` | CycloneDX distribution of the SPDX License List (Apache-2.0 packaging; the list itself is CC0/SPDX) |
+| SPDX licence-id list (`spdx.schema.json`) | `spec/schemas/`, `omega_cra_evol/data/` | CycloneDX distribution of the SPDX License List (Apache-2.0 packaging; the list itself is CC0/SPDX) |
 | ENISA CRA SRP Glossary table (39 fields), snapshot of 15/09/2026 (kept for history) | `spec/sources/enisa_srp_glossary_20260915.json` | ENISA, reproduction authorised provided the source is acknowledged — https://www.enisa.europa.eu/topics/product-security/single-reporting-platform-srp/cra-srp-glossary2 |
 | ENISA CRA SRP Glossary table (40 fields; page dated 25/09/2026), snapshot of 29/09/2026 (the reference of 0.4.0 – 0.6.0, kept: notices recorded under it are checked under it) | `spec/sources/enisa_srp_glossary_20260929.json` | ENISA, reproduction authorised provided the source is acknowledged — same page |
 | ENISA CRA SRP Glossary table (42 fields; page "Version 1.4", dated 01/10/2026), snapshot of the page saved on 10/10/2026 (history) | `spec/sources/enisa_srp_glossary_20261010.json` | ENISA, same terms — same page |

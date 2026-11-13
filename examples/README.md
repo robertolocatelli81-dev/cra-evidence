@@ -7,8 +7,12 @@ the evidence pack anchored into the ledger, its signature and its long-term seal
 (the signature is made with an ephemeral key each run; the public key is in `trust.json`).
 
 The committed files were generated on 29/09/2026 by this script, for version 0.4.0 (the script reads the package
-version) and under the glossary snapshot of 25/09/2026 (the drop file's `glossary_source` says so). The notice is an
+version), under the glossary snapshot of 25/09/2026 (the drop file's `glossary_source` says so). The notice is an
 early warning: the field ENISA added on 25/09/2026 (v26a, occurrence instant) is optional at that stage, so the payload
 is complete. The stored source document is the Syft fixture re-run the same day from a neutral directory
 (`/tmp/tiny-cra-sample`), which is the path its `file` component carries. Regenerating the example changes every hash,
 the signature and the drop file's name (a fresh notice id): the script clears the previous run first.
+
+Version 0.4.0 was published as `cra-evidence`, and the script then used the project name as the product id, so the
+committed files say `cra-evidence`. They are kept byte for byte across the 0.10.0 rename, as evidence made before it
+that still verifies (tests/test_frozen_identifiers.py); a run of the script now writes `omega-cra-evol`.

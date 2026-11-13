@@ -1,4 +1,6 @@
-# cra-evidence
+# omega-cra-evol
+
+_Renamed from `cra-evidence` to `omega-cra-evol` in 0.10.0 (13/11/2026). The earlier name was not available as a PyPI project name. Formats, exit codes and verification are unchanged; packs, ledgers and attestations made with earlier versions verify as before._
 
 **Manufacturers of products with digital elements on the EU market now report in hours.** Under the Cyber Resilience
 Act (Regulation (EU) 2024/2847), Article 14 applies since **11 September 2026**, also to products placed on the market
@@ -17,7 +19,7 @@ the product is placed on the market, or for the support period if longer (Art. 1
 
 The SRP is a web portal. What was notified, under which ENISA field glossary, how complete, when the clock started and
 when it was filed lives in the firm's own tools — and may have to be shown, years later, to someone who does not run them.
-**cra-evidence** keeps it in one hash-chained ledger (SBOMs byte for byte, the Art. 14 clock, notices in the ENISA SRP
+**omega-cra-evol** keeps it in one hash-chained ledger (SBOMs byte for byte, the Art. 14 clock, notices in the ENISA SRP
 field vocabulary, signed evidence packs and renewable seals) and signs a notice as an in-toto attestation that
 anyone can verify **offline**.
 
@@ -112,7 +114,7 @@ which says nothing about identifiers.
   cryptography only and with no optional dependency; the differential oracle across Python, JS, Go and Rust; the
   official CycloneDX CLI and SPDX tools on the SBOM fixtures; gitleaks on the whole history. A weekly workflow
   re-reads ENISA's SRP glossary page and fails on any difference from the vendored snapshot.
-- **Public demo:** [cra-evidence-demo](https://github.com/robertolocatelli81-dev/cra-evidence-demo) installs a release
+- **Public demo:** [omega-cra-evol-demo](https://github.com/robertolocatelli81-dev/omega-cra-evol-demo) installs a release
   three ways (index, attested image, GitHub Action) on clean GitHub-hosted runners, every week, and verifies the
   release's signed evidence pack with each (the index job also requires a tampered copy to fail).
 - **Attested container image and GitHub Action:** below, under Install.
@@ -121,7 +123,7 @@ which says nothing about identifiers.
 
 ## What is measured
 
-Re-run on 13/11/2026 on this release's code (cra-evidence 0.9.0; `git archive` of the commit, fresh
+Re-run on 13/11/2026 on this release's code (omega-cra-evol 0.10.0; `git archive` of the commit, fresh
 virtual environments):
 
 - The test suite: 439 tests, OK on Python 3.9.25, 3.11.2 and 3.12.15 with `[sign]`, jsonschema, referencing and the
@@ -140,24 +142,27 @@ virtual environments):
 ## Install
 
 ```
-pip install --index-url https://robertolocatelli81-dev.github.io/pypi/ cra-evidence        # wheel of the GitHub Release
+pip install --index-url https://robertolocatelli81-dev.github.io/pypi/ omega-cra-evol      # wheel of the GitHub Release
 pip install ".[sign]"    # from a checkout; no runtime dependency, [sign] adds Ed25519 signatures / signed tips / seals
 ```
+
+The command is `cra` (also installed as `omega-cra-evol`, the name `pipx run` and `uvx` look for); the Python package is
+`omega_cra_evol`.
 
 Container image (Linux x86_64, `[sign]` included, build provenance attested by the release workflow):
 
 ```
-gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.9.0 --repo robertolocatelli81-dev/cra-evidence \
-  --cert-identity https://github.com/robertolocatelli81-dev/cra-evidence/.github/workflows/container.yml@refs/tags/v0.9.0 \
-  --source-ref refs/tags/v0.9.0 --deny-self-hosted-runners
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/cra-evidence:0.9.0 verify pack.json --ledger cra.ledger.jsonl
+gh attestation verify oci://ghcr.io/robertolocatelli81-dev/omega-cra-evol:0.10.0 --repo robertolocatelli81-dev/omega-cra-evol \
+  --cert-identity https://github.com/robertolocatelli81-dev/omega-cra-evol/.github/workflows/container.yml@refs/tags/v0.10.0 \
+  --source-ref refs/tags/v0.10.0 --deny-self-hosted-runners
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/omega-cra-evol:0.10.0 verify pack.json --ledger cra.ledger.jsonl
 ```
 
 GitHub Action (verifies the provenance of the image digest it pulled, then runs `cra` in the workspace, without
 network by default):
 
 ```yaml
-- uses: robertolocatelli81-dev/cra-evidence@v0.9.0
+- uses: robertolocatelli81-dev/omega-cra-evol@v0.10.0
   with:
     args: verify dist/pack.json --ledger evidence/cra.ledger.jsonl --trust-store evidence/trust.json
 ```
@@ -204,9 +209,9 @@ Every subcommand has `--help`. `cra verify` gives one authenticity verdict (`tru
 ## Contact, pilots, citation
 
 - **Questions, interoperability reports, divergences found by your own verifier**: open a thread in this repository's
-  [Discussions](https://github.com/robertolocatelli81-dev/cra-evidence/discussions) or an issue; e-mail: roberto.locatelli.81@gmail.com.
+  [Discussions](https://github.com/robertolocatelli81-dev/omega-cra-evol/discussions) or an issue; e-mail: roberto.locatelli.81@gmail.com.
 - **Pilots**: the author runs short evaluation pilots (four to six weeks, scoped and priced up front) with firms that must report under the Cyber Resilience Act and want their SBOM, Art. 14 clock and SRP notices as verifiable evidence. Write with the use case; the answer says what is measured and what is not.
-- **Citation**: DOI [10.5281/zenodo.24203603](https://doi.org/10.5281/zenodo.24203603) for 0.9.0, concept DOI [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) (latest version); `CITATION.cff` in this repository.
+- **Citation**: concept DOI [10.5281/zenodo.24172960](https://doi.org/10.5281/zenodo.24172960) (resolves to the latest version; DOI of 0.9.0: [10.5281/zenodo.24203603](https://doi.org/10.5281/zenodo.24203603)); `CITATION.cff` in this repository.
 - Author: Roberto Locatelli, 2026. Public interventions by his AI agent (Noûs) are signed as such.
 
 ## Licence

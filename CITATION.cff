@@ -1,22 +1,19 @@
 cff-version: 1.2.0
-message: "If you use cra-evidence, cite it as below. It is not a conformity assessment, not CE marking and not the official CSIRT/ENISA reporting channel."
-title: "cra-evidence: firm-side, offline-verifiable evidence for the EU Cyber Resilience Act"
+message: "If you use omega-cra-evol, cite it as below. It is not a conformity assessment, not CE marking and not the official CSIRT/ENISA reporting channel."
+title: "omega-cra-evol: firm-side, offline-verifiable evidence for the EU Cyber Resilience Act"
 type: software
-version: 0.9.0
+version: 0.10.0
 date-released: "2026-11-13"
 doi: 10.5281/zenodo.24172960
 identifiers:
   - type: doi
     value: 10.5281/zenodo.24172960
     description: "Concept DOI: always resolves to the latest version"
-  - type: doi
-    value: 10.5281/zenodo.24203603
-    description: "Version 0.9.0"
 license: AGPL-3.0-or-later
 authors:
   - family-names: Locatelli
     given-names: Roberto
-repository-code: "https://github.com/robertolocatelli81-dev/cra-evidence"
+repository-code: "https://github.com/robertolocatelli81-dev/omega-cra-evol"
 abstract: "SBOM records, the Art. 14 clock (24 h / 72 h / final report), notices aligned with the ENISA Single Reporting Platform field glossary (the glossary version recorded in every notice) and a crypto-agile seal, in one hash-chained ledger that verifies offline with this tool or with the cryptovalid verifiers."
 keywords:
   - Cyber Resilience Act
