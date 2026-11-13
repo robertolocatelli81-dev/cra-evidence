@@ -120,17 +120,19 @@ nothing about identifiers.
 
 ## What is measured
 
-Re-run on 13/11/2026 on this release's code (cra-evidence 0.8.0, fresh virtual environment):
+Re-run on 13/11/2026 on the code of this branch (cra-evidence 0.9.0, unreleased; `git archive` of the commit, fresh
+virtual environments):
 
-- The test suite: 400 tests, OK on Python 3.11.2 with `[sign]`, jsonschema and referencing; 2 skipped (the live feeds
-  check, which needs the network; the interop test against cryptovalid, whose wheel was not installed).
-- The 52 attestation vectors (10 valid, 42 each breaking one rule): 52 of 52 give the exit code and exactly the set of reason codes
-  `manifest.json` expects.
+- The test suite: 430 tests, OK on Python 3.9.25, 3.11.2 and 3.12.15 with `[sign]`, jsonschema, referencing and the
+  cryptovalid wheel; 1 skipped (the live feeds check, which needs the network).
+- The attestation vectors: v0.1, 52 (10 valid, 42 each breaking one rule), and v0.2, 53 (10 valid, 43 refused): each
+  gives the exit code and exactly the set of reason codes its `manifest.json` expects.
+- A v0.1 statement keeps its receipt: on the 52 v0.1 vectors of 0.8.0, the receipts of 0.8.0 and of this code are
+  byte for byte the same on 51; the 52nd used the v0.2 TypeURI as its "wrong" value and is now judged as v0.2.
 - The vendored sbomify documents (3 reports, 9 filings, all five stages: early warning, notification, intermediate,
-  final report, users informed): every filing imports, and each of the 9 notices is attested and verifies with its drop
-  file and ledger.
-- The differential oracle: 186 intact and tampered cases, Python and JavaScript verifiers, 0 divergences (Go and Rust
-  run in CI).
+  final report, users informed): every filing imports, and each of the 9 notices is attested (v0.2) and verifies with
+  its drop file and ledger.
+- The differential oracle: 186 intact and tampered cases, Python, JavaScript, Go and Rust verifiers, 0 divergences.
 - The notice schema follows ENISA's SRP glossary "Version 1.6" of 21/10/2026: 49 table rows, 43 numbered fields, in
   `spec/sources/enisa_srp_glossary_20261112.json`.
 
