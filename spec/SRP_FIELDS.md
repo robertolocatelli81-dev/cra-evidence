@@ -112,7 +112,7 @@ Written before the code. No notice recorded before carries these stages or keys,
    `missing_required` is `[]`, the deadline is `null`. Any field of the stream may be in `fields` or `previous_fields`.
 10. **Imported notices** (`cra import sbomify`, below). The drop file is `"schema": "cra-srp/3"`: the keys of
    `cra-srp/2` plus `"source"` and `"filing"`.
-   - `source`: `{"tool", "tool_version", "document_sha256", "absent_at_source"}` — the tool that recorded the notice
+   - `source`: `{"tool", "tool_version", "document_sha256", "absent_at_source", "later_stage", "readings", "normalisations"}` — the tool that recorded the notice
      (`"cra-evidence"` for a notice built here, or `"sbomify"`), its version or commit, the sha256 of the exact source
      document (the export file, kept byte for byte), and the glossary rows the source does not carry (never filled in).
    - `filing`: `null`, or `{"declared_by", "srp_reference", "filed_at", "filed_by"}` exactly as the source recorded it —
@@ -121,6 +121,61 @@ Written before the code. No notice recorded before carries these stages or keys,
      `previous_fields`, or the importer's list of unmapped pairs; an import with a non-empty unmapped list is refused
      and writes nothing. A value that does not convert is refused, never replaced by a default.
    - `notice_sha3` covers `source` and `filing` too.
+
+### Importing from sbomify (`cra import sbomify`) — measured on its API at commit 4ef6128 (13/11/2026)
+
+The source is the JSON of sbomify's API, kept byte for byte: `GET /api/v1/compliance/cra-reports/{id}` (the report:
+`kind`, `aware_at`, `occurred_at`, `measure_available_at`, `values`, `filings`) and
+`GET /api/v1/compliance/cra-reports/{id}/filings/{filing_id}` (one filing: `stage`, `srp_reference`, `filed_at`,
+`filed_by`, and `snapshot` = the report's `srp_fields` and dates when the filing was recorded). Measured on real
+responses (3 reports, 9 filings, all five stages; fixtures in `tests/fixtures/sbomify_4ef6128/`):
+- sbomify carries 39 of the glossary's rows: all except 1 (the stream is the report's `kind`), 4 (system-generated in
+  the portal), 7a (new in 1.6) and 41 (the CSIRT's). These are `absent_at_source`.
+- The snapshot is **cumulative**: every filing holds every value of the report, whatever the stage (sbomify's model,
+  "copied from previous step", is the one of the glossaries before 1.6).
+- Dates are RFC 3339 with an offset (`+00:00` measured); a date without a zone is refused by sbomify itself (HTTP 422).
+
+Mapping (sbomify id → field, row): title→`title` 2; summary→`summary` 3; member_states→`member_states_available` 5;
+product_name→`product_name` 6; product_version→`product_version` 7; product_type→`product_type` 8; product_class→
+`product_class` 9; product_category→`product_category` 10; end_of_support→`end_of_support` 11; component_name→
+`component_name` 12; measure_expected→`mitigating_measure_expected_shortly` 13; user_action→`user_action_reduce_impact`
+14; sensitivity→`sensitivity_justification` 15; measures_taken→`corrective_measures_taken` 16; measures_for_users→
+`user_measures` 17; attack_vector→`attack_vector` 18; cve_id v19; euvd_id v20; general_information v21;
+measure_available_at (date)→`corrective_available_date` v22; measure_details→`security_update_details` v23;
+vulnerability_severity→`severity_description` v24; vulnerability_impact→`impact_description` v25; aware_at (date,
+vulnerability)→`awareness_datetime_utc` v26; occurred_at (date, vulnerability)→`vulnerability_occurred_datetime_utc`
+v26a; malicious_actor v27; pec→`particular_exceptional_circumstances` v28; pec_delay_reason v29;
+further_information→`further_information_cdac` v30; suspected_unlawful→`suspected_malicious` i31; incident_nature i32;
+incident_mitigation→`mitigation_measures` i33; incident_severity→`severity_description` i34; incident_impact→
+`impact_description` i35; root_cause→`threat_type_root_cause` i36; aware_at (date, incident)→`awareness_datetime_utc`
+i37; occurred_at (date, incident)→`incident_datetime_utc` i38; initial_assessment i39; ar_note 40.
+
+Conversions — closed lists; any other value refuses the import with the field and the value:
+- `product_type`: "Default"→"Default", "Important Product with Digital Elements"→"Important", "Critical Product with
+  Digital Elements"→"Critical".
+- `member_states`: split on commas, each part stripped, each an EU Member State code (the 27 ISO 3166-1 alpha-2 codes,
+  "EL" accepted for Greece as in EU usage); empty parts refused.
+- dates: an offset other than `Z`/`+00:00` is converted to the same instant in UTC (listed as a normalisation);
+  no offset is refused.
+- `pec`, `pec_delay_reason` (free text in sbomify, a set of three checkboxes in the glossary): the exact text of one
+  of the three glossary options (`PEC_OPTIONS`) → its code; "" (or one of "None", "No", "Not applicable", "N/A",
+  exactly) → **no option ticked**: the field is left out and the pair is listed under `readings` with that reading;
+  anything else is refused (never guessed).
+
+Where each non-empty pair of a filing's snapshot goes, for a filing at stage S (glossary of the instant `filed_at`):
+1. a field the glossary admits at S → `fields`;
+2. else a field the glossary admits at an earlier stage → `previous_fields` (sbomify's cumulative record carries the
+   earlier stages' values);
+3. else (a field the glossary admits only at a later stage, e.g. row 18 at the early warning) → `later_stage`, listed
+   with the stage that admits it: recorded, not part of this stage's notice;
+4. a `pec`/`pec_delay_reason` reading → `readings`.
+At `intermediate` and `users_informed` every pair goes to `fields` (rule 9). `unmapped` must be empty; the drop file's
+`source` carries `later_stage` and `readings`, so every pair of the source is accounted for, and the source document
+itself is kept. Glossary by instant: a filing whose `filed_at` is before 2026-10-21T00:00:00Z (publication of the
+glossary 1.6) is refused — the earlier glossaries are not mapped for import.
+
+The vulnerability or incident event is recorded once per report before its notices (`awareness` = sbomify's `aware_at`,
+a declaration of the manufacturer; ids from `cve_id`/`euvd_id`; source `sbomify`), so that rule 8 binds every notice.
 
 ## Rules `srp-notice/1` (glossaries `enisa_srp_glossary_20260915`, `enisa_srp_glossary_20260929`)
 
