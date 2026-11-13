@@ -230,7 +230,7 @@ class TestAttestV02(unittest.TestCase):
                                  ("valid_no_identifiers", "drop_no_ids.json", None),
                                  ("valid_identifiers_from_previous_fields", "drop_previous.json", None),
                                  ("valid_identifiers_and_case_reference", "drop_cve_euvd.json",
-                                  {"issuer": "CSIRT Italia (synthetic case)", "id": "CASE-2026-000123"})):
+                                  {"issuer": "Example CSIRT (synthetic case)", "id": "CASE-2026-000123"})):
             with self.subTest(vector=name):
                 got = build_statement(os.path.join(self.v, drop), os.path.join(self.v, "ledger.jsonl"), attested_at=at,
                                       predicate="v0.2", case_reference=case)
@@ -263,10 +263,10 @@ class TestAttestV02(unittest.TestCase):
         self.assertEqual(rc, 0, r)
 
     def test_case_reference(self):
-        rc, r, out = self.attest("drop_no_ids.json", "--case-reference", "CSIRT Italia (synthetic case)", "CASE-2026-000123")
+        rc, r, out = self.attest("drop_no_ids.json", "--case-reference", "Example CSIRT (synthetic case)", "CASE-2026-000123")
         self.assertEqual(rc, 0, r)
         self.assertEqual(self.predicate(out)["predicate"]["caseReference"],
-                         {"issuer": "CSIRT Italia (synthetic case)", "id": "CASE-2026-000123"})
+                         {"issuer": "Example CSIRT (synthetic case)", "id": "CASE-2026-000123"})
         for bad in (["", "x"], ["x", ""], ["x\u0007", "y"], ["x ", "y"], ["x", "y" * 256], ["x", "\u0085"]):
             with self.subTest(case=bad):
                 rc, r, out = self.attest("drop_no_ids.json", "--case-reference", *bad)

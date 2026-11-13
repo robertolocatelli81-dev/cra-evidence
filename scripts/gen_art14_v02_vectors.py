@@ -115,7 +115,7 @@ def generate(out):
     def euvd(i):
         return {"scheme": "euvd", "id": i}
     XZ_IDS = [cve(XZ[0]), euvd(XZ[1])]
-    CASE = {"issuer": "CSIRT Italia (synthetic case)", "id": "CASE-2026-000123"}
+    CASE = {"issuer": "Example CSIRT (synthetic case)", "id": "CASE-2026-000123"}
     vectors = []
 
     def add(name, st, expect, notice, drop=True, ledger=True, raw=None, rule="", key=k1):
@@ -236,7 +236,7 @@ def generate(out):
         rule="§2.2 no control character (C1: U+0085)")
     add("case_reference_del", to_v02(v01["no_ids"], case={**CASE, "issuer": "CSIRT\u007f"}), bad(E), "no_ids",
         rule="§2.2 no control character (U+007F)")
-    add("case_reference_trailing_space", to_v02(v01["no_ids"], case={**CASE, "issuer": "CSIRT Italia "}), bad(E), "no_ids",
+    add("case_reference_trailing_space", to_v02(v01["no_ids"], case={**CASE, "issuer": "Example CSIRT "}), bad(E), "no_ids",
         rule="§2.2 no leading or trailing U+0020")
     # ── v0.1 stays closed; unknown versions ──
     add("v01_with_vulnerability_ids", to_v02(v01["cve_euvd"], XZ_IDS, type_uri=TYPE_V01), bad("predicate_unknown_key"), "cve_euvd",

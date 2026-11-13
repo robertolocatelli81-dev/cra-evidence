@@ -34,7 +34,7 @@ refused as before (`predicate_unknown_key`).
     {"scheme": "cve",  "id": "CVE-2024-3094"},
     {"scheme": "euvd", "id": "EUVD-2024-31700"}
   ],
-  "caseReference": {"issuer": "CSIRT-IT", "id": "2026-000123"}   // optional
+  "caseReference": {"issuer": "example-csirt", "id": "2026-000123"}   // optional
 }
 ```
 
@@ -102,8 +102,8 @@ authority, or the manufacturer itself. 255 is the bound the glossary uses for it
 The identifiers **of the notice** are read from the drop file (the subject, `cra-srp/2` or `cra-srp/3`): for each of
 `cve_id` (scheme `cve`) and `euvd_id` (scheme `euvd`), the value of `fields`, or, when `fields` has no present value
 for it, the value of `previous_fields` (the "C" fields carried from the earlier stage: spec/SRP_FIELDS.md rule 8, as `cra notice` and the
-ledger binding read them). A value is present unless it is missing, `null`, or a string
-made only of whitespace (Python `str.isspace`) or empty.
+ledger binding read them). A value is present unless it is missing, `null`, an empty list,
+or a string that is empty or made only of whitespace (Python `str.isspace`).
 
 Rule 5 (new, v0.2 statements only; checked when the drop file is given and passes the v0.1 rules 1–2):
 
@@ -146,19 +146,20 @@ keys:
   "result": "matched"                                       // see below
 },
 "case_reference": {
-  "declared": {"issuer": "CSIRT-IT", "id": "2026-000123"},  // null when the key is absent
+  "declared": {"issuer": "example-csirt", "id": "2026-000123"},  // null when the key is absent
   "result": "declared by the signer, not checkable"         // "none declared" when absent
 }
 ```
 
 `vulnerability_ids.result`: `matched` (rule 5 holds); `FAIL` (rule 5 does not hold: reason `vulnerability_ids`);
-`declared, not checked (no drop file given)`; `not_evaluated (the drop file did not pass rules 1-2)` (the drop file was
-given but refused earlier, so the notice's identifiers were not read). `notice` lists the identifiers the notice
+`declared, not checked (no drop file given)`; `not_evaluated (the drop file did not pass its digest, schema or rule 2
+checks)` (the drop file was given but refused before rule 5, so the notice's identifiers were not read). `notice` lists the identifiers the notice
 carries in the order of §2.1; a notice value that is not in its scheme's form is listed as it is.
 
-`predicate_type` in the receipt is the TypeURI of the statement once its payload has been read (a trusted signature);
-before that point (an envelope not trusted or not decodable) the receipt keeps the v0.1 TypeURI, as the verifier of
-v0.1 wrote it, so that every v0.1 receipt stays byte for byte the same.
+`predicate_type` in the receipt is the TypeURI of the statement once its payload has been read (a trusted signature)
+and found to be one of the two defined here. Before that point (an envelope not trusted or not decodable), and for a
+statement whose TypeURI is neither (refused with `predicate_type`), the receipt keeps the v0.1 TypeURI, as the verifier
+of v0.1 wrote it, so that every v0.1 receipt stays byte for byte the same.
 
 A v0.1 statement gets neither key: its receipt is the one the v0.1 verifier gives (measured byte for byte on the
 v0.1 vectors, CHANGELOG 0.9.0).
@@ -210,3 +211,7 @@ are real public records, chosen for their form, and say nothing about the synthe
 ## 9. Change log
 
 - v0.2 (13/11/2026): first draft — `vulnerabilityIds`, `caseReference`, rule 5, receipt keys.
+  Same day, before any release, while implementing it: the receipt wording `not_evaluated (…)` of §5 and the
+  `predicate_type` of a statement with an undefined TypeURI written down as implemented; "an empty list" added to the
+  values that are not present (§3); the duplicate and order checks of §2.1 are one rule in the code (the order of
+  the distinct schemes), with the same reason code; the example issuers are fictitious.
