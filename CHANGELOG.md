@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 — unreleased — notices recorded in sbomify imported as cra-srp/3; in-toto attestations of an Art. 14 notice (art14-filing v0.1)
+## 0.8.0 — 2026-11-13 — notices recorded in sbomify imported as cra-srp/3; in-toto attestations of an Art. 14 notice (art14-filing v0.1)
 
 Specifications written before the code: `spec/art14-filing/v0.1/README.md` and, in `spec/SRP_FIELDS.md`, the amendment of
 13/11/2026 (rules 9 and 10) and "Importing from sbomify".
