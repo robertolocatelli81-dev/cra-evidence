@@ -126,7 +126,7 @@ which says nothing about identifiers.
 Re-run on 13/11/2026 on this release's code (omega-cra-evol 0.10.0; `git archive` of the commit, fresh
 virtual environments):
 
-- The test suite: 439 tests, OK on Python 3.9.25, 3.11.2 and 3.12.15 with `[sign]`, jsonschema, referencing and the
+- The test suite: 464 tests, OK on Python 3.9.25, 3.11.2, 3.12.15 and 3.13.15 with `[sign]`, jsonschema, referencing and the
   cryptovalid wheel; 1 skipped (the live feeds check, which needs the network).
 - The attestation vectors: v0.1, 52 (10 valid, 42 each breaking one rule), and v0.2, 53 (10 valid, 43 refused): each
   gives the exit code and exactly the set of reason codes its `manifest.json` expects.
