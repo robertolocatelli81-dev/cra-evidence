@@ -28,7 +28,8 @@ def _rehash(p):
     return p
 
 
-class _Tmp(unittest.TestCase):
+class _Tmp:
+    """Mixin, not a TestCase: the CI check wants every TestCase class to have run."""
     def setUp(self):
         self.d = tempfile.mkdtemp()
 
@@ -51,7 +52,7 @@ class _Tmp(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
 
-class TestLegacyFrozen(_Tmp):
+class TestLegacyFrozen(_Tmp, unittest.TestCase):
     def test_060_notice_with_na_field_and_integers_still_verifies(self):
         with open(V060_NA, encoding="utf-8") as f:
             p = json.load(f)
@@ -64,7 +65,7 @@ class TestLegacyFrozen(_Tmp):
         self.assertTrue(r["verified"], r); self.assertEqual(r["glossary_version"], "enisa_srp_glossary_20260915")
 
 
-class TestCheckNoticeRefusals(_Tmp):
+class TestCheckNoticeRefusals(_Tmp, unittest.TestCase):
     def drop(self):
         return SRPNotice("vulnerability", "notification", {"general_information": "g"}, previous_fields=dict(EW)).payload()
 
@@ -121,7 +122,7 @@ class TestCheckNoticeRefusals(_Tmp):
         self.assertEqual(t["title"], ""); self.assertEqual(t["member_states_available"], [])
 
 
-class TestLedgerNegatives(_Tmp):
+class TestLedgerNegatives(_Tmp, unittest.TestCase):
     def setUp(self):
         super().setUp()
         led = os.path.join(self.d, "l.jsonl"); drop = os.path.join(self.d, "drop")
@@ -197,7 +198,7 @@ class TestLedgerNegatives(_Tmp):
         self.assertFalse(r["verified"]); self.assertIn("ledger", " ".join(r["reasons"]))
 
 
-class TestMoreRefusals(_Tmp):
+class TestMoreRefusals(_Tmp, unittest.TestCase):
     def test_unknown_schema_is_a_reason(self):
         p = SRPNotice("vulnerability", "early_warning", dict(EW)).payload(); p["schema"] = "cra-srp/3"
         r = check_notice(self.write("s.json", p))
@@ -220,7 +221,7 @@ class TestMoreRefusals(_Tmp):
                   glossary_version=G0929)                                      # srp-notice/1 frozen: not parsed there
 
 
-class TestCli(_Tmp):
+class TestCli(_Tmp, unittest.TestCase):
     def test_a_new_notice_is_built_under_the_current_glossary_only(self):
         f = self.write("ew.json", EW)
         rc, out, err = self.cli("notice", "--ledger", os.path.join(self.d, "l.jsonl"), "--product", "p", "--version", "1",
@@ -242,7 +243,7 @@ class TestCli(_Tmp):
         self.assertEqual(os.listdir(drop) if os.path.isdir(drop) else [], [])
 
 
-class TestDrift(_Tmp):
+class TestDrift(_Tmp, unittest.TestCase):
     HTML = os.path.join(ROOT, "tests", "fixtures", "enisa", "enisa_srp_glossary_20261112.html")
     SNAP = os.path.join(ROOT, "spec", "sources", "enisa_srp_glossary_20261112.json")
 
