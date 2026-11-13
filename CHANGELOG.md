@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.1 — unreleased — installable without PyPI: a container image with verified provenance, and a GitHub Action
+## 0.7.1 — 2026-11-13 — installable without PyPI: a container image with verified provenance, and a GitHub Action
 
 The package's code is that of 0.7.0; only the version changes. New:
 
