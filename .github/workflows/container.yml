@@ -1,0 +1,99 @@
+name: container
+
+# Builds ghcr.io/robertolocatelli81-dev/cra-evidence:<version> from the wheel of a GitHub Release exactly as released
+# (checked against the release's SHA256SUMS, nothing rebuilt), proves that the image verifies the release's own signed
+# evidence pack and refuses a tampered copy, pushes it, and attests its build provenance (Sigstore, stored in the
+# registry): `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:<version> --repo robertolocatelli81-dev/cra-evidence`.
+# Runs on a published release, or by hand for an existing tag (the Dockerfile is the one of the commit that runs).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, e.g. v0.7.1"
+        required: true
+
+permissions: {}
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      IMAGE: ghcr.io/robertolocatelli81-dev/cra-evidence
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the release and check it against SHA256SUMS
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "tag '$TAG' is not vX.Y.Z"; exit 1;; esac
+          v="${TAG#v}"
+          case "$v" in *[!0-9.]*) echo "version '$v' is not X.Y.Z"; exit 1;; esac
+          rm -rf rel dist; mkdir rel dist
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D rel
+          cd rel
+          sha256sum -c SHA256SUMS
+          for f in "cra_evidence-$v-py3-none-any.whl" "cra-evidence-$v-cra_pack.json" "cra-evidence-$v-cra_pack.json.sig.json" \
+                   "cra-evidence-$v-cra.ledger.jsonl" "cra-evidence-$v-trust.json"; do
+            awk -v f="$f" '$2==f {found=1} END {exit !found}' SHA256SUMS || { echo "$f is not listed in SHA256SUMS"; exit 1; }
+          done
+          cp "cra_evidence-$v-py3-none-any.whl" ../dist/
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build
+        env:
+          V: ${{ steps.rel.outputs.version }}
+        run: docker build --pull --build-arg "CRA_VERSION=$V" -t "$IMAGE:$V" .
+      - name: The image verifies the release's signed pack and refuses a tampered copy
+        env:
+          V: ${{ steps.rel.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm "$IMAGE:$V" --version)" = "cra-evidence $V"
+          chmod -R a+rX rel
+          run() { docker run --rm -v "$PWD/rel:/work:ro" "$IMAGE:$V" verify "$1" --ledger "cra-evidence-$V-cra.ledger.jsonl" --trust-store "cra-evidence-$V-trust.json"; }
+          run "cra-evidence-$V-cra_pack.json" > ok.json
+          python3 -c "import json,sys; d=json.load(open('ok.json')); sys.exit(0 if (d['ok'], d['authenticity']) == (True, 'trusted-signed') else 1)"
+          sed "s/\"$V\"/\"$V-tampered\"/" "rel/cra-evidence-$V-cra_pack.json" > rel/tampered.json
+          cp "rel/cra-evidence-$V-cra_pack.json.sig.json" rel/tampered.json.sig.json
+          chmod a+r rel/tampered.json rel/tampered.json.sig.json
+          cmp -s "rel/cra-evidence-$V-cra_pack.json" rel/tampered.json && { echo "positive control: the tampered copy is identical"; exit 1; }
+          rc=0; run tampered.json > bad.json || rc=$?
+          test "$rc" -eq 1 || { echo "tampered pack: exit $rc, expected 1"; exit 1; }
+          python3 -c "import json,sys; sys.exit(0 if json.load(open('bad.json'))['ok'] is False else 1)"
+          echo "verified: trusted-signed; tampered copy refused"
+      - name: Push
+        id: push
+        env:
+          V: ${{ steps.rel.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$V"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$V")
+          digest="${digest#*@}"
+          case "$digest" in sha256:[0-9a-f]*) ;; *) echo "no digest after push: '$digest'"; exit 1;; esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "$IMAGE:$V@$digest"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false

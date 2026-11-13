@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.1 — unreleased — installable without PyPI: a container image with verified provenance, and a GitHub Action
+
+The package's code is that of 0.7.0; only the version changes. New:
+
+- **Container image** `ghcr.io/robertolocatelli81-dev/cra-evidence:<version>` (Linux x86_64), built by
+  `.github/workflows/container.yml` on every published release from the release's own wheel, checked against its
+  `SHA256SUMS` (nothing rebuilt). Base image `python:3.12-slim` pinned by digest; the `[sign]` extra
+  (`cryptography`, `cffi`, `pycparser`) pinned by hash in `container/requirements-sign.txt` and installed with
+  `--require-hashes`; build context limited to the wheel and that file (`.dockerignore`); runs as uid 10001. Before
+  the push the workflow runs the image on the release's own evidence pack (`trusted-signed`) and on a tampered copy
+  (exit 1); after the push it attests the image's build provenance (Sigstore, stored in the registry):
+  `gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:<version> --repo robertolocatelli81-dev/cra-evidence`.
+- **GitHub Action** (`action.yml`): `uses: robertolocatelli81-dev/cra-evidence@v0.7.1` with `args:`. It pulls the image,
+  verifies the provenance of the pulled digest (signer workflow `container.yml` of this repository) and runs `cra`
+  from that digest as the runner's user, in the workspace, without network unless `network: bridge` (for
+  `cra feeds`); arguments are split on whitespace and never pass through a shell. Linux runners with docker.
+- `tests/test_distribution_20261113.py`: the pins above (digest, hashes, actions by commit, build context, the
+  action's default version = the package version), each with a positive control on a broken copy.
+
 ## 0.7.0 — 2026-11-13 — ENISA SRP glossary "Version 1.6" (21/10/2026); the glossary recorded in every notice; drift check
 
 - **Why a minor version.** The same input gets a different verdict: a 72 h or final-report payload that

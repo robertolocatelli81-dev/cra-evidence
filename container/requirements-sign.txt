@@ -1,0 +1,9 @@
+# The [sign] extra inside the container image (Dockerfile), pinned by hash: CPython 3.12, Linux x86_64 (glibc >= 2.34).
+# pip installs these with --require-hashes --only-binary=:all: — a file whose sha256 is not listed here is refused.
+# Measured on 13/11/2026 with `pip download --only-binary=:all: --platform manylinux_2_34_x86_64 --python-version 3.12 cryptography`.
+cryptography==50.0.2 \
+    --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079
+cffi==2.1.1 \
+    --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf
+pycparser==3.12 \
+    --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e

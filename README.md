@@ -25,8 +25,23 @@ EUVD known-exploited lists are surfaced as a signal, not as the decision.
 ## Install
 
 ```
-pip install .            # no runtime dependency; add [sign] for Ed25519 signatures / signed tips / seals (cryptography)
-pip install ".[sign]"
+pip install --index-url https://robertolocatelli81-dev.github.io/pypi/ cra-evidence        # wheel of the GitHub Release
+pip install ".[sign]"    # from a checkout; no runtime dependency, [sign] adds Ed25519 signatures / signed tips / seals
+```
+
+Container image (Linux x86_64, `[sign]` included, provenance attested by the release workflow):
+
+```
+gh attestation verify oci://ghcr.io/robertolocatelli81-dev/cra-evidence:0.7.1 --repo robertolocatelli81-dev/cra-evidence
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/robertolocatelli81-dev/cra-evidence:0.7.1 verify pack.json --ledger cra.ledger.jsonl
+```
+
+GitHub Action (verifies the image's provenance, then runs `cra` in the workspace, without network by default):
+
+```yaml
+- uses: robertolocatelli81-dev/cra-evidence@v0.7.1
+  with:
+    args: verify dist/pack.json --ledger evidence/cra.ledger.jsonl --trust-store evidence/trust.json
 ```
 
 ## Ten minutes, end to end

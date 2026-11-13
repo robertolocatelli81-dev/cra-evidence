@@ -1,0 +1,78 @@
+name: "cra-evidence"
+description: "Run the cra command (EU Cyber Resilience Act evidence: SBOM record, Art. 14 clock, SRP notices, offline verification) from the provenance-verified container image"
+author: "Roberto Locatelli"
+branding:
+  icon: "shield"
+  color: "blue"
+
+# Linux runners with docker (GitHub-hosted ubuntu-*). The image is pulled, its build provenance is verified for the
+# pulled digest (`gh attestation verify`: built by .github/workflows/container.yml of this repository), and the cra
+# command runs from that digest, as the runner's user, in the workspace. Arguments are split on whitespace (no shell).
+# Usage:
+#   - uses: robertolocatelli81-dev/cra-evidence@v0.7.1
+#     with:
+#       args: verify dist/pack.json --ledger evidence/cra.ledger.jsonl --trust-store evidence/trust.json
+
+inputs:
+  args:
+    description: "Arguments of the cra command, e.g. `verify pack.json --ledger cra.ledger.jsonl`; split on whitespace"
+    required: true
+  version:
+    description: "cra-evidence version of the image (default: the version of this action's release)"
+    required: false
+    default: "0.7.1"
+  network:
+    description: "Network of the container: `none` (default; every cra command except `cra feeds` works offline) or `bridge` (for `cra feeds`)"
+    required: false
+    default: "none"
+  token:
+    description: "Token used by `gh attestation verify` to read the attestation (read access to public data is enough)"
+    required: false
+    default: ${{ github.token }}
+outputs:
+  image:
+    description: "The image that ran, by digest"
+    value: ${{ steps.verify.outputs.image }}
+  exit-code:
+    description: "Exit code of the cra command (the step fails unless it is 0)"
+    value: ${{ steps.run.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - id: verify
+      shell: bash
+      env:
+        V: ${{ inputs.version }}
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: robertolocatelli81-dev/cra-evidence
+      run: |
+        set -euo pipefail
+        case "$V" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::version '$V' is not X.Y.Z"; exit 1;; esac
+        case "$V" in *[!0-9.]*) echo "::error::version '$V' is not X.Y.Z"; exit 1;; esac
+        image="ghcr.io/$REPO"
+        docker pull --quiet "$image:$V" > /dev/null
+        ref=$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$V")
+        digest="${ref#*@}"
+        case "$digest" in sha256:[0-9a-f]*) ;; *) echo "::error::no digest for $image:$V"; exit 1;; esac
+        gh attestation verify "oci://$image@$digest" --repo "$REPO" \
+          --signer-workflow "$REPO/.github/workflows/container.yml" > /dev/null
+        echo "provenance verified: $image@$digest (built by $REPO/.github/workflows/container.yml)"
+        echo "image=$image@$digest" >> "$GITHUB_OUTPUT"
+    - id: run
+      shell: bash
+      env:
+        IMAGE: ${{ steps.verify.outputs.image }}
+        CRA_ARGS: ${{ inputs.args }}
+        NET: ${{ inputs.network }}
+      run: |
+        set -uo pipefail
+        set -f
+        case "$NET" in none|bridge) ;; *) echo "::error::network '$NET' is neither none nor bridge"; exit 1;; esac
+        argv=()
+        read -r -d '' -a argv <<< "$CRA_ARGS" || true
+        [ "${#argv[@]}" -gt 0 ] || { echo "::error::args is empty"; exit 1; }
+        rc=0
+        docker run --rm --network "$NET" --user "$(id -u):$(id -g)" -v "$GITHUB_WORKSPACE:/work" -w /work "$IMAGE" "${argv[@]}" || rc=$?
+        echo "exit-code=$rc" >> "$GITHUB_OUTPUT"
+        exit "$rc"

@@ -1,0 +1,4 @@
+# Only the released wheel and the pinned requirements enter the build context.
+*
+!dist/cra_evidence-*-py3-none-any.whl
+!container/requirements-sign.txt
